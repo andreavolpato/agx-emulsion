@@ -282,6 +282,9 @@ def create_profile(stock='kodak_portra_400',
         profile.glare.compensation_removal_density = 1.2
         profile.glare.compensation_removal_transition = 0.3
         
+        profile.data.tune.dye_density_min_factor = 0.4
+
+        
     return profile
 
 def remove_density_min(profile):

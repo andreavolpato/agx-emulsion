@@ -2611,7 +2611,7 @@
         ],
         "tune": {
             "gamma_factor": 1.0,
-            "dye_density_min_factor": 1.0,
+            "dye_density_min_factor": 0.4,
             "gamma_correction": [
                 1.0,
                 1.0,

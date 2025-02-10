@@ -1,7 +1,7 @@
 {
     "info": {
         "stock": "fujifilm_crystal_archive_typeii",
-        "name": "Fujicolor Crystal Archive Type II",
+        "name": "Fujifilm Crystal Archive Type II",
         "type": "paper",
         "color": true,
         "densitometer": "status_A",
@@ -2611,7 +2611,7 @@
         ],
         "tune": {
             "gamma_factor": 1.0,
-            "dye_density_min_factor": 1.0,
+            "dye_density_min_factor": 0.4,
             "gamma_correction": [
                 1.0,
                 1.0,

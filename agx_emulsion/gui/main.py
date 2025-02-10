@@ -177,6 +177,7 @@ def simulation(input_layer:Image,
                scan_lens_blur=0.00,
                scan_unsharp_mask=(0.7,0.7),
                output_color_space=RGBColorSpaces.sRGB,
+               output_cctf_encoding=True,
                compute_negative=False,
                compute_full_image=False,
                )->ImageData:    
@@ -212,6 +213,7 @@ def simulation(input_layer:Image,
     params.io.input_color_space = input_image.input_color_space.value.value
     params.io.input_cctf_decoding = input_image.apply_cctf_decoding.value
     params.io.output_color_space = output_color_space.value
+    params.io.output_cctf_encoding = output_cctf_encoding
     params.io.full_image = compute_full_image
     params.io.compute_negative = compute_negative
     
@@ -293,6 +295,7 @@ simulation.print_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the 
 simulation.scan_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the scanner lens blur'
 simulation.scan_unsharp_mask.tooltip = 'Apply unsharp mask to the scan, [sigma in pixel, amount]'
 simulation.output_color_space.tooltip = 'Color space of the output image'
+simulation.output_cctf_encoding.tooltip = 'Apply the cctf transfer function of the color space. If false, data is linear.'
 simulation.compute_negative.tooltip = 'Show a scan of the negative instead of the print'
 simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active'
 
