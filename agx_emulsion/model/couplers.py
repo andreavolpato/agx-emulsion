@@ -3,6 +3,20 @@ from scipy.ndimage import gaussian_filter
 from opt_einsum import contract
 
 def compute_density_curves_before_dir_couplers(density_curves, log_exposure, dir_couplers_matrix, high_exposure_couplers_shift=0.0):
+    """
+    DIR couplers affect the same layer by increasing contrast.
+    I suppose that in the design of a film this is taken into account, and the final film has well behaved density curves.
+    In order to get final curves for gray ramps equal to the input data, the density curves before the effect of the couplers are needed.
+
+    Args:
+        density_curves (numpy.array): Characteristic density curves of the film after the application of DIR couplers
+        log_exposure (numpy.array): The image as log_exposure
+        dir_couplers_matrix (_type_): DIR couplers matrix computed with compute_dir_couplers_matrix()
+        high_exposure_couplers_shift (float, optional): Related to increased inhibition at high exposures, defaults to 0.0.
+
+    Returns:
+        _type_: _description_
+    """
     d_max = np.nanmax(density_curves, axis=0)
     dc_norm = density_curves/d_max
     dc_norm_shift = dc_norm + high_exposure_couplers_shift*dc_norm**2
@@ -45,6 +59,7 @@ def compute_exposure_correction_dir_couplers(log_raw, density_cmy, density_max, 
     density_max (float): The maximum density value achievable for each layer, used for normalization.
     dir_couplers_matrix (numpy.ndarray): The inhibitors matrix. Fisrt index is the input layer, second index is the output layer.
     diffusion_size_pixel (int): The size of the gaussian filter for the diffusion of the inhibitors in xy.
+    high_exposure_couplers_shift (float): if overexposure increases saturation, this will increase the inhibitors effect at higher density
     
     Returns:
     numpy.ndarray: The modified raw exposure data after applying the effect of inhibitors.
