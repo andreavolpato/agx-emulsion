@@ -71,6 +71,8 @@ def interpolate_to_common_axis(data, new_x,
     elif method=='linear':
         def interpolator(x_new):
             return np.interp(x_new, x, y) #, left=np.nan, right=np.nan)
+    elif method=='smoothing_spline':
+        interpolator = scipy.interpolate.make_smoothing_spline(x, y)
     new_data = interpolator(new_x)
     return new_data
 

@@ -35,9 +35,9 @@ layer_list = viewer.window.qt_viewer.dockLayerList
 # viewer.add_image(cc_it87,
 #                  name="it87_test_chart",
 #                  contrast_limits=[0,1])
-portrait = read_png_16bit('img/test/portrait_leaves.png', return_double=False)
-viewer.add_image(portrait,
-                 name="portrait")
+# portrait = read_png_16bit('img/test/portrait_leaves.png', return_double=False)
+# viewer.add_image(portrait,
+#                  name="portrait")
 
 class RGBColorSpaces(Enum):
     sRGB = 'sRGB'

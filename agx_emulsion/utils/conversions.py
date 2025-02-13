@@ -20,10 +20,10 @@ def density_to_light(density, light):
     Returns:
     np.ndarray: The light intensity after passing through the medium with the given density.
     """
-    transmittance = 10**(-density)
-    transmittance[np.isnan(transmittance)] = 0
-    light_transmitted = transmittance * light
-    return light_transmitted
+    transmitted = 10**(-density)
+    transmitted *= light
+    transmitted[np.isnan(transmitted)] = 0
+    return transmitted
 
 def compute_densitometer_correction(dye_density, type='status_A'):
     densitometer_responsivities = load_densitometer_data(type=type)

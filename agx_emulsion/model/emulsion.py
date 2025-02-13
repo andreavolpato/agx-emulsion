@@ -1,6 +1,7 @@
 import numpy as np
 import colour
 import scipy.ndimage
+import gc
 from opt_einsum import contract
 from agx_emulsion.config import STANDARD_OBSERVER_CMFS
 from agx_emulsion.model.illuminants import standard_illuminant
@@ -120,8 +121,7 @@ class AgXEmulsion():
              lens_blur=0.0,
              unsharp_mask=[0.0,0.8]):
         light = self._calculate_light_transmitted(density_spectral, illuminant)
-        light = self._apply_glare(light, illuminant)
-        rgb   = self._convert_light_to_RGB(light, illuminant, color_space)
+        rgb   = self._add_glare_and_convert_light_to_RGB(light, illuminant, color_space)
         rgb   = self._apply_blur_and_unsharp(rgb, lens_blur, unsharp_mask)
         rgb   = self._apply_cctf_encoding_and_clip(rgb, color_space, apply_cctf_encoding)
         return rgb
@@ -129,16 +129,13 @@ class AgXEmulsion():
     def _calculate_light_transmitted(self, density_spectral, illuminant):
         return density_to_light(density_spectral, illuminant)
     
-    def _apply_glare(self, light, illuminant):
-        if self.type=='paper' and self.glare.active and self.glare.percent>0:
-            glare_amount = compute_random_glare_amount(self.glare.percent, self.glare.roughness, self.glare.blur, light.shape[:2])
-            light += glare_amount[:,:,None] * illuminant[None,None,:]
-        return light
-    
-    def _convert_light_to_RGB(self, light_transmitted, illuminant, color_space):
+    def _add_glare_and_convert_light_to_RGB(self, light_transmitted, illuminant, color_space):
         normalization = np.sum(illuminant * STANDARD_OBSERVER_CMFS[:, 1], axis=0)
         xyz = contract('ijk,kl->ijl', light_transmitted, STANDARD_OBSERVER_CMFS[:]) / normalization
-        illuminant_xyz = contract('k,kl->l', illuminant, STANDARD_OBSERVER_CMFS[:]) / normalization 
+        illuminant_xyz = contract('k,kl->l', illuminant, STANDARD_OBSERVER_CMFS[:]) / normalization
+        if self.type=='paper' and self.glare.active and self.glare.percent>0:
+            glare_amount = compute_random_glare_amount(self.glare.percent, self.glare.roughness, self.glare.blur, light_transmitted.shape[:2])
+            xyz += glare_amount[:,:,None] * illuminant_xyz[None,None,:]
         illuminant_xy = colour.XYZ_to_xy(illuminant_xyz)
         rgb = colour.XYZ_to_RGB(xyz, colourspace=color_space, apply_cctf_encoding=False, illuminant=illuminant_xy)
         return rgb
@@ -297,6 +294,8 @@ class PrintPaper(AgXEmulsion):
             preflashing_illuminant = illuminant
         density_midgray      = self._expose_midgray(negative, negative_exposure_compensation_ev)
         cmy                  = self._compute_cmy_layer_exposures(negative_density_spectral, illuminant, exposure)
+        del negative_density_spectral
+        gc.collect()
         cmy                  = self._apply_preflashing(cmy, negative, preflashing_illuminant, preflashing_exposure)
         cmy                  = self._scale_cmy_exposure_with_midgray(cmy, density_midgray, illuminant)
         cmy                  = self._gaussian_blur(cmy, lens_blur) # of printing projection lens

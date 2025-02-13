@@ -66,7 +66,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     
     params.debug.deactivate_spatial_effects = False
     params.debug.deactivate_grain = False
-    params.debut.input_negative_density_cmy = False
+    params.debug.input_negative_density_cmy = False
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
     
@@ -104,21 +104,20 @@ class AgXPhoto():
         image = np.double(np.array(image)[:,:,0:3])
         exposure_ev = self._auto_exposure(image)
         image, preview_resize_factor, pixel_size_um = self._crop_and_rescale(image)
-        negative_density = self._expose_negative(image, exposure_ev, pixel_size_um)
-        if self.debug.return_negative_density_cmy: return negative_density
-        else:
-            print_density    = self._expose_print_paper(negative_density)
-            if self.debug.return_print_density_cmy: return print_density
-            else:
-                scan = self._scan(negative_density, print_density)
-                scan = self._rescale_to_original(scan, preview_resize_factor)
-                return scan
-            
+        density = self._expose_negative(image, exposure_ev, pixel_size_um)
+        if self.debug.return_negative_density_cmy: return density
+        if not self.io.compute_negative:
+            density = self._expose_print_paper(density)
+            if self.debug.return_print_density_cmy: return density            
+        scan = self._scan(density)
+        scan = self._rescale_to_original(scan, preview_resize_factor)
+        return scan
+
     def process_midscale_neutral(self):
         # used only to fit print filters
-        negative_density = self.negative.get_density_mid()
-        print_density    = self._expose_print_paper(negative_density)
-        scan = self._scan(negative_density, print_density)
+        density = self.negative.get_density_mid()
+        density = self._expose_print_paper(density)
+        scan = self._scan(density)
         return scan
 
     ################################################################################
@@ -158,7 +157,7 @@ class AgXPhoto():
                                 return_density_cmy=self.debug.return_negative_density_cmy)
         return density_spectral
     
-    def _expose_print_paper(self, negative_density):
+    def _expose_print_paper(self, density_spectral):
         y_filter = self.enlarger.y_filter_neutral*ENLARGER_STEPS + self.enlarger.y_filter_shift
         m_filter = self.enlarger.m_filter_neutral*ENLARGER_STEPS + self.enlarger.m_filter_shift
         c_filter = self.enlarger.c_filter_neutral*ENLARGER_STEPS
@@ -174,7 +173,7 @@ class AgXPhoto():
         else:
             print_exposure_compensation_ev = 0.0
                 
-        density_spectral = self.print_paper.print(negative_density, print_illuminant, self.negative,
+        density_spectral = self.print_paper.print(density_spectral, print_illuminant, self.negative,
                                exposure=self.enlarger.print_exposure,
                                negative_exposure_compensation_ev=print_exposure_compensation_ev,
                                preflashing_exposure=self.enlarger.preflash_exposure,
@@ -182,16 +181,16 @@ class AgXPhoto():
                                lens_blur=self.enlarger.lens_blur)
         return density_spectral
     
-    def _scan(self, negative_density, print_density):
+    def _scan(self, density_spectral):
         if self.io.compute_negative:
-            scan = self.negative.scan(negative_density,
+            scan = self.negative.scan(density_spectral,
                                       standard_illuminant(self.negative.viewing_illuminant),
                                       color_space=self.io.output_color_space,
                                       apply_cctf_encoding=self.io.output_cctf_encoding,
                                       lens_blur=self.scanner.lens_blur,
                                       unsharp_mask=self.scanner.unsharp_mask)
         else:
-            scan = self.print_paper.scan(print_density, 
+            scan = self.print_paper.scan(density_spectral, 
                                          standard_illuminant(self.print_paper.viewing_illuminant),
                                          color_space=self.io.output_color_space,
                                          apply_cctf_encoding=self.io.output_cctf_encoding,
@@ -207,13 +206,12 @@ class AgXPhoto():
 def photo_process(image, params):
     photo = AgXPhoto(params)
     return photo.process(image)
-
     
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     from agx_emulsion.utils.io import read_png_16bit
-    image = read_png_16bit('img/targets/cc11.png')
-    params = photo_params('kodak_portra_400_au')
+    image = read_png_16bit('img/targets/cc_halation.png')
+    params = photo_params()
     params.io.preview_resize_factor = 1.0
     image = photo_process(image, params)
     plt.imshow(image)
