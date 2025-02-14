@@ -139,7 +139,7 @@ def fit_density_curves():
 
 @magicgui(filename={"mode": "r"}, call_button='load 16bit png')
 def filepicker(filename=Path("./")) -> ImageData:
-    img_array = read_png_16bit(str(filename), return_double=False)
+    img_array = read_png_16bit(str(filename), return_double=True)
     return img_array
 
 @magicgui(layout="vertical", call_button='None')
