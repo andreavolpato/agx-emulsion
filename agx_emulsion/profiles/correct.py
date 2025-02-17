@@ -76,7 +76,7 @@ def gray_ramp(p0, density_scale=[1,1,1], shift_corr=[0,0,0], stretch_corr=[1,1,1
     pl = copy.copy(p0)
     pl.io.input_cctf_decoding = False
     pl.debug.deactivate_spatial_effects = True
-    pl.debug.deactivate_grain = True
+    pl.debug.deactivate_stochastic_effects = True
     pl.print_paper.glare.active = False
     pl.io.output_cctf_encoding = False
     pl.negative = apply_scale_shift_stretch_density_curves(pl.negative, density_scale, shift_corr, stretch_corr)

@@ -16,6 +16,10 @@ from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
 from agx_emulsion.model.parametric import parametric_density_curves_model
 from agx_emulsion.profiles.io import load_profile
 from agx_emulsion.profiles.factory import swap_channels
+from agx_emulsion.utils.fast_stats import fast_stats_warmup
+
+# precompile numba functions for rng
+fast_stats_warmup()
 
 # create a viewer and add a couple image layers
 viewer = napari.Viewer()

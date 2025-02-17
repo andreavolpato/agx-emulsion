@@ -75,6 +75,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     
     params.settings.rgb_to_raw_method = 'mallett2019'
     params.settings.use_film_exposure_lut = False
+    params.settings.use_fast_stats = False
     
     return params
 
@@ -197,25 +198,33 @@ class AgXPhoto():
 
     def _develop_film(self, log_raw, pixel_size_um):
         film = Film(self.negative)
-        density_cmy = film.develop(log_raw, pixel_size_um)
+        density_cmy = film.develop(log_raw, pixel_size_um,
+                                   _use_fast_stats=self.settings.use_fast_stats)
         return density_cmy
     
-    def _expose_print_paper(self, density_spectral):
+    def _expose_print(self, density_cmy):
+        light_source = standard_illuminant(self.enlarger.illuminant)
         y_filter = self.enlarger.y_filter_neutral*ENLARGER_STEPS + self.enlarger.y_filter_shift
         m_filter = self.enlarger.m_filter_neutral*ENLARGER_STEPS + self.enlarger.m_filter_shift
         c_filter = self.enlarger.c_filter_neutral*ENLARGER_STEPS
-        light_source = standard_illuminant(self.enlarger.illuminant)
         print_illuminant = color_enlarger(light_source, y_filter, m_filter, c_filter)
-        y_filter_preflash = self.enlarger.y_filter_neutral*ENLARGER_STEPS + self.enlarger.preflash_y_filter_shift
-        m_filter_preflash = self.enlarger.m_filter_neutral*ENLARGER_STEPS + self.enlarger.preflash_m_filter_shift
-        illuminant_preflash = color_enlarger(light_source, y_filter_preflash, m_filter_preflash, c_filter)
+        
+        if self.enalrger.preflash_exposure > 0:
+            y_filter_preflash = self.enlarger.y_filter_neutral*ENLARGER_STEPS + self.enlarger.preflash_y_filter_shift
+            m_filter_preflash = self.enlarger.m_filter_neutral*ENLARGER_STEPS + self.enlarger.preflash_m_filter_shift
+            illuminant_preflash = color_enlarger(light_source, y_filter_preflash, m_filter_preflash, c_filter)
+            
         if self.enlarger.just_preflash:
             self.enlarger.print_exposure = 0.0
+            
         if self.enlarger.print_exposure_compensation:
             print_exposure_compensation_ev = self.camera.exposure_compensation_ev
         else:
             print_exposure_compensation_ev = 0.0
-                
+        
+        # density_cmy_n = (density_cmy + self.negative.grain.density_min) / (np.max(self.negative.data.density_curves, axis=0) + self.negative.grain.density_min) #HERE
+        def spectral_calculation(density_cmy_n):
+        
         density_spectral = self.print_paper.print(density_spectral, print_illuminant, self.negative,
                                exposure=self.enlarger.print_exposure,
                                negative_exposure_compensation_ev=print_exposure_compensation_ev,
@@ -257,7 +266,9 @@ if __name__ == '__main__':
     params.io.preview_resize_factor = 1
     params.io.upscale_factor = 1
     params.io.compute_negative = True
+    params.negative.grain.agx_particle_area_um2 = 1
     params.debug.return_negative_density_cmy = True
+    params.settings.use_fast_stats = False
     params.settings.use_film_exposure_lut = False
     image = photo_process(image, params)
     plt.imshow(image/np.max(image))

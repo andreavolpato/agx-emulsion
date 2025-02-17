@@ -167,6 +167,7 @@ class Film(AgXEmulsion):
 
     def develop(self, log_raw, pixel_size_um,
                 _bypass_grain=False,
+                _use_fast_stats=False,
                 ):
 
         # self.exposure_ev = exposure_ev
@@ -177,7 +178,7 @@ class Film(AgXEmulsion):
         # log_raw          = np.log10(raw + 1e-10)
         density_cmy      = self._interpolate_density_with_curves(log_raw)
         density_cmy      = self._apply_density_correction_dir_couplers(density_cmy, log_raw, pixel_size_um)
-        density_cmy      = self._apply_grain(density_cmy, pixel_size_um, _bypass_grain)
+        density_cmy      = self._apply_grain(density_cmy, pixel_size_um, _bypass_grain, _use_fast_stats)
         # density_spectral = self._compute_density_spectral(density_cmy) #DEL
         return density_cmy
         
@@ -231,7 +232,7 @@ class Film(AgXEmulsion):
             density_cmy = interpolate_exposure_to_density(log_raw_0, density_curves_0, self.log_exposure, self.gamma_factor)
         return density_cmy
 
-    def _apply_grain(self, density_cmy, pixel_size_um, bypass_grain):
+    def _apply_grain(self, density_cmy, pixel_size_um, bypass_grain, use_fast_stats):
         if self.grain.active and not bypass_grain:
             if not self.grain.sublayers_active:
                 density_max = np.nanmax(self.density_curves, axis=0)
@@ -256,7 +257,8 @@ class Film(AgXEmulsion):
                                                             density_min=self.grain.density_min,
                                                             grain_uniformity=self.grain.uniformity,
                                                             grain_blur=self.grain.blur,
-                                                            grain_blur_dye_clouds_um=self.grain.blur_dye_clouds_um)
+                                                            grain_blur_dye_clouds_um=self.grain.blur_dye_clouds_um,
+                                                            use_fast_stats=use_fast_stats)
         return density_cmy
 
     def get_density_mid(self):
