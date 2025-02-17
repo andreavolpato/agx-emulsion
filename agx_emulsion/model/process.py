@@ -102,14 +102,24 @@ class AgXPhoto():
 
     def process(self, image):
         image = np.double(np.array(image)[:,:,0:3])
+        
+        # input
         exposure_ev = self._auto_exposure(image)
         image, preview_resize_factor, pixel_size_um = self._crop_and_rescale(image)
-        density = self._expose_negative(image, exposure_ev, pixel_size_um)
-        if self.debug.return_negative_density_cmy: return density
+        
+        # film exposure in camera
+        log_raw = self._expose_film(image, exposure_ev)
+        density_cmy = self._develop_film(log_raw, pixel_size_um)
+        if self.debug.return_film_density_cmy: return density_cmy
+        
+        # print exposure with enlarger
         if not self.io.compute_negative:
-            density = self._expose_print_paper(density)
-            if self.debug.return_print_density_cmy: return density            
-        scan = self._scan(density)
+            log_raw = self._expose_print(density_cmy)
+            density_cmy = self._develop_print(log_raw)
+            if self.debug.return_print_density_cmy: return density_cmy
+        
+        # scan
+        scan = self._scan(density_cmy)
         scan = self._rescale_to_original(scan, preview_resize_factor)
         return scan
 
@@ -146,6 +156,21 @@ class AgXPhoto():
             image  = resize_image(image, preview_resize_factor*upscale_factor)
             pixel_size_um /= preview_resize_factor*upscale_factor
         return image, preview_resize_factor, pixel_size_um
+    
+    def _expose_film(self, image, exposure_ev):
+        # image >> linear_RGB 
+        # - RGB >> linear_RGB
+        # - _apply_camera_lens_blur(linear_RGB)
+        
+        # (next two steps could go through a LUT or matrix)
+        # linear_RGB to raw
+        # - linear_RGB >> spectral 
+        # - spectral + sensitivities >> raw
+        
+        # raw processing
+        # - add halation
+        # raw >> log_raw
+        
     
     def _expose_negative(self, image, exposure_ev, pixel_size_um):
         density_spectral = self.negative.expose(image,

@@ -2,6 +2,7 @@ import numpy as np
 import colour
 
 def measure_autoexposure_ev(image, color_space='sRGB', apply_cctf_decoding=True, method='center_weighted'):
+    # approximation of luminance L = 0.2126 * R + 0.7152 * G + 0.0722 * B
     image_XYZ = colour.RGB_to_XYZ(image, color_space, apply_cctf_decoding=apply_cctf_decoding)
     image_Y = image_XYZ[:,:,1]
     if method == 'median':

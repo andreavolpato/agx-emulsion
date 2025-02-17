@@ -262,7 +262,6 @@ def simulation(input_layer:Image,
     params.scanner.lens_blur = scan_lens_blur
     params.scanner.unsharp_mask = scan_unsharp_mask
 
-    image = np.double(input_layer.data[:,:,0:3])
     scan = photo_process(image, params)
     scan = np.uint8(scan*255)
     return scan
