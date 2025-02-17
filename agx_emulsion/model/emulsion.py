@@ -165,15 +165,9 @@ class Film(AgXEmulsion):
         self.dir_couplers = profile.dir_couplers
         self.density_midscale_neutral = profile.info.density_midscale_neutral
 
-    def develop(self, log_raw,
-            #    exposure_ev=0.0,
-            #    color_space='sRGB',
-            #    apply_cctf_decoding=True,
-            #    lens_blur_um=0.0,
-               pixel_size_um=12,
-               compute_reference_exposure=False,
-            #    return_density_cmy=False,
-               ):
+    def develop(self, log_raw, pixel_size_um,
+                _bypass_grain=False,
+                ):
 
         # self.exposure_ev = exposure_ev
         # self.replace_data_with_parametric_models() #DEL
@@ -183,7 +177,7 @@ class Film(AgXEmulsion):
         # log_raw          = np.log10(raw + 1e-10)
         density_cmy      = self._interpolate_density_with_curves(log_raw)
         density_cmy      = self._apply_density_correction_dir_couplers(density_cmy, log_raw, pixel_size_um)
-        density_cmy      = self._apply_grain(density_cmy, pixel_size_um, compute_reference_exposure)
+        density_cmy      = self._apply_grain(density_cmy, pixel_size_um, _bypass_grain)
         # density_spectral = self._compute_density_spectral(density_cmy) #DEL
         return density_cmy
         
@@ -199,27 +193,27 @@ class Film(AgXEmulsion):
     #         shoulder_size = self.parametric.density_curves.shoulder_size
     #         self.density_curves = parametric_density_curves_model(self.log_exposure, gamma, log_exposure_0, density_max, toe_size, shoulder_size)
 
-    def _convert_rgb_to_raw_and_expose(self, rgb, color_space, apply_cctf_decoding, exposure_ev):
-        reference_illuminant = standard_illuminant(self.reference_illuminant)
-        raw = rgb_to_raw_mallett2019(rgb, reference_illuminant, self.sensitivity,
-                                     color_space=color_space,
-                                     apply_cctf_decoding=apply_cctf_decoding)
-        raw_midgray = rgb_to_raw_mallett2019(self.midgray_rgb, reference_illuminant, self.sensitivity,
-                                             color_space='sRGB',
-                                             apply_cctf_decoding=False)
-        raw *= 2**exposure_ev / raw_midgray[:,:,1]
-        return raw
+    # def _convert_rgb_to_raw_and_expose(self, rgb, color_space, apply_cctf_decoding, exposure_ev): #DEL
+    #     reference_illuminant = standard_illuminant(self.reference_illuminant)
+    #     raw = rgb_to_raw_mallett2019(rgb, reference_illuminant, self.sensitivity,
+    #                                  color_space=color_space,
+    #                                  apply_cctf_decoding=apply_cctf_decoding)
+    #     raw_midgray = rgb_to_raw_mallett2019(self.midgray_rgb, reference_illuminant, self.sensitivity,
+    #                                          color_space='sRGB',
+    #                                          apply_cctf_decoding=False)
+    #     raw *= 2**exposure_ev / raw_midgray[:,:,1]
+    #     return raw
 
-    def _apply_halation(self, raw, pixel_size_um):
-        if self.halation.active:
-            halation_size_pixels = np.array(self.halation.size_um)/pixel_size_um
-            scattering_size_pixels = np.array(self.halation.scattering_size_um)/pixel_size_um
-            raw = apply_halation(raw, 
-                                np.array(halation_size_pixels),
-                                np.array(self.halation.strength),
-                                np.array(scattering_size_pixels),
-                                np.array(self.halation.scattering_strength))
-        return raw
+    # def _apply_halation(self, raw, pixel_size_um): #DEL
+    #     if self.halation.active:
+    #         halation_size_pixels = np.array(self.halation.size_um)/pixel_size_um
+    #         scattering_size_pixels = np.array(self.halation.scattering_size_um)/pixel_size_um
+    #         raw = apply_halation(raw, 
+    #                             np.array(halation_size_pixels),
+    #                             np.array(self.halation.strength),
+    #                             np.array(scattering_size_pixels),
+    #                             np.array(self.halation.scattering_strength))
+    #     return raw
 
     def _apply_density_correction_dir_couplers(self, density_cmy, log_raw, pixel_size_um):
         if self.dir_couplers.active:
@@ -237,8 +231,8 @@ class Film(AgXEmulsion):
             density_cmy = interpolate_exposure_to_density(log_raw_0, density_curves_0, self.log_exposure, self.gamma_factor)
         return density_cmy
 
-    def _apply_grain(self, density_cmy, pixel_size_um, compute_reference_exposure):
-        if self.grain.active and not compute_reference_exposure:
+    def _apply_grain(self, density_cmy, pixel_size_um, bypass_grain):
+        if self.grain.active and not bypass_grain:
             if not self.grain.sublayers_active:
                 density_max = np.nanmax(self.density_curves, axis=0)
                 density_cmy = apply_grain_to_density(density_cmy,

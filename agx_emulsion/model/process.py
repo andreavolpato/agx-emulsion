@@ -5,6 +5,9 @@ from dotmap import DotMap
 from agx_emulsion.config import ENLARGER_STEPS
 from agx_emulsion.model.emulsion import Film, PrintPaper
 from agx_emulsion.utils.autoexposure import measure_autoexposure_ev
+from agx_emulsion.utils.conversions import rgb_to_raw_mallett2019
+from agx_emulsion.utils.lut3d import compute_with_lut
+from agx_emulsion.model.diffusion import apply_gaussian_blur_um, apply_halation_um
 from agx_emulsion.model.color_filters import color_enlarger
 from agx_emulsion.utils.crop_resize import crop_image, resize_image
 from agx_emulsion.model.illuminants import standard_illuminant
@@ -70,18 +73,22 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
     
+    params.settings.rgb_to_raw_method = 'mallett2019'
+    params.settings.use_film_exposure_lut = False
+    
     return params
 
 class AgXPhoto():
     def __init__(self, params):
         self._params = copy.deepcopy(params)
-        self.negative = Film(params.negative)
-        self.print_paper = PrintPaper(params.print_paper)
+        self.negative = params.negative
+        self.print_paper = params.print_paper
         self.camera = params.camera
         self.enlarger = params.enlarger
         self.scanner = params.scanner
         self.io = params.io
         self.debug = params.debug
+        self.settings = params.settings
         self._apply_debug_switches()
 
     def _apply_debug_switches(self):
@@ -107,8 +114,8 @@ class AgXPhoto():
         exposure_ev = self._auto_exposure(image)
         image, preview_resize_factor, pixel_size_um = self._crop_and_rescale(image)
         
-        # film exposure in camera
-        log_raw = self._expose_film(image, exposure_ev)
+        # film exposure in camera and chemical development
+        log_raw = self._expose_film(image, exposure_ev, pixel_size_um)
         density_cmy = self._develop_film(log_raw, pixel_size_um)
         if self.debug.return_film_density_cmy: return density_cmy
         
@@ -157,30 +164,55 @@ class AgXPhoto():
             pixel_size_um /= preview_resize_factor*upscale_factor
         return image, preview_resize_factor, pixel_size_um
     
-    def _expose_film(self, image, exposure_ev):
-        # image >> linear_RGB 
-        # - RGB >> linear_RGB
-        # - _apply_camera_lens_blur(linear_RGB)
+    def _expose_film(self, image, exposure_ev, pixel_size_um):
+        '''This function emulates all the steps happening in the camera:
+        - light through the lens, adding lens blur
+        - absorption of the film using spectral calculations
+        - halation in the film
+        It finally outputs log_raw (log_exposure data), which represent the effective exposure of each layer of the film.
+        '''
         
+        # image(RGB) >> linear_RGB 
         # (next two steps could go through a LUT or matrix)
-        # linear_RGB to raw
+        # - RGB >> linear_RGB
         # - linear_RGB >> spectral 
         # - spectral + sensitivities >> raw
         
+        illuminant = standard_illuminant(self.negative.info.reference_illuminant)
+        sensitivity = 10**self.negative.data.log_sensitivity
+        method = self.settings.rgb_to_raw_method
+        
+        def spectral_calculation(rgb):
+            if method=='mallett2019':
+                return rgb_to_raw_mallett2019(rgb,
+                                              illuminant,
+                                              sensitivity,
+                                              color_space=self.io.input_color_space,
+                                              apply_cctf_decoding=self.io.input_cctf_decoding) 
+    
+        if self.settings.use_film_exposure_lut:
+            raw = compute_with_lut(image, spectral_calculation)
+        else:
+            raw = spectral_calculation(image)
+        
+        # set exposure level
+        raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
+        raw *= 2**exposure_ev / raw_midgray[1] # normalize with green channel
+        
         # raw processing
+        # - _apply_camera_lens_blur(raw)
         # - add halation
         # raw >> log_raw
+        raw = apply_gaussian_blur_um(raw, self.camera.lens_blur_um, pixel_size_um)
+        raw = apply_halation_um(raw, self.negative.halation, pixel_size_um)
+        log_raw = np.log10(raw + 1e-10)
         
-    
-    def _expose_negative(self, image, exposure_ev, pixel_size_um):
-        density_spectral = self.negative.expose(image,
-                                exposure_ev=exposure_ev,
-                                pixel_size_um=pixel_size_um,
-                                color_space=self.io.input_color_space,
-                                apply_cctf_decoding=self.io.input_cctf_decoding,
-                                lens_blur_um=self.camera.lens_blur_um,
-                                return_density_cmy=self.debug.return_negative_density_cmy)
-        return density_spectral
+        return log_raw
+
+    def _develop_film(self, log_raw, pixel_size_um):
+        film = Film(self.negative)
+        density_cmy = film.develop(log_raw, pixel_size_um)
+        return density_cmy
     
     def _expose_print_paper(self, density_spectral):
         y_filter = self.enlarger.y_filter_neutral*ENLARGER_STEPS + self.enlarger.y_filter_shift
@@ -206,21 +238,20 @@ class AgXPhoto():
                                lens_blur=self.enlarger.lens_blur)
         return density_spectral
     
-    def _scan(self, density_spectral):
+    def _scan(self, denisty_cmy):
         if self.io.compute_negative:
-            scan = self.negative.scan(density_spectral,
-                                      standard_illuminant(self.negative.viewing_illuminant),
-                                      color_space=self.io.output_color_space,
-                                      apply_cctf_encoding=self.io.output_cctf_encoding,
-                                      lens_blur=self.scanner.lens_blur,
-                                      unsharp_mask=self.scanner.unsharp_mask)
+            dye_density = self.negative.data.dye_density
+            dye_density_min_factor = self.negative.data.tune.dye_density_min_factor
         else:
-            scan = self.print_paper.scan(density_spectral, 
-                                         standard_illuminant(self.print_paper.viewing_illuminant),
-                                         color_space=self.io.output_color_space,
-                                         apply_cctf_encoding=self.io.output_cctf_encoding,
-                                         lens_blur=self.scanner.lens_blur,
-                                         unsharp_mask=self.scanner.unsharp_mask)
+            dye_density = self.print_paper.data.dye_density
+            dye_density_min_factor = self.print_paper.data.tune.dye_density_min_factor
+
+        scan = self.print_paper.scan(density_spectral, 
+                                     standard_illuminant(self.print_paper.viewing_illuminant),
+                                     color_space=self.io.output_color_space,
+                                     apply_cctf_encoding=self.io.output_cctf_encoding,
+                                     lens_blur=self.scanner.lens_blur,
+                                     unsharp_mask=self.scanner.unsharp_mask)
         return scan
     
     def _rescale_to_original(self, scan, preview_resize_factor):

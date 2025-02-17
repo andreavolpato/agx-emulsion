@@ -18,7 +18,7 @@ def apply_unsharp_mask(image, sigma=0.0, amount=0.0):
     return image_sharp
 
 
-def apply_halation(raw, halation_size_pixel, halation_strength, scattering_size_pixel=[0,0,0], scattering_strength=[0,0,0]):
+def apply_halation_um(raw, halation, pixel_size_um):
     """
     Apply a halation effect to an image.
 
@@ -32,13 +32,33 @@ def apply_halation(raw, halation_size_pixel, halation_strength, scattering_size_
     Returns:
     numpy.ndarray: The image array with the halation effect applied.
     """
-    for i in np.arange(3):
-        if halation_strength[i]>0:
-            raw[:,:,i] += halation_strength[i]*scipy.ndimage.gaussian_filter(raw[:,:,i], halation_size_pixel[i], truncate=7)
-            raw[:,:,i] /= (1+halation_strength[i])
-            
-    for i in np.arange(3):
-        if scattering_strength[i]>0:
-            raw[:,:,i] += scattering_strength[i]*scipy.ndimage.gaussian_filter(raw[:,:,i], scattering_size_pixel[i], truncate=7)
-            raw[:,:,i] /= (1+scattering_strength[i])
+    
+    halation_size_pixel = np.array(halation.size_um) / pixel_size_um
+    halation_strength = halation.strength
+    scattering_size_pixel = np.array(halation.scattering_size_um) / pixel_size_um
+    scattering_strength = halation.scattering_strength
+    
+    if halation.active:
+        for i in np.arange(3):
+            if halation_strength[i]>0:
+                raw[:,:,i] += halation_strength[i]*scipy.ndimage.gaussian_filter(raw[:,:,i], halation_size_pixel[i], truncate=7)
+                raw[:,:,i] /= (1+halation_strength[i])
+                
+        for i in np.arange(3):
+            if scattering_strength[i]>0:
+                raw[:,:,i] += scattering_strength[i]*scipy.ndimage.gaussian_filter(raw[:,:,i], scattering_size_pixel[i], truncate=7)
+                raw[:,:,i] /= (1+scattering_strength[i])
     return raw
+
+def apply_gaussian_blur(data, sigma):
+    if sigma > 0:
+        return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
+    else:
+        return data
+    
+def apply_gaussian_blur_um(data, sigma_um, pixel_size_um):
+    sigma = sigma_um / pixel_size_um
+    if sigma > 0:
+        return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
+    else:
+        return data
