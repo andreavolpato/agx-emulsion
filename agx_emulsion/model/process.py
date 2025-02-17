@@ -68,7 +68,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.io.compute_negative = False
     
     params.debug.deactivate_spatial_effects = False
-    params.debug.deactivate_grain = False
+    params.debug.deactivate_stochastic_effects = False
     params.debug.input_negative_density_cmy = False
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
@@ -104,7 +104,7 @@ class AgXPhoto():
             self.scanner.lens_blur = 0.0
             self.scanner.unsharp_mask = (0.0, 0.0)
 
-        if self.debug.deactivate_grain:
+        if self.debug.deactivate_stochastic_effects:
             self.negative.grain.active = False
 
     def process(self, image):
@@ -117,7 +117,7 @@ class AgXPhoto():
         # film exposure in camera and chemical development
         log_raw = self._expose_film(image, exposure_ev, pixel_size_um)
         density_cmy = self._develop_film(log_raw, pixel_size_um)
-        if self.debug.return_film_density_cmy: return density_cmy
+        if self.debug.return_negative_density_cmy: return density_cmy
         
         # print exposure with enlarger
         if not self.io.compute_negative:
@@ -170,16 +170,11 @@ class AgXPhoto():
         - absorption of the film using spectral calculations
         - halation in the film
         It finally outputs log_raw (log_exposure data), which represent the effective exposure of each layer of the film.
-        '''
-        
-        # image(RGB) >> linear_RGB 
-        # (next two steps could go through a LUT or matrix)
-        # - RGB >> linear_RGB
-        # - linear_RGB >> spectral 
-        # - spectral + sensitivities >> raw
-        
+        ''' 
+        # input rgb >> raw, with spectral calculations
         illuminant = standard_illuminant(self.negative.info.reference_illuminant)
         sensitivity = 10**self.negative.data.log_sensitivity
+        sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
         method = self.settings.rgb_to_raw_method
         
         def spectral_calculation(rgb):
@@ -188,25 +183,16 @@ class AgXPhoto():
                                               illuminant,
                                               sensitivity,
                                               color_space=self.io.input_color_space,
-                                              apply_cctf_decoding=self.io.input_cctf_decoding) 
-    
-        if self.settings.use_film_exposure_lut:
-            raw = compute_with_lut(image, spectral_calculation)
-        else:
-            raw = spectral_calculation(image)
-        
+                                              apply_cctf_decoding=self.io.input_cctf_decoding)
+        if self.settings.use_film_exposure_lut: raw = compute_with_lut(image, spectral_calculation)
+        else:                                   raw = spectral_calculation(image)
+
         # set exposure level
         raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
         raw *= 2**exposure_ev / raw_midgray[1] # normalize with green channel
-        
-        # raw processing
-        # - _apply_camera_lens_blur(raw)
-        # - add halation
-        # raw >> log_raw
         raw = apply_gaussian_blur_um(raw, self.camera.lens_blur_um, pixel_size_um)
         raw = apply_halation_um(raw, self.negative.halation, pixel_size_um)
         log_raw = np.log10(raw + 1e-10)
-        
         return log_raw
 
     def _develop_film(self, log_raw, pixel_size_um):
@@ -268,11 +254,15 @@ if __name__ == '__main__':
     from agx_emulsion.utils.io import read_png_16bit
     image = read_png_16bit('img/targets/cc_halation.png')
     params = photo_params()
-    params.io.preview_resize_factor = 1.0
+    params.io.preview_resize_factor = 1
+    params.io.upscale_factor = 1
+    params.io.compute_negative = True
+    params.debug.return_negative_density_cmy = True
+    params.settings.use_film_exposure_lut = False
     image = photo_process(image, params)
-    plt.imshow(image)
+    plt.imshow(image/np.max(image))
     
-    system = AgXPhoto(params)
-    print(system.process_midscale_neutral())
+    # system = AgXPhoto(params)
+    # print(system.process_midscale_neutral())
     
     plt.show()
