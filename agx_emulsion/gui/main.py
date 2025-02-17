@@ -42,6 +42,7 @@ layer_list = viewer.window.qt_viewer.dockLayerList
 class RGBColorSpaces(Enum):
     sRGB = 'sRGB'
     DCI_P3 = 'DCI-P3'
+    DisplayP3 = 'Display P3'
     AdobeRGB = 'Adobe RGB (1998)'
     ProPhotoRGB = 'ProPhoto RGB'
     ACES2065_1 = 'ACES2065-1'
