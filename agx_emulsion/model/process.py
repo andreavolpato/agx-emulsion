@@ -1,11 +1,12 @@
 import numpy as np
 import copy
 from dotmap import DotMap
+from opt_einsum import contract
 
 from agx_emulsion.config import ENLARGER_STEPS
-from agx_emulsion.model.emulsion import Film, PrintPaper
+from agx_emulsion.model.emulsion import Film, PrintPaper, compute_density_spectral
 from agx_emulsion.utils.autoexposure import measure_autoexposure_ev
-from agx_emulsion.utils.conversions import rgb_to_raw_mallett2019
+from agx_emulsion.utils.conversions import rgb_to_raw_mallett2019, density_to_light
 from agx_emulsion.utils.lut3d import compute_with_lut
 from agx_emulsion.model.diffusion import apply_gaussian_blur_um, apply_halation_um
 from agx_emulsion.model.color_filters import color_enlarger
@@ -75,6 +76,8 @@ def photo_params(negative='kodak_vision3_50d_uc',
     
     params.settings.rgb_to_raw_method = 'mallett2019'
     params.settings.use_film_exposure_lut = False
+    params.settings.use_print_exposure_lut = False
+    params.settings.lut_resolution = 16
     params.settings.use_fast_stats = False
     
     return params
@@ -123,6 +126,7 @@ class AgXPhoto():
         # print exposure with enlarger
         if not self.io.compute_negative:
             log_raw = self._expose_print(density_cmy)
+            return log_raw
             density_cmy = self._develop_print(log_raw)
             if self.debug.return_print_density_cmy: return density_cmy
         
@@ -172,25 +176,10 @@ class AgXPhoto():
         - halation in the film
         It finally outputs log_raw (log_exposure data), which represent the effective exposure of each layer of the film.
         ''' 
-        # input rgb >> raw, with spectral calculations
-        illuminant = standard_illuminant(self.negative.info.reference_illuminant)
-        sensitivity = 10**self.negative.data.log_sensitivity
-        sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
-        method = self.settings.rgb_to_raw_method
-        
-        def spectral_calculation(rgb):
-            if method=='mallett2019':
-                return rgb_to_raw_mallett2019(rgb,
-                                              illuminant,
-                                              sensitivity,
-                                              color_space=self.io.input_color_space,
-                                              apply_cctf_decoding=self.io.input_cctf_decoding)
-        if self.settings.use_film_exposure_lut: raw = compute_with_lut(image, spectral_calculation)
-        else:                                   raw = spectral_calculation(image)
-
-        # set exposure level
-        raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
-        raw *= 2**exposure_ev / raw_midgray[1] # normalize with green channel
+        raw = self._rgb_to_film_raw(image, exposure_ev,
+                                    color_space=self.io.input_color_space,
+                                    apply_cctf_decoding=self.io.input_cctf_decoding,
+                                    use_lut=self.settings.use_film_exposure_lut)
         raw = apply_gaussian_blur_um(raw, self.camera.lens_blur_um, pixel_size_um)
         raw = apply_halation_um(raw, self.negative.halation, pixel_size_um)
         log_raw = np.log10(raw + 1e-10)
@@ -202,29 +191,42 @@ class AgXPhoto():
                                    _use_fast_stats=self.settings.use_fast_stats)
         return density_cmy
     
-    def _expose_print(self, density_cmy):
+    def _expose_print(self, film_density_cmy):
         light_source = standard_illuminant(self.enlarger.illuminant)
         y_filter = self.enlarger.y_filter_neutral*ENLARGER_STEPS + self.enlarger.y_filter_shift
         m_filter = self.enlarger.m_filter_neutral*ENLARGER_STEPS + self.enlarger.m_filter_shift
         c_filter = self.enlarger.c_filter_neutral*ENLARGER_STEPS
         print_illuminant = color_enlarger(light_source, y_filter, m_filter, c_filter)
+        sensitivity = 10**self.print_paper.data.log_sensitivity
+        sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
         
-        if self.enalrger.preflash_exposure > 0:
-            y_filter_preflash = self.enlarger.y_filter_neutral*ENLARGER_STEPS + self.enlarger.preflash_y_filter_shift
-            m_filter_preflash = self.enlarger.m_filter_neutral*ENLARGER_STEPS + self.enlarger.preflash_m_filter_shift
-            illuminant_preflash = color_enlarger(light_source, y_filter_preflash, m_filter_preflash, c_filter)
-            
-        if self.enlarger.just_preflash:
-            self.enlarger.print_exposure = 0.0
-            
-        if self.enlarger.print_exposure_compensation:
-            print_exposure_compensation_ev = self.camera.exposure_compensation_ev
-        else:
-            print_exposure_compensation_ev = 0.0
-        
-        # density_cmy_n = (density_cmy + self.negative.grain.density_min) / (np.max(self.negative.data.density_curves, axis=0) + self.negative.grain.density_min) #HERE
+        raw_preflash = self._compute_raw_preflash(light_source, sensitivity)
+        raw_midgray_factor = self._compute_exposure_factor_midgray(sensitivity, print_illuminant)
+        print('raw midgray factor:',raw_midgray_factor)
+
         def spectral_calculation(density_cmy_n):
+            raw = np.zeros_like(density_cmy_n)
+            if not self.enlarger.just_preflash:
+                density_cmy = self._denormalize_film_density(density_cmy_n)
+                density_spectral = compute_density_spectral(self.negative, density_cmy)
+                light = density_to_light(density_spectral, print_illuminant)
+                raw = contract('ijk, kl->ijl', light, sensitivity)
+                raw *= self.enlarger.print_exposure # adjust print exposure
+                raw *= raw_midgray_factor # scale with negative midgray factor
+            raw += raw_preflash # add preflash
+            log_raw = np.log10(raw + 1e-10)
+            return log_raw
         
+        film_density_cmy_normalized = self._normalize_film_density(film_density_cmy) # 0-1 density for lut
+        if self.settings.use_print_exposure_lut:
+            log_raw = compute_with_lut(film_density_cmy_normalized, spectral_calculation,
+                                       steps=self.settings.lut_resolution)
+        else:
+            log_raw = spectral_calculation(film_density_cmy_normalized)
+        
+        return log_raw
+    
+    def _develop_print(self, log_raw):
         density_spectral = self.print_paper.print(density_spectral, print_illuminant, self.negative,
                                exposure=self.enlarger.print_exposure,
                                negative_exposure_compensation_ev=print_exposure_compensation_ev,
@@ -248,11 +250,95 @@ class AgXPhoto():
                                      lens_blur=self.scanner.lens_blur,
                                      unsharp_mask=self.scanner.unsharp_mask)
         return scan
-    
+
+################################################################################
+
     def _rescale_to_original(self, scan, preview_resize_factor):
         if preview_resize_factor != 1.0:
             scan = resize_image(scan, 1.0/preview_resize_factor)
         return scan
+
+    ################################################################################
+    # Film calculations (maybe move them in emulsion)
+
+    def _rgb_to_film_raw(self, rgb, exposure_ev,
+                         color_space='sRGB', apply_cctf_decoding=False,
+                         use_lut=False):
+        illuminant = standard_illuminant(self.negative.info.reference_illuminant)
+        sensitivity = 10**self.negative.data.log_sensitivity
+        sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
+        
+        method = self.settings.rgb_to_raw_method
+        def spectral_calculation(rgb):
+            raw = np.zeros_like(rgb)
+            if method=='mallett2019':
+                raw = rgb_to_raw_mallett2019(rgb,
+                                                illuminant,
+                                                sensitivity,
+                                                color_space=color_space,
+                                                apply_cctf_decoding=apply_cctf_decoding)
+            return raw
+        raw = self._spectral_lut_compute(rgb, spectral_calculation, use_lut)
+
+        # set exposure level
+        raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
+        raw *= 2**exposure_ev / raw_midgray[1] # normalize with green channel
+        return raw
+
+    def _normalize_film_density(self, denisty_cmy):
+        density_max = np.nanmax(self.negative.data.density_curves, axis=0)
+        density_min = self.negative.grain.density_min
+        density_max += density_min
+        density_cmy_normalized = (denisty_cmy + density_min) / density_max
+        return density_cmy_normalized
+    
+    def _denormalize_film_density(self, density_cmy_normalized):
+        density_max = np.nanmax(self.negative.data.density_curves, axis=0)
+        density_min = self.negative.grain.density_min
+        density_max += density_min
+        density_cmy = density_cmy_normalized * density_max - density_min
+        return density_cmy
+    
+    ################################################################################
+    # Print calculations (maybe move them in emulsion)
+
+    def _compute_raw_preflash(self, light_source, sensitivity):
+        if self.enlarger.preflash_exposure > 0:
+            y_filter_preflash = self.enlarger.y_filter_neutral*ENLARGER_STEPS + self.enlarger.preflash_y_filter_shift
+            m_filter_preflash = self.enlarger.m_filter_neutral*ENLARGER_STEPS + self.enlarger.preflash_m_filter_shift
+            c_filter = self.enlarger.c_filter_neutral*ENLARGER_STEPS
+            illuminant_preflash = color_enlarger(light_source, y_filter_preflash, m_filter_preflash, c_filter)
+
+            density_base = self.negative.data.dye_density[:, 3][None, None, :]
+            light_preflash = density_to_light(density_base, illuminant_preflash)
+            raw_preflash = contract('ijk, kl->ijl', light_preflash, sensitivity)
+            raw_preflash *= self.enlarger.preflash_exposure
+        else:
+            raw_preflash = np.zeros((3))
+        return raw_preflash
+    
+    def _compute_exposure_factor_midgray(self, sensitivity, print_illuminant):
+        if self.enlarger.print_exposure_compensation:
+            neg_exp_comp_ev = self.camera.exposure_compensation_ev
+        else:
+            neg_exp_comp_ev = 0.0
+        rgb_midgray = np.array([[[0.184]*3]]) * 2**neg_exp_comp_ev
+        raw_midgray = self._rgb_to_film_raw(rgb_midgray, exposure_ev=0.0, use_lut=False)
+        log_raw_midgray = np.log10(raw_midgray + 1e-10)
+        density_spectral_midgray = compute_density_spectral(self.negative, log_raw_midgray)
+        light_midgray = density_to_light(density_spectral_midgray, print_illuminant)
+        raw_midgray = contract('ijk, kl->ijl', light_midgray, sensitivity)
+        factor = 1/raw_midgray[:,:,1]
+        return factor
+
+    def _spectral_lut_compute(self, data, spectral_calculation,
+                              use_lut=False):
+        steps = self.settings.lut_resolution
+        if use_lut:
+            data_out = compute_with_lut(data, spectral_calculation, steps=steps)
+        else:                                   
+            data_out = spectral_calculation(data)
+        return data_out
 
 def photo_process(image, params):
     photo = AgXPhoto(params)
@@ -263,15 +349,19 @@ if __name__ == '__main__':
     from agx_emulsion.utils.io import read_png_16bit
     image = read_png_16bit('img/targets/cc_halation.png')
     params = photo_params()
-    params.io.preview_resize_factor = 1
+    params.camera.exposure_compensation_ev = 0
+    params.io.preview_resize_factor = .1
     params.io.upscale_factor = 1
-    params.io.compute_negative = True
+    params.io.compute_negative = False
     params.negative.grain.agx_particle_area_um2 = 1
-    params.debug.return_negative_density_cmy = True
-    params.settings.use_fast_stats = False
-    params.settings.use_film_exposure_lut = False
+    params.enlarger.preflash_exposure = 0.0
+    params.enlarger.print_exposure_compensation = True
+    params.debug.return_negative_density_cmy = False
+    params.settings.use_fast_stats = True
+    params.settings.use_film_exposure_lut = True
+    params.settings.use_print_exposure_lut = True
     image = photo_process(image, params)
-    plt.imshow(image/np.max(image))
+    plt.imshow(image[:,:,0])
     
     # system = AgXPhoto(params)
     # print(system.process_midscale_neutral())

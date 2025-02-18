@@ -68,6 +68,10 @@ def compute_random_glare_amount(amount, roughness, blur, shape):
     random_glare = scipy.ndimage.gaussian_filter(random_glare, blur) / 100
     return random_glare
 
+def compute_density_spectral(profile, density_cmy):
+    density_spectral = contract('ijk, lk->ijl', density_cmy, profile.data.dye_density[:, 0:3])
+    density_spectral += profile.data.dye_density[:, 3] * profile.data.tune.dye_density_min_factor
+    return density_spectral
 
 class AgXEmulsion():
     def __init__(self, profile):
