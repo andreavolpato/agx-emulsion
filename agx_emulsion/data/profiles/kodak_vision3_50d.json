@@ -2139,6 +2139,12 @@
             ]
         }
     },
+    "glare": {
+        "active": false,
+        "percent": 0.0,
+        "roughness": 0.25,
+        "blur": 0.5
+    },
     "grain": {
         "active": true,
         "sublayers_active": true,

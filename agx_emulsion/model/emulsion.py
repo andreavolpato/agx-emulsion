@@ -73,6 +73,13 @@ def compute_density_spectral(profile, density_cmy):
     density_spectral += profile.data.dye_density[:, 3] * profile.data.tune.dye_density_min_factor
     return density_spectral
 
+def develop_simple(profile, log_raw):
+    density_curves = profile.data.density_curves
+    log_exposure = profile.data.log_exposure
+    gamma_factor = profile.data.tune.gamma_factor
+    density_cmy = interpolate_exposure_to_density(log_raw, density_curves, log_exposure, gamma_factor)
+    return density_cmy
+
 class AgXEmulsion():
     def __init__(self, profile):
         self.sensitivity = 10**np.array(profile.data.log_sensitivity)
@@ -170,8 +177,8 @@ class Film(AgXEmulsion):
         self.density_midscale_neutral = profile.info.density_midscale_neutral
 
     def develop(self, log_raw, pixel_size_um,
-                _bypass_grain=False,
-                _use_fast_stats=False,
+                bypass_grain=False,
+                use_fast_stats=False,
                 ):
 
         # self.exposure_ev = exposure_ev
@@ -182,7 +189,7 @@ class Film(AgXEmulsion):
         # log_raw          = np.log10(raw + 1e-10)
         density_cmy      = self._interpolate_density_with_curves(log_raw)
         density_cmy      = self._apply_density_correction_dir_couplers(density_cmy, log_raw, pixel_size_um)
-        density_cmy      = self._apply_grain(density_cmy, pixel_size_um, _bypass_grain, _use_fast_stats)
+        density_cmy      = self._apply_grain(density_cmy, pixel_size_um, bypass_grain, use_fast_stats)
         # density_spectral = self._compute_density_spectral(density_cmy) #DEL
         return density_cmy
         
@@ -286,7 +293,7 @@ class PrintPaper(AgXEmulsion):
     def __init__(self, profile):
         super().__init__(profile)
         self.glare = profile.glare
-            
+        
     def print(self, negative_density_spectral, illuminant, negative,
               exposure=1, negative_exposure_compensation_ev=0.0,
               preflashing_illuminant=None, preflashing_exposure=0.0,

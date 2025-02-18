@@ -2141,8 +2141,8 @@
     },
     "glare": {
         "active": true,
-        "percent": 0.5,
-        "roughness": 0.25,
+        "percent": 0.1,
+        "roughness": 0.4,
         "blur": 0.5,
         "compensation_removal_factor": 0.1,
         "compensation_removal_density": 1.2,
