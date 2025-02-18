@@ -39,9 +39,9 @@ layer_list = viewer.window.qt_viewer.dockLayerList
 # viewer.add_image(cc_it87,
 #                  name="it87_test_chart",
 #                  contrast_limits=[0,1])
-# portrait = read_png_16bit('img/test/portrait_leaves.png', return_double=False)
-# viewer.add_image(portrait,
-#                  name="portrait")
+portrait = read_png_16bit('img/test/portrait_leaves.png', return_double=False)
+viewer.add_image(portrait,
+                 name="portrait")
 
 class RGBColorSpaces(Enum):
     sRGB = 'sRGB'
@@ -266,6 +266,7 @@ def simulation(input_layer:Image,
     params.scanner.lens_blur = scan_lens_blur
     params.scanner.unsharp_mask = scan_unsharp_mask
 
+    image = np.double(input_layer)[:,:,:3]
     scan = photo_process(image, params)
     scan = np.uint8(scan*255)
     return scan

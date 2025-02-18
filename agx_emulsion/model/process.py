@@ -79,7 +79,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.settings.use_film_exposure_lut = False
     params.settings.use_print_exposure_lut = False
     params.settings.use_scan_lut = False
-    params.settings.lut_resolution = 16
+    params.settings.lut_resolution = 32
     params.settings.use_fast_stats = False
     
     return params
@@ -112,6 +112,7 @@ class AgXPhoto():
 
         if self.debug.deactivate_stochastic_effects:
             self.negative.grain.active = False
+            self.negative.glare.active = False
             self.print_paper.glare.active = False
 
     def process(self, image):
@@ -124,25 +125,22 @@ class AgXPhoto():
         # film exposure in camera and chemical development
         log_raw = self._expose_film(image, exposure_ev, pixel_size_um)
         density_cmy = self._develop_film(log_raw, pixel_size_um)
+        # print('film density_cmy:', density_cmy)
         if self.debug.return_negative_density_cmy: return density_cmy
         
         # print exposure with enlarger
         if not self.io.compute_negative:
             log_raw = self._expose_print(density_cmy)
             density_cmy = self._develop_print(log_raw)
+            # print('print density_cmy:', density_cmy)
             if self.debug.return_print_density_cmy: return density_cmy
         
         # scan
         scan = self._scan(density_cmy)
+        
+        # rescale output
         scan = self._rescale_to_original(scan, preview_resize_factor)
         return scan
-
-    # def process_midscale_neutral(self):
-    #     # used only to fit print filters
-    #     density = self.negative.get_density_mid()
-    #     density = self._expose_print_paper(density)
-    #     scan = self._scan(density)
-    #     return scan
 
     ################################################################################
             
@@ -197,7 +195,8 @@ class AgXPhoto():
         return log_raw
     
     def _develop_print(self, log_raw):
-        return develop_simple(self.print_paper, log_raw)
+        density_cmy = develop_simple(self.print_paper, log_raw)
+        return density_cmy
     
     def _scan(self, density_cmy):
         rgb = self._density_cmy_to_rgb(density_cmy, use_lut=self.settings.use_scan_lut)
@@ -211,6 +210,15 @@ class AgXPhoto():
         if preview_resize_factor != 1.0:
             scan = resize_image(scan, 1.0/preview_resize_factor)
         return scan
+    
+    def _spectral_lut_compute(self, data, spectral_calculation,
+                              use_lut=False):
+        steps = self.settings.lut_resolution
+        if use_lut:
+            data_out = compute_with_lut(data, spectral_calculation, steps=steps)
+        else:                                   
+            data_out = spectral_calculation(data)
+        return data_out
 
     ################################################################################
     # Film calculations (maybe move them in emulsion)
@@ -259,17 +267,18 @@ class AgXPhoto():
     def _film_density_cmy_to_print_log_raw(self, density_cmy):
         sensitivity = 10**self.print_paper.data.log_sensitivity
         sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
-        light_source = standard_illuminant(self.enlarger.illuminant)
+        enlarger_light_source = standard_illuminant(self.enlarger.illuminant)
         raw = np.zeros_like(density_cmy)
         if not self.enlarger.just_preflash:
             density_spectral = compute_density_spectral(self.negative, density_cmy)
-            print_illuminant = self._compute_print_illuminant(light_source)
+            print_illuminant = self._compute_print_illuminant(enlarger_light_source)
             light = density_to_light(density_spectral, print_illuminant)
             raw = contract('ijk, kl->ijl', light, sensitivity)
             raw *= self.enlarger.print_exposure # adjust print exposure
             raw_midgray_factor = self._compute_exposure_factor_midgray(sensitivity, print_illuminant)
+            # print('raw midgray factor:', raw_midgray_factor)
             raw *= raw_midgray_factor # scale with negative midgray factor
-        raw_preflash = self._compute_raw_preflash(light_source, sensitivity)
+        raw_preflash = self._compute_raw_preflash(enlarger_light_source, sensitivity)
         raw += raw_preflash # add preflash
         log_raw = np.log10(raw + 1e-10)
         return log_raw
@@ -307,20 +316,13 @@ class AgXPhoto():
         rgb_midgray = np.array([[[0.184]*3]]) * 2**neg_exp_comp_ev
         raw_midgray = self._rgb_to_film_raw(rgb_midgray, exposure_ev=0.0, use_lut=False)
         log_raw_midgray = np.log10(raw_midgray + 1e-10)
-        density_spectral_midgray = compute_density_spectral(self.negative, log_raw_midgray)
+        # film = Film(self.negative) # TODO: fix this using a function 
+        density_cmy_midgray = develop_simple(self.negative, log_raw_midgray)
+        density_spectral_midgray = compute_density_spectral(self.negative, density_cmy_midgray)
         light_midgray = density_to_light(density_spectral_midgray, print_illuminant)
         raw_midgray = contract('ijk, kl->ijl', light_midgray, sensitivity)
         factor = 1/raw_midgray[:,:,1]
         return factor
-
-    def _spectral_lut_compute(self, data, spectral_calculation,
-                              use_lut=False):
-        steps = self.settings.lut_resolution
-        if use_lut:
-            data_out = compute_with_lut(data, spectral_calculation, steps=steps)
-        else:                                   
-            data_out = spectral_calculation(data)
-        return data_out
     
     def _normalize_print_density(self, denisty_cmy):
         density_max = np.nanmax(self.print_paper.data.density_curves, axis=0)
@@ -349,11 +351,10 @@ class AgXPhoto():
         def spectral_calculation(density_cmy_n):
             if self.io.compute_negative:
                 density_cmy = self._denormalize_film_density(density_cmy_n)
-                density_spectral = compute_density_spectral(self.negative, density_cmy)
             else:
                 density_cmy = self._denormalize_print_density(density_cmy_n)
-                density_spectral = compute_density_spectral(self.print_paper, density_cmy)
-            light = density_to_light(density_spectral, scan_illuminant)
+            density_spectral = compute_density_spectral(profile, density_cmy)
+            light = density_to_light(density_spectral, scan_illuminant)            
             xyz = contract('ijk,kl->ijl', light, STANDARD_OBSERVER_CMFS[:]) / normalization
             log_xyz = np.log10(xyz + 1e-10)
             return log_xyz
@@ -366,7 +367,7 @@ class AgXPhoto():
         illuminant_xy = colour.XYZ_to_xy(illuminant_xyz)
         rgb = colour.XYZ_to_RGB(xyz,
                                 colourspace=self.io.output_color_space, 
-                                apply_cctf_encoding=self.io.output_cctf_encoding,
+                                apply_cctf_encoding=False,
                                 illuminant=illuminant_xy)
         return rgb
     
@@ -402,25 +403,34 @@ def photo_process(image, params):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     from agx_emulsion.utils.io import read_png_16bit
-    image = read_png_16bit('img/targets/cc_halation.png')
-    params = photo_params()
-    params.camera.exposure_compensation_ev = 3
-    params.io.preview_resize_factor = .1
+    # image = read_png_16bit('img/targets/cc_halation.png')
+    # image = plt.imread('img/targets/it87_test_chart_2.jpg')
+    # image = np.double(image[:,:,:3])/255
+    image = read_png_16bit('img/test/portrait_leaves.png')
+    # image = [[[0.184,0.184,0.184]]]
+    # image = [[[0,0,0], [0.184,0.184,0.184], [1,1,1]]]
+    params = photo_params(print_paper='kodak_portra_endura_uc')
+    params.io.input_cctf_decoding = True
+    params.print_paper.glare.active = False
+    params.debug.deactivate_stochastic_effects = False
+    params.camera.exposure_compensation_ev = 0
+    params.camera.auto_exposure = True
+    params.io.preview_resize_factor = 1
     params.io.upscale_factor = 1
     params.io.compute_negative = False
     params.negative.grain.agx_particle_area_um2 = 1
     params.enlarger.preflash_exposure = 0.0
-    params.enlarger.print_exposure_compensation = False
-    params.enlarger.print_exposure = 10
+    params.enlarger.print_exposure_compensation = True
+    params.enlarger.print_exposure = 1
     params.debug.return_negative_density_cmy = False
-    params.debug.return_print_density_cmy =False
-    params.settings.use_fast_stats = False
-    params.settings.use_film_exposure_lut = False
-    params.settings.use_print_exposure_lut = False
+    params.debug.return_print_density_cmy = False
+    
+    params.settings.use_fast_stats = True
+    params.settings.use_film_exposure_lut = True
+    params.settings.use_print_exposure_lut = True
+    params.settings.use_scan_lut = True
+    params.settings.lut_resolution = 16
     image = photo_process(image, params)
+    # plt.imshow(image[:,:,1])
     plt.imshow(image)
-    
-    # system = AgXPhoto(params)
-    # print(system.process_midscale_neutral())
-    
     plt.show()

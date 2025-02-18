@@ -7,7 +7,8 @@ def test_main_simulation():
     params = photo_params()
     params.negative.grain.sublayers_active = True
     params.io.preview_resize_factor = 1.0
-    params.enlarger.print_exposure = 8.0
+    params.camera.exposure_compensation_ev = 2
+    params.enlarger.print_exposure = 0.5
     params.camera.film_format_mm = 35
     params.print_paper.glare.active = True
     print_scan = photo_process(image, params)
