@@ -241,7 +241,7 @@ class AgXPhoto():
                                                 apply_cctf_decoding=apply_cctf_decoding)
             return raw
         raw = self._spectral_lut_compute(rgb, spectral_calculation, use_lut)
-
+        
         # set exposure level
         raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
         raw *= 2**exposure_ev / raw_midgray[1] # normalize with green channel
