@@ -139,25 +139,13 @@ class TestStrip:
 
 
 if __name__ == '__main__':
-    from agx_emulsion.utils.io import load_image_16bit
-    # image = read_png_16bit('img/color_checker/cc11.png')
-    # image = read_png_16bit('C:/Users/andre/Pictures/pixls/playraw/darktable_exported/P1140349.png')
+    from agx_emulsion.utils.io import load_image_16bit_32bit
     
-    
-    image = load_image_16bit('img/targets/cc11.tiff')
+    image = load_image_16bit_32bit('img/targets/cc11.tiff')
     p = photo_params(negative='kodak_portra_400_auc')
     p.io.input_cctf_decoding = True
-    # p.negative.parametric.density_curves.active=True
-    # p.negative.parametric.density_curves.gamma=[0.65,0.60,0.70]
-    p.negative.data.tune.gamma_factor=[0.90,0.87,1]
-        
+      
     strip = TestStrip(image, base_params=p, stack='h', crop_size=(1.0,1.0), crop_center=(0.5,0.85), resize_factor=0.05, rotate=True)
     strip.negative_exposure_ramp(values=[-3, -2, -1, 0, 1, 2, 3, 4, 5, 6])
     fig = strip.process()
     plt.show()
-    # strip.print_exposure_ramp()
-    
-    # strip = TestStrip(image, base_params=p, crop_size=(0.1, 0.4), crop_center=(0.5,0.5), resize_factor=1.0)
-    # strip.grain_ramp()
-    # f = strip.process()
-    # plt.savefig('test_strip.png', dpi=300)

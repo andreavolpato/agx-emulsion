@@ -408,11 +408,11 @@ def photo_process(image, params):
     
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    from agx_emulsion.utils.io import load_image_16bit
-    # image = load_image_16bit('img/targets/cc_halation.png')
+    from agx_emulsion.utils.io import load_image_16bit_32bit
+    # image = load_image_16bit_32bit('img/targets/cc_halation.png')
     # image = plt.imread('img/targets/it87_test_chart_2.jpg')
     # image = np.double(image[:,:,:3])/255
-    image = load_image_16bit('img/test/portrait_leaves.png')
+    image = load_image_16bit_32bit('img/test/portrait_leaves.png')
     # image = [[[0.184,0.184,0.184]]]
     # image = [[[0,0,0], [0.184,0.184,0.184], [1,1,1]]]
     params = photo_params(print_paper='kodak_portra_endura_uc')

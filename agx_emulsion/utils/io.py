@@ -10,7 +10,7 @@ from agx_emulsion.config import LOG_EXPOSURE, SPECTRAL_SHAPE
 # 16-bit PNG I/O
 ################################################################################
 
-def load_image_16bit(filename):
+def load_image_16bit_32bit(filename):
     # Open the image file
     in_img = oiio.ImageInput.open(filename)
     if not in_img:
@@ -27,6 +27,8 @@ def load_image_16bit(filename):
             read_type = oiio.TypeDesc("uint16")
         elif spec.format == oiio.TypeDesc("half"):
             read_type = oiio.TypeDesc("half")
+        elif spec.format == oiio.TypeDesc("float"):
+            read_type = oiio.TypeDesc("float")
         else:
             # Fallback: use "uint16" by default. You might choose "float" if desired.
             read_type = oiio.TypeDesc("uint16")
