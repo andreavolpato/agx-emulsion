@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+from agx_emulsion.utils.fast_stats import fast_binomial, fast_poisson
 
 ################################################################################
 # Grain (very simple model)
@@ -12,6 +13,7 @@ def layer_particle_model(density,
                          seed=None,
                          blur_particle=0.0,
                          method='poisson_binomial',
+                         use_fast_stats=False,
                          ):
     if seed is not None:
         np.random.seed(seed) # scipy uses np.random
@@ -28,11 +30,16 @@ def layer_particle_model(density,
         grain = beta_rvs(probability_of_development*n_particles_per_pixel,
                         (1-probability_of_development)*n_particles_per_pixel)*seeds*od_particle
     elif method=='poisson_binomial':
-        binom_rvs = scipy.stats.binom.rvs
-        poisson_rvs = scipy.stats.poisson.rvs
+        if use_fast_stats:
+            binom_rvs = fast_binomial
+            poisson_rvs = fast_poisson
+        else:
+            binom_rvs = scipy.stats.binom.rvs
+            poisson_rvs = scipy.stats.poisson.rvs
         saturation = 1 - probability_of_development*grain_uniformity*(1-1e-6)
-        seeds = poisson_rvs(n_particles_per_pixel/saturation, size=density.shape)
-        grain = binom_rvs(seeds, probability_of_development)*od_particle*saturation
+        seeds = poisson_rvs(n_particles_per_pixel/saturation)
+        grain = binom_rvs(seeds, probability_of_development)
+        grain = np.double(grain)*od_particle*saturation
     
     if blur_particle>0:
         grain = scipy.ndimage.gaussian_filter(grain, blur_particle*np.sqrt(od_particle))
@@ -94,6 +101,7 @@ def apply_grain_to_density_layers(density_cmy_layers, # x,y,sublayers,rgb
                                   grain_blur=1.0,
                                   grain_blur_dye_clouds_um=1.0,
                                   fixed_seed=None,
+                                  use_fast_stats=False,
                                   ):
     density_max_total = np.sum(density_max_layers, axis=0) # [sublayers,rgb]
     density_max_fractions = density_max_layers/density_max_total[None,:]
@@ -121,7 +129,8 @@ def apply_grain_to_density_layers(density_cmy_layers, # x,y,sublayers,rgb
                                                             n_particles_per_pixel=n_particles_per_pixel[sl,ch],
                                                             grain_uniformity=grain_uniformity[ch],
                                                             seed=seed[ch] + sl*10,
-                                                            blur_particle=grain_blur_dye_clouds_um)
+                                                            blur_particle=grain_blur_dye_clouds_um,
+                                                            use_fast_stats=use_fast_stats)
     density_cmy_out -= density_min
     
     # particle_blur_pixel = grain_blur_dye_clouds_um / pixel_size_um

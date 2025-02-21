@@ -139,13 +139,13 @@ class TestStrip:
 
 
 if __name__ == '__main__':
-    from agx_emulsion.utils.io import read_png_16bit, read_png
+    from agx_emulsion.utils.io import load_image_16bit
     # image = read_png_16bit('img/color_checker/cc11.png')
     # image = read_png_16bit('C:/Users/andre/Pictures/pixls/playraw/darktable_exported/P1140349.png')
     
     
-    image = read_png_16bit('img/targets/gradient_8ev.png')
-    p = photo_params(negative='kodak_portra_400_au')
+    image = load_image_16bit('img/targets/cc11.tiff')
+    p = photo_params(negative='kodak_portra_400_auc')
     p.io.input_cctf_decoding = True
     # p.negative.parametric.density_curves.active=True
     # p.negative.parametric.density_curves.gamma=[0.65,0.60,0.70]

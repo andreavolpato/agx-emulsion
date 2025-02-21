@@ -7,7 +7,7 @@ from agx_emulsion.config import STANDARD_OBSERVER_CMFS
 from agx_emulsion.model.illuminants import standard_illuminant
 from agx_emulsion.model.density_curves import interpolate_exposure_to_density
 from agx_emulsion.utils.conversions import density_to_light, rgb_to_raw_mallett2019
-from agx_emulsion.model.diffusion import apply_unsharp_mask, apply_halation
+from agx_emulsion.model.diffusion import apply_unsharp_mask, apply_halation_um
 from agx_emulsion.model.couplers import compute_exposure_correction_dir_couplers, compute_dir_couplers_matrix, compute_density_curves_before_dir_couplers
 from agx_emulsion.model.grain import apply_grain_to_density, apply_grain_to_density_layers
 from agx_emulsion.model.parametric import parametric_density_curves_model
@@ -68,6 +68,17 @@ def compute_random_glare_amount(amount, roughness, blur, shape):
     random_glare = scipy.ndimage.gaussian_filter(random_glare, blur) / 100
     return random_glare
 
+def compute_density_spectral(profile, density_cmy):
+    density_spectral = contract('ijk, lk->ijl', density_cmy, profile.data.dye_density[:, 0:3])
+    density_spectral += profile.data.dye_density[:, 3] * profile.data.tune.dye_density_min_factor
+    return density_spectral
+
+def develop_simple(profile, log_raw):
+    density_curves = profile.data.density_curves
+    log_exposure = profile.data.log_exposure
+    gamma_factor = profile.data.tune.gamma_factor
+    density_cmy = interpolate_exposure_to_density(log_raw, density_curves, log_exposure, gamma_factor)
+    return density_cmy
 
 class AgXEmulsion():
     def __init__(self, profile):
@@ -165,60 +176,56 @@ class Film(AgXEmulsion):
         self.dir_couplers = profile.dir_couplers
         self.density_midscale_neutral = profile.info.density_midscale_neutral
 
-    def expose(self, rgb,
-               exposure_ev=0.0,
-               color_space='sRGB',
-               apply_cctf_decoding=True,
-               lens_blur_um=0.0,
-               pixel_size_um=12,
-               compute_reference_exposure=False,
-               return_density_cmy=False,
-               ):
+    def develop(self, log_raw, pixel_size_um,
+                bypass_grain=False,
+                use_fast_stats=False,
+                ):
 
         # self.exposure_ev = exposure_ev
-        self.replace_data_with_parametric_models()
-        raw              = self._convert_rgb_to_raw_and_expose(rgb, color_space, apply_cctf_decoding, exposure_ev)
-        raw              = self._gaussian_blur(raw, lens_blur_um/pixel_size_um)
-        raw              = self._apply_halation(raw, pixel_size_um)
-        log_raw          = np.log10(raw + 1e-10)
+        # self.replace_data_with_parametric_models() #DEL
+        # raw              = self._convert_rgb_to_raw_and_expose(rgb, color_space, apply_cctf_decoding, exposure_ev)
+        # raw              = self._gaussian_blur(raw, lens_blur_um/pixel_size_um)
+        # raw              = self._apply_halation(raw, pixel_size_um)
+        # log_raw          = np.log10(raw + 1e-10)
         density_cmy      = self._interpolate_density_with_curves(log_raw)
         density_cmy      = self._apply_density_correction_dir_couplers(density_cmy, log_raw, pixel_size_um)
-        density_cmy      = self._apply_grain(density_cmy, pixel_size_um, compute_reference_exposure)
-        density_spectral = self._compute_density_spectral(density_cmy)
+        density_cmy      = self._apply_grain(density_cmy, pixel_size_um, bypass_grain, use_fast_stats)
+        # density_spectral = self._compute_density_spectral(density_cmy) #DEL
+        return density_cmy
         
-        if return_density_cmy: return density_cmy # only used for grain tuning with a virtual densitometer
-        else:                  return density_spectral
+        # if return_density_cmy: return density_cmy # only used for grain tuning with a virtual densitometer
+        # else:                  return density_spectral #DEL
 
-    def replace_data_with_parametric_models(self):
-        if self.parametric.density_curves.active:
-            gamma = self.parametric.density_curves.gamma
-            log_exposure_0 = self.parametric.density_curves.log_exposure_0
-            density_max = self.parametric.density_curves.density_max
-            toe_size = self.parametric.density_curves.toe_size
-            shoulder_size = self.parametric.density_curves.shoulder_size
-            self.density_curves = parametric_density_curves_model(self.log_exposure, gamma, log_exposure_0, density_max, toe_size, shoulder_size)
+    # def replace_data_with_parametric_models(self): #DEL
+    #     if self.parametric.density_curves.active:
+    #         gamma = self.parametric.density_curves.gamma
+    #         log_exposure_0 = self.parametric.density_curves.log_exposure_0
+    #         density_max = self.parametric.density_curves.density_max
+    #         toe_size = self.parametric.density_curves.toe_size
+    #         shoulder_size = self.parametric.density_curves.shoulder_size
+    #         self.density_curves = parametric_density_curves_model(self.log_exposure, gamma, log_exposure_0, density_max, toe_size, shoulder_size)
 
-    def _convert_rgb_to_raw_and_expose(self, rgb, color_space, apply_cctf_decoding, exposure_ev):
-        reference_illuminant = standard_illuminant(self.reference_illuminant)
-        raw = rgb_to_raw_mallett2019(rgb, reference_illuminant, self.sensitivity,
-                                     color_space=color_space,
-                                     apply_cctf_decoding=apply_cctf_decoding)
-        raw_midgray = rgb_to_raw_mallett2019(self.midgray_rgb, reference_illuminant, self.sensitivity,
-                                             color_space='sRGB',
-                                             apply_cctf_decoding=False)
-        raw *= 2**exposure_ev / raw_midgray[:,:,1]
-        return raw
+    # def _convert_rgb_to_raw_and_expose(self, rgb, color_space, apply_cctf_decoding, exposure_ev): #DEL
+    #     reference_illuminant = standard_illuminant(self.reference_illuminant)
+    #     raw = rgb_to_raw_mallett2019(rgb, reference_illuminant, self.sensitivity,
+    #                                  color_space=color_space,
+    #                                  apply_cctf_decoding=apply_cctf_decoding)
+    #     raw_midgray = rgb_to_raw_mallett2019(self.midgray_rgb, reference_illuminant, self.sensitivity,
+    #                                          color_space='sRGB',
+    #                                          apply_cctf_decoding=False)
+    #     raw *= 2**exposure_ev / raw_midgray[:,:,1]
+    #     return raw
 
-    def _apply_halation(self, raw, pixel_size_um):
-        if self.halation.active:
-            halation_size_pixels = np.array(self.halation.size_um)/pixel_size_um
-            scattering_size_pixels = np.array(self.halation.scattering_size_um)/pixel_size_um
-            raw = apply_halation(raw, 
-                                np.array(halation_size_pixels),
-                                np.array(self.halation.strength),
-                                np.array(scattering_size_pixels),
-                                np.array(self.halation.scattering_strength))
-        return raw
+    # def _apply_halation(self, raw, pixel_size_um): #DEL
+    #     if self.halation.active:
+    #         halation_size_pixels = np.array(self.halation.size_um)/pixel_size_um
+    #         scattering_size_pixels = np.array(self.halation.scattering_size_um)/pixel_size_um
+    #         raw = apply_halation(raw, 
+    #                             np.array(halation_size_pixels),
+    #                             np.array(self.halation.strength),
+    #                             np.array(scattering_size_pixels),
+    #                             np.array(self.halation.scattering_strength))
+    #     return raw
 
     def _apply_density_correction_dir_couplers(self, density_cmy, log_raw, pixel_size_um):
         if self.dir_couplers.active:
@@ -236,10 +243,10 @@ class Film(AgXEmulsion):
             density_cmy = interpolate_exposure_to_density(log_raw_0, density_curves_0, self.log_exposure, self.gamma_factor)
         return density_cmy
 
-    def _apply_grain(self, density_cmy, pixel_size_um, compute_reference_exposure):
-        if self.grain.active and not compute_reference_exposure:
+    def _apply_grain(self, density_cmy, pixel_size_um, bypass_grain, use_fast_stats):
+        if self.grain.active and not bypass_grain:
             if not self.grain.sublayers_active:
-                density_max = np.nanmax(self.density_curves.data, axis=0)
+                density_max = np.nanmax(self.density_curves, axis=0)
                 density_cmy = apply_grain_to_density(density_cmy,
                                                     pixel_size_um=pixel_size_um,
                                                     agx_particle_area_um2=self.grain.agx_particle_area_um2,
@@ -261,7 +268,8 @@ class Film(AgXEmulsion):
                                                             density_min=self.grain.density_min,
                                                             grain_uniformity=self.grain.uniformity,
                                                             grain_blur=self.grain.blur,
-                                                            grain_blur_dye_clouds_um=self.grain.blur_dye_clouds_um)
+                                                            grain_blur_dye_clouds_um=self.grain.blur_dye_clouds_um,
+                                                            use_fast_stats=use_fast_stats)
         return density_cmy
 
     def get_density_mid(self):
@@ -269,7 +277,7 @@ class Film(AgXEmulsion):
         d_mid = self.density_midscale_neutral
         density_spectral = np.sum(self.dye_density[:, :3] * d_mid, axis=1) + self.dye_density[:, 3]
         return density_spectral[None,None,:]
-    
+
 
 def interp_density_cmy_layers(density_cmy, density_curves, density_curves_layers):
     density_cmy_layers = np.zeros((density_cmy.shape[0], density_cmy.shape[1], 3, 3)) # x,y,layer,rgb
@@ -285,7 +293,7 @@ class PrintPaper(AgXEmulsion):
     def __init__(self, profile):
         super().__init__(profile)
         self.glare = profile.glare
-            
+        
     def print(self, negative_density_spectral, illuminant, negative,
               exposure=1, negative_exposure_compensation_ev=0.0,
               preflashing_illuminant=None, preflashing_exposure=0.0,

@@ -242,6 +242,11 @@ def create_profile(stock='kodak_portra_400',
     profile.parametric.density_curves.toe_size = [0.3,0.3,0.3]
     profile.parametric.density_curves.shoulder_size = [0.85,0.85,0.85]
     
+    profile.glare.active = False
+    profile.glare.percent = 0.0
+    profile.glare.roughness = 0.25
+    profile.glare.blur = 0.5
+    
     if type == 'negative':
         profile.grain.active = True
         profile.grain.sublayers_active = True
@@ -275,8 +280,8 @@ def create_profile(stock='kodak_portra_400',
     
     if type == 'paper':       
         profile.glare.active = True
-        profile.glare.percent = 0.5
-        profile.glare.roughness = 0.25
+        profile.glare.percent = 0.1
+        profile.glare.roughness = 0.4
         profile.glare.blur = 0.5
         profile.glare.compensation_removal_factor = 0.1
         profile.glare.compensation_removal_density = 1.2

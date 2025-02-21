@@ -41,11 +41,10 @@ class Illuminants(Enum):
     lamp = 'BB3200'
     # led_rgb = 'LED-RGB1'
 
-def fit_print_filters(profile, fit_midscale_neutral=False):
+def fit_print_filters(profile):
     p = copy.copy(profile)
     p.debug.deactivate_spatial_effects = True
-    p.debug.deactivate_grain = True
-    p.print_paper.glare.active = False
+    p.debug.deactivate_stochastic_effects = True
     p.io.input_cctf_decoding = False
     p.io.resize_factor = 1.0
     p.camera.auto_exposure = False
@@ -57,11 +56,7 @@ def fit_print_filters(profile, fit_midscale_neutral=False):
         p.enlarger.y_filter_neutral = ymc_values[0]
         p.enlarger.m_filter_neutral = ymc_values[1]
         p.enlarger.print_exposure = print_exposure
-        if fit_midscale_neutral:
-            system = AgXPhoto(p)
-            rgb = system.process_midscale_neutral()
-        else:
-            rgb = photo_process(midgray_rgb, p)
+        rgb = photo_process(midgray_rgb, p)
         return rgb
     def evaluate_residues(x):
         res = midgray_print([x[0], x[1], c_filter], x[2])

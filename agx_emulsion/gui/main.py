@@ -3,25 +3,32 @@ import napari
 from enum import Enum
 from napari.layers import Image
 from napari.types import ImageData
+from napari.settings import get_settings
 from magicgui import magicgui
 from pathlib import Path
-import tifffile as tiff
-import imageio.v3 as iio
 import matplotlib.pyplot as plt
 
 from agx_emulsion.config import ENLARGER_STEPS
-from agx_emulsion.utils.io import read_png_16bit
+from agx_emulsion.utils.io import load_image_16bit
 from agx_emulsion.model.process import  photo_params, photo_process
 from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
 from agx_emulsion.model.parametric import parametric_density_curves_model
 from agx_emulsion.profiles.io import load_profile
 from agx_emulsion.profiles.factory import swap_channels
+from agx_emulsion.utils.fast_stats import fast_stats_warmup
+from agx_emulsion.utils.fast_interp import fast_interp_warmup
+
+# precompile numba functions
+fast_stats_warmup()
+fast_interp_warmup()
 
 # create a viewer and add a couple image layers
 viewer = napari.Viewer()
 viewer.window._qt_viewer.dockLayerControls.setVisible(False)
 viewer.window._qt_viewer.dockLayerList.setVisible(False)
 layer_list = viewer.window.qt_viewer.dockLayerList
+settings = get_settings()
+settings.appearance.theme = 'light'
 
 # cc_halation = np.double(iio.imread('img/targets/cc_halation.png')[:,:,0:3])/(2**8-1)
 # viewer.add_image(cc_halation,
@@ -35,7 +42,7 @@ layer_list = viewer.window.qt_viewer.dockLayerList
 # viewer.add_image(cc_it87,
 #                  name="it87_test_chart",
 #                  contrast_limits=[0,1])
-# portrait = read_png_16bit('img/test/portrait_leaves.png', return_double=False)
+# portrait = load_image_16bit('img/test/portrait_leaves.png')
 # viewer.add_image(portrait,
 #                  name="portrait")
 
@@ -138,9 +145,9 @@ def fit_density_curves():
     return
 
 
-@magicgui(filename={"mode": "r"}, call_button='load 16bit png')
+@magicgui(filename={"mode": "r"}, call_button='load 16bit image (e.g. png/exr)')
 def filepicker(filename=Path("./")) -> ImageData:
-    img_array = read_png_16bit(str(filename), return_double=True)
+    img_array = load_image_16bit(str(filename))
     return img_array
 
 @magicgui(layout="vertical", call_button='None')
@@ -262,8 +269,15 @@ def simulation(input_layer:Image,
     
     params.scanner.lens_blur = scan_lens_blur
     params.scanner.unsharp_mask = scan_unsharp_mask
+    
+    params.settings.rgb_to_raw_method = 'mallett2019'
+    params.settings.use_camera_lut = False
+    params.settings.use_enlarger_lut = True
+    params.settings.use_scanner_lut = True
+    params.settings.lut_resolution = 32
+    params.settings.use_fast_stats = True
 
-    image = np.double(input_layer.data[:,:,0:3])
+    image = np.double(input_layer.data[:,:,:3])
     scan = photo_process(image, params)
     scan = np.uint8(scan*255)
     return scan
@@ -355,7 +369,6 @@ input_image.input_color_space.tooltip = 'Color space of the input image, will be
 input_image.apply_cctf_decoding.tooltip = 'Apply the inverse cctf transfer function of the color space'
 
 # tab1 = Container(layout='vertical', widgets=[grain, preflashing])
-viewer.window.add_dock_widget(filepicker, area="right", name='filepicker', tabify=True)
 viewer.window.add_dock_widget(input_image, area="right", name='input', tabify=True)
 # viewer.window.add_dock_widget(curves, area="right", name='curves', tabify=True)
 viewer.window.add_dock_widget(halation, area="right", name='halation', tabify=True)
@@ -365,9 +378,8 @@ viewer.window.add_dock_widget(preflashing, area="right", name='preflash', tabify
 viewer.window.add_dock_widget(glare, area="right", name='glare', tabify=True)
 viewer.window.add_dock_widget(special, area="right", name='special', tabify=True)
 viewer.window.add_dock_widget(layer_list, area="right", name='layers', tabify=True)
+viewer.window.add_dock_widget(filepicker, area="right", name='filepicker', tabify=True)
 viewer.window.add_dock_widget(simulation, area="right", name='main', tabify=False)
 napari.run()
 
-
-# TODO: replace viewer with a color managed viewer
 # TODO: use magicclass to create collapsable widgets as in https://forum.image.sc/t/widgets-alignment-in-the-plugin-when-nested-magic-class-and-magicgui-are-used/62929
