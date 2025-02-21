@@ -1,12 +1,8 @@
-import png
-import imageio.v3
 import numpy as np
 import scipy.interpolate
 import json
+import OpenImageIO as oiio
 import importlib.resources as pkg_resources
-from dotmap import DotMap
-import copy
-import os
 
 from agx_emulsion.config import LOG_EXPOSURE, SPECTRAL_SHAPE
 
@@ -14,46 +10,88 @@ from agx_emulsion.config import LOG_EXPOSURE, SPECTRAL_SHAPE
 # 16-bit PNG I/O
 ################################################################################
 
-def read_png_16bit(filename, return_double=True):
-    img_array = imageio.v3.imread(filename, plugin='PNG-FI')  # 16-bit
-    bitdepth = 16
-    # reader = png.Reader(filename)
-    # width, height, rows, info = reader.read_flat()  # returns a generator
-    # bitdepth = info["bitdepth"]   # should be 16 for 16-bit
-    # planes   = info["planes"]     # e.g. 1=grayscale, 3=RGB, 4=RGBA
-    # # rows is a 1D array-like of all pixel data
-    # assert bitdepth in [8, 16], "Only 8-bit and 16-bit PNGs are supported"
-    # if bitdepth == 16:
-    #     img_array = np.array(rows, dtype=np.uint16)  # We expect 16-bit data
-    # if bitdepth == 8:
-    #     img_array = np.array(rows, dtype=np.uint8)
-    # # Reshape to (height, width, channels)
-    # img_array = img_array.reshape((height, width, planes))
-    img_array = img_array[:,:,0:3] # remove alpha if present
-    if return_double:
-        img_array = np.double(img_array)
-        img_array /= 2**bitdepth-1
-    return img_array
+def load_image_16bit(filename):
+    # Open the image file
+    in_img = oiio.ImageInput.open(filename)
+    if not in_img:
+        raise IOError("Could not open image file: " + filename)
+    
+    try:
+        spec = in_img.spec()
+        
+        # Determine the native pixel format:
+        # Use "uint16" for PNG and "half" for EXR if applicable.
+        if spec.format == oiio.TypeDesc("uint8"): # for compatibility
+            read_type = oiio.TypeDesc("uint8")
+        elif spec.format == oiio.TypeDesc("uint16"):
+            read_type = oiio.TypeDesc("uint16")
+        elif spec.format == oiio.TypeDesc("half"):
+            read_type = oiio.TypeDesc("half")
+        else:
+            # Fallback: use "uint16" by default. You might choose "float" if desired.
+            read_type = oiio.TypeDesc("uint16")
+        
+        # Read the image data using the chosen type
+        pixels = in_img.read_image(read_type)
+        if pixels is None:
+            raise Exception("Failed to read image data from " + filename)
+        
+        # Convert the raw data to a NumPy array and reshape it
+        np_pixels = np.array(pixels)
+        np_pixels = np_pixels.reshape(spec.height, spec.width, spec.nchannels)
+        
+        if spec.format == oiio.TypeDesc("uint16"):
+            np_pixels = np.double(np_pixels)/(2**16-1)
+        if spec.format == oiio.TypeDesc("uint8"):
+            np_pixels = np.double(np_pixels)/(2**8-1)
+        
+        return np_pixels
+    finally:
+        in_img.close()
 
-def read_png(filename, return_double=True):
-    img_array = imageio.v3.imread(filename)
-    bitdepth = 8
-    img_array = img_array[:,:,0:3] # remove alpha if present
-    if return_double:
-        img_array = np.double(img_array)
-        img_array /= 2**bitdepth-1
-    return img_array
+def save_image_16bit(filename, image_data):
+    """
+    Save a floating-point (double) image with 3 channels as a 16-bit image file.
+    For PNG files, the image data is scaled to the [0,65535] range and saved as uint16.
+    For EXR files, the image data is converted to 16-bit half floats.
+    
+    Parameters:
+      filename (str): The output file name (e.g., "saved_image.png" or "saved_image.exr")
+      image_data (np.ndarray): The input image data as a NumPy array with shape (height, width, 3).
+    """
+    # Extract image dimensions and number of channels
+    height, width, nchannels = image_data.shape
 
-def save_png_16bit(float_array, filename='image_16bit.png'):
-    scaled = float_array / np.max(float_array)
-    scaled = (float_array * 65535).astype(np.uint16)
-    height, width, channels = scaled.shape
-    # pypng wants a 2D list of rows
-    reshaped = scaled.reshape(height, width * channels)
-    with open(filename, 'wb') as f:
-        writer = png.Writer(width, height, bitdepth=16, greyscale=False)
-        writer.write(f, reshaped)
-
+    # Determine file type based on extension
+    ext = filename.split('.')[-1].lower()
+    
+    # Create an ImageSpec with the proper data type
+    if ext == "png":
+        # Assume image_data is in [0, 1]: scale to 16-bit unsigned integers.
+        img_uint16 = np.clip(image_data, 0, 1) * 65535.0
+        img_uint16 = img_uint16.astype(np.uint16)
+        spec = oiio.ImageSpec(width, height, nchannels, oiio.TypeDesc("uint16"))
+        data_to_write = img_uint16
+    elif ext == "exr":
+        # Convert the image data to 16-bit half precision.
+        # Note: numpy's float16 is used here; OpenImageIO accepts "half" for 16-bit floats.
+        img_half = image_data.astype(np.float16)
+        spec = oiio.ImageSpec(width, height, nchannels, oiio.TypeDesc("half"))
+        data_to_write = img_half
+    else:
+        raise ValueError("Unsupported file extension: " + ext)
+    
+    # Create an ImageOutput for writing the file
+    out = oiio.ImageOutput.create(filename)
+    if not out:
+        raise IOError("Could not create output image: " + filename)
+    
+    try:
+        out.open(filename, spec)
+        # Write the image data; write_image accepts the NumPy array directly.
+        out.write_image(data_to_write)
+    finally:
+        out.close()
 
 ################################################################################
 # Interpolation
@@ -208,12 +246,7 @@ def load_dichroic_filters(wavelengths, brand='thorlabs'):
     return filters
 
 if __name__ == '__main__':
-    # imageio.plugins.freeimage.download()
-    # img = read_png_16bit('img/targets/cc_halation.png')
-
     load_agx_emulsion_data()
     read_neutral_ymc_filter_values()
     # load_densitometer_data()
-    
-    
     
