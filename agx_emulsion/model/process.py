@@ -76,9 +76,9 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.debug.return_print_density_cmy = False
     
     params.settings.rgb_to_raw_method = 'mallett2019'
-    params.settings.use_film_exposure_lut = False
-    params.settings.use_print_exposure_lut = False
-    params.settings.use_scan_lut = False
+    params.settings.use_camera_lut = False
+    params.settings.use_enlarger_lut = False
+    params.settings.use_scanner_lut = False
     params.settings.lut_resolution = 32
     params.settings.use_fast_stats = False
     
@@ -173,7 +173,7 @@ class AgXPhoto():
         raw = self._rgb_to_film_raw(image, exposure_ev,
                                     color_space=self.io.input_color_space,
                                     apply_cctf_decoding=self.io.input_cctf_decoding,
-                                    use_lut=self.settings.use_film_exposure_lut)
+                                    use_lut=self.settings.use_camera_lut)
         raw = apply_gaussian_blur_um(raw, self.camera.lens_blur_um, pixel_size_um)
         raw = apply_halation_um(raw, self.negative.halation, pixel_size_um)
         log_raw = np.log10(raw + 1e-10)
@@ -191,7 +191,7 @@ class AgXPhoto():
             density_cmy = self._denormalize_film_density(density_cmy_n)
             return self._film_density_cmy_to_print_log_raw(density_cmy)
         log_raw = self._spectral_lut_compute(film_density_cmy_normalized, spectral_calculation,
-                                             use_lut=self.settings.use_print_exposure_lut)
+                                             use_lut=self.settings.use_enlarger_lut)
         return log_raw
     
     def _develop_print(self, log_raw):
@@ -199,7 +199,7 @@ class AgXPhoto():
         return density_cmy
     
     def _scan(self, density_cmy):
-        rgb = self._density_cmy_to_rgb(density_cmy, use_lut=self.settings.use_scan_lut)
+        rgb = self._density_cmy_to_rgb(density_cmy, use_lut=self.settings.use_scanner_lut)
         rgb = self._apply_blur_and_unsharp(rgb)
         rgb = self._apply_cctf_encoding_and_clip(rgb)
         return rgb 
@@ -235,10 +235,16 @@ class AgXPhoto():
             raw = np.zeros_like(rgb)
             if method=='mallett2019':
                 raw = rgb_to_raw_mallett2019(rgb,
-                                                illuminant,
-                                                sensitivity,
-                                                color_space=color_space,
-                                                apply_cctf_decoding=apply_cctf_decoding)
+                                             illuminant,
+                                             sensitivity,
+                                             color_space=color_space,
+                                             apply_cctf_decoding=apply_cctf_decoding)
+            # if method=='jakob2019':
+            #     raw = rgb_to_raw_jakob2019(rgb,
+            #                                illuminant,
+            #                                sensitivity,
+            #                                color_space=color_space,
+            #                                apply_cctf_decoding=apply_cctf_decoding)
             return raw
         raw = self._spectral_lut_compute(rgb, spectral_calculation, use_lut)
         
@@ -402,11 +408,11 @@ def photo_process(image, params):
     
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    from agx_emulsion.utils.io import read_png_16bit
-    # image = read_png_16bit('img/targets/cc_halation.png')
+    from agx_emulsion.utils.io import load_image_16bit
+    # image = load_image_16bit('img/targets/cc_halation.png')
     # image = plt.imread('img/targets/it87_test_chart_2.jpg')
     # image = np.double(image[:,:,:3])/255
-    image = read_png_16bit('img/test/portrait_leaves.png')
+    image = load_image_16bit('img/test/portrait_leaves.png')
     # image = [[[0.184,0.184,0.184]]]
     # image = [[[0,0,0], [0.184,0.184,0.184], [1,1,1]]]
     params = photo_params(print_paper='kodak_portra_endura_uc')
@@ -426,9 +432,9 @@ if __name__ == '__main__':
     params.debug.return_print_density_cmy = False
     
     params.settings.use_fast_stats = True
-    params.settings.use_film_exposure_lut = True
-    params.settings.use_print_exposure_lut = True
-    params.settings.use_scan_lut = True
+    params.settings.use_camera_lut = True
+    params.settings.use_enlarger_lut = True
+    params.settings.use_scanner_lut = True
     params.settings.lut_resolution = 16
     image = photo_process(image, params)
     # plt.imshow(image[:,:,1])

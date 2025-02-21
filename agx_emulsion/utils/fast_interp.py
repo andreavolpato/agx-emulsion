@@ -5,6 +5,14 @@ import numpy as np
 import numba
 from numba.typed import List
 
+
+def fast_interp_warmup():
+    x = np.linspace(0,1,8)
+    data = x[:,None,None]*x[None,:,None]*x[None,None,:]
+    y = np.random.uniform(size=(2,2))
+    _ = interp3d([0]*3,[1]*3,[1]*3,data,k=3)(y,y,y)
+
+
 ################################################################################
 # variables to control when we switch between serial / parallel versions
 
