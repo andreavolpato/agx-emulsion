@@ -16,11 +16,11 @@ from agx_emulsion.model.parametric import parametric_density_curves_model
 from agx_emulsion.profiles.io import load_profile
 from agx_emulsion.profiles.factory import swap_channels
 from agx_emulsion.utils.fast_stats import fast_stats_warmup
-from agx_emulsion.utils.fast_interp import fast_interp_warmup
+from agx_emulsion.utils.lut3d import warmup_lut3d
 
 # precompile numba functions
 fast_stats_warmup()
-fast_interp_warmup()
+warmup_lut3d()
 
 # create a viewer and add a couple image layers
 viewer = napari.Viewer()
@@ -42,9 +42,9 @@ settings.appearance.theme = 'light'
 # viewer.add_image(cc_it87,
 #                  name="it87_test_chart",
 #                  contrast_limits=[0,1])
-# portrait = load_image_16bit_32bit('img/test/portrait_leaves.png')
-# viewer.add_image(portrait,
-#                  name="portrait")
+portrait = load_image_16bit_32bit('img/test/portrait_leaves.png')
+viewer.add_image(portrait,
+                 name="portrait")
 
 class RGBColorSpaces(Enum):
     sRGB = 'sRGB'
@@ -196,7 +196,7 @@ def simulation(input_layer:Image,
                scan_unsharp_mask=(0.7,0.7),
                output_color_space=RGBColorSpaces.sRGB,
                output_cctf_encoding=True,
-               compute_film_raw=False,
+            #    compute_film_raw=False,
                compute_negative=False,
                compute_full_image=False,
                )->ImageData:    
@@ -235,7 +235,7 @@ def simulation(input_layer:Image,
     params.io.output_cctf_encoding = output_cctf_encoding
     params.io.full_image = compute_full_image
     params.io.compute_negative = compute_negative
-    params.io.compute_film_raw = compute_film_raw
+    # params.io.compute_film_raw = compute_film_raw
     
     # assign parameters to the film stock and paper
     params.negative.halation.active = halation.active.value
@@ -291,8 +291,9 @@ def simulation(input_layer:Image,
 
     image = np.double(input_layer.data[:,:,:3])
     scan = photo_process(image, params)
-    if params.io.compute_film_raw:
-        scan = np.vstack((scan[:, :, 0], scan[:, :, 1], scan[:, :, 2]))
+    # if params.io.compute_film_raw:
+    #     scan = np.vstack((scan[:, :, 0], scan[:, :, 1], scan[:, :, 2]))
+    scan = np.uint8(scan*255)
     return scan
 
 # add our new magicgui widget to the viewer

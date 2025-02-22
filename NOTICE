@@ -1,3 +1,0 @@
-This project is licensed under GPLv3. However, the following files are adapted from an Apache 2.0-licensed project and retain their original license:
-- agx_emulsion/utils/fast_interp.py (Apache 2.0) project hosted here: https://github.com/dbstein/fast_interp/tree/master by David Stein
-Note that Apache 2.0 license is compatible with GPLv3.

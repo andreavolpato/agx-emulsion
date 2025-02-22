@@ -4,7 +4,8 @@ import colour
 import scipy
 import importlib.resources
 from opt_einsum import contract
-from agx_emulsion.utils.fast_interp import interp2d, interp3d
+import scipy.interpolate
+from agx_emulsion.utils.interp_lut3d import apply_lut_cubic
 from agx_emulsion.config import SPECTRAL_SHAPE
 
 ################################################################################
@@ -59,7 +60,7 @@ def fetch_coeffs(rgb, lut_coeffs, color_space='ITU-R BT.2020', apply_cctf_decodi
     h = 1/(np.array(lut_coeffs.shape[:2])-1)
     x = np.linspace(0,1,lut_coeffs.shape[0])
     for i in np.arange(4):
-        coeffs[...,i] = interp2d([0]*2,[1]*2, h, lut_coeffs[:,:,i], k=3)(tc[...,0], tc[...,1])
+        coeffs[...,i] = scipy.interpolate.RegularGridInterpolator((x,x), lut_coeffs[:,:,i], method='cubic')(tc)
     return coeffs[...,:3], b/coeffs[...,3]
 
 def compute_spectra_from_coeffs(coeffs, b):
@@ -170,8 +171,7 @@ def rgb_to_raw_hanatos2025(rgb, sensitivity,
     rgb_scale = np.max(rgb, axis=-1) # scale rgb by the max to be able to be interp with the lut    
     rgb /= rgb_scale[...,None]
     raw = np.zeros_like(rgb)
-    for i in np.arange(3):
-        raw[...,i] = interp3d([0]*3, [1]*3, [h]*3, raw_lut[...,i], k=3)(rgb[...,0], rgb[...,1], rgb[...,2])
+    raw = apply_lut_cubic(raw_lut, rgb)
     raw *= rgb_scale[...,None] # scale the raw back with the scale factor
     # raw = np.nan_to_num(raw) # make sure nans are removed
     

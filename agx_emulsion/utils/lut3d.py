@@ -1,42 +1,38 @@
 import numpy as np
-import scipy.interpolate
-from agx_emulsion.utils.fast_interp import interp3d
+from agx_emulsion.utils.interp_lut3d import apply_lut_cubic
 
 def _create_lut3d(function, xmin=0, xmax=1, steps=32):
     x = np.linspace(xmin, xmax, steps, endpoint=True)
-    X = np.meshgrid(x,x,x)
+    X = np.meshgrid(x,x,x, indexing='ij')
     X = np.stack(X, axis=3)
     X = np.reshape(X, (steps**3, 1, 3)) # shape as an image to be compatible with normal processing
-    return x, function(X)
+    lut = np.reshape(function(X), (steps, steps, steps, 3))
+    return lut
 
-def _interpolate_lut3d(data, lut, x, method='cubic'):
-    steps = np.int32(np.size(lut, 0)**(1/3)+1)
-    lut3d = np.reshape(lut, (steps, steps, steps, 3))
-    interpolator = scipy.interpolate.RegularGridInterpolator((x,x,x), lut3d, method=method) # this is too slow to be usable
-    data_out = interpolator(data[:,:,(1,0,2)])
-    return data_out
+def compute_with_lut(data, function, xmin=0, xmax=1, steps=32):
+    lut = _create_lut3d(function, xmin, xmax, steps)
+    # lut = np.ascontiguousarray(lut)
+    return apply_lut_cubic(lut, data)
 
-def _fast_interpolate_lut3d(data, lut, x, method='cubic'):
-    steps = np.size(x)
-    xmin = np.min(x)
-    xmax = np.max(x)
-    h = (xmax - xmin)/(steps-1) # regular grid step
-    lut3d = np.reshape(lut, (steps, steps, steps , 3))
-    data_out = np.zeros_like(data)
-    if method=='linear': k=1
-    if method=='cubic':  k=3
-    for i in np.arange(3):        
-        interpolator = interp3d([xmin]*3, [xmax]*3, [h]*3, lut3d[:,:,:,i], k=k)
-        data_out[:,:,i] = interpolator(data[:,:,1], data[:,:,0], data[:,:,2]) # note the flip of xy for ij-ordering
-    return data_out
-
-def compute_with_lut(data, function, method='cubic', xmin=0, xmax=1, steps=32, fast_interp=True):
-    x, lut = _create_lut3d(function, xmin, xmax, steps)
-    if fast_interp:
-        data_out = _fast_interpolate_lut3d(data, lut, x, method)
-    else:
-        data_out = _interpolate_lut3d(data, lut, x, method)
-    return data_out
+def warmup_lut3d():
+    L = 32
+    grid = np.linspace(0, 1, L, dtype=np.float64)
+    R, G, B = np.meshgrid(grid, grid, grid, indexing='ij')
+    lut = np.stack((R**2, G**2, B**2), axis=-1)  # double precision; unbounded output
+    
+    # --- Create a Synthetic Test Image ---
+    # Generate a clear gradient image:
+    # - Red channel varies horizontally,
+    # - Green channel varies vertically,
+    # - Blue channel is fixed at 0.5.
+    height, width = 128, 128
+    x = np.linspace(0, 1, width, dtype=np.float64)
+    y = np.linspace(0, 1, height, dtype=np.float64)
+    X, Y = np.meshgrid(x, y)
+    image = np.stack((X, Y, 0.5 * np.ones_like(X)), axis=-1)  # double precision
+    
+    # --- Warm Up the JIT Compiler ---
+    _ = apply_lut_cubic(lut, image)
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
@@ -53,17 +49,12 @@ if __name__=='__main__':
         y[:,:,2] = 3*x[:,:,0] + x[:,:,2]
         return y
 
+    warmup_lut3d()
     np.random.seed(0)
     data = np.random.uniform(0,1,size=(300,200,3))
-    x, lut = _create_lut3d(mycalculation, steps=32)
-    data_finterp = _fast_interpolate_lut3d(data, lut, x)
-    data_scipy_interp = _interpolate_lut3d(data, lut, x)
+    lut = _create_lut3d(mycalculation)
+    data_finterp = apply_lut_cubic(lut, data)
     error = mycalculation(data)-data_finterp
-    error_scipy = mycalculation(data)-data_scipy_interp
-    print('Max interpolation error fast_interp:',np.max(error))
-    print('Max interpolation error scipy:',np.max(error_scipy))
-    print('Mean interpolation error fast_interp:',np.mean(np.abs(error)))
-    print('Mean interpolation error scipy:',np.mean(np.abs(error_scipy)))
-    
-    imshow_lut(lut/np.max(lut))
+    print('Max interpolation error:',np.max(error))
+    print('Mean interpolation error:',np.mean(np.abs(error)))
     plt.show()

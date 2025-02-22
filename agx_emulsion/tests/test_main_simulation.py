@@ -6,6 +6,8 @@ def test_main_simulation():
     image = load_image_16bit_32bit('img/targets/it87_test_chart_2.jpg')
     params = photo_params()
     params.negative.grain.sublayers_active = True
+    params.settings.use_enlarger_lut = True
+    params.settings.use_scanner_lut = True
     params.io.preview_resize_factor = 1.0
     params.camera.exposure_compensation_ev = 2
     params.enlarger.print_exposure = 0.5
