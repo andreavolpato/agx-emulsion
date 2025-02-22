@@ -7,7 +7,8 @@ from opt_einsum import contract
 from agx_emulsion.config import ENLARGER_STEPS, STANDARD_OBSERVER_CMFS
 from agx_emulsion.model.emulsion import Film, compute_density_spectral, develop_simple, compute_random_glare_amount
 from agx_emulsion.utils.autoexposure import measure_autoexposure_ev
-from agx_emulsion.utils.conversions import rgb_to_raw_mallett2019, density_to_light
+from agx_emulsion.utils.conversions import density_to_light
+from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_to_raw_hanatos2025
 from agx_emulsion.utils.lut3d import compute_with_lut
 from agx_emulsion.model.diffusion import apply_gaussian_blur_um, apply_halation_um, apply_unsharp_mask, apply_gaussian_blur
 from agx_emulsion.model.color_filters import color_enlarger
@@ -75,7 +76,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
     
-    params.settings.rgb_to_raw_method = 'mallett2019'
+    params.settings.rgb_to_raw_method = 'hanatos2025'
     params.settings.use_camera_lut = False
     params.settings.use_enlarger_lut = False
     params.settings.use_scanner_lut = False
@@ -231,22 +232,31 @@ class AgXPhoto():
         sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
         
         method = self.settings.rgb_to_raw_method
-        def spectral_calculation(rgb):
-            raw = np.zeros_like(rgb)
-            if method=='mallett2019':
-                raw = rgb_to_raw_mallett2019(rgb,
-                                             illuminant,
-                                             sensitivity,
-                                             color_space=color_space,
-                                             apply_cctf_decoding=apply_cctf_decoding)
-            # if method=='jakob2019':
-            #     raw = rgb_to_raw_jakob2019(rgb,
-            #                                illuminant,
-            #                                sensitivity,
-            #                                color_space=color_space,
-            #                                apply_cctf_decoding=apply_cctf_decoding)
-            return raw
-        raw = self._spectral_lut_compute(rgb, spectral_calculation, use_lut)
+        raw = np.zeros_like(rgb)
+        if method=='mallett2019':
+            raw = rgb_to_raw_mallett2019(rgb,
+                                            illuminant,
+                                            sensitivity,
+                                            color_space=color_space,
+                                            apply_cctf_decoding=apply_cctf_decoding)
+        if method=='hanatos2025':
+            raw = rgb_to_raw_hanatos2025(rgb,
+                                            sensitivity,
+                                            color_space=color_space,
+                                            apply_cctf_decoding=apply_cctf_decoding)
+        if method=='mallett2019_filter':
+            raw = rgb_to_raw_mallett2019(rgb,
+                                            illuminant,
+                                            sensitivity,
+                                            color_space=color_space,
+                                            apply_cctf_decoding=apply_cctf_decoding,
+                                            apply_band_pass_filter=True)
+        if method=='hanatos2025_filter':
+            raw = rgb_to_raw_hanatos2025(rgb,
+                                            sensitivity,
+                                            color_space=color_space,
+                                            apply_cctf_decoding=apply_cctf_decoding,
+                                            apply_band_pass_filter=True)
         
         # set exposure level
         raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference

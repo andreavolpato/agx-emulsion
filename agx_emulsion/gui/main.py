@@ -51,8 +51,15 @@ class RGBColorSpaces(Enum):
     DCI_P3 = 'DCI-P3'
     DisplayP3 = 'Display P3'
     AdobeRGB = 'Adobe RGB (1998)'
+    ITU_R_BT2020 = 'ITU-R BT.2020'
     ProPhotoRGB = 'ProPhoto RGB'
     ACES2065_1 = 'ACES2065-1'
+
+class RGBtoRAWMethod(Enum):
+    mallett2019 = 'mallett2019'
+    hanatos2025 = 'hanatos2025'
+    mallett2019_filter = 'mallett2019_filter'
+    hanatos2025_filter = 'hanatos2025_filter'
 
 @magicgui(layout="vertical", call_button='None')
 def grain(active=True,
@@ -169,6 +176,7 @@ class ae_methods(Enum):
 def simulation(input_layer:Image,
                film_stock=FilmStocks.kodak_gold_200,
                film_format_mm=35.0,
+               spectral_upsampling_method=RGBtoRAWMethod.hanatos2025,
                camera_lens_blur_um=0.0,
                exposure_compensation_ev=0.0,
                auto_exposure=True,
@@ -270,7 +278,7 @@ def simulation(input_layer:Image,
     params.scanner.lens_blur = scan_lens_blur
     params.scanner.unsharp_mask = scan_unsharp_mask
     
-    params.settings.rgb_to_raw_method = 'mallett2019'
+    params.settings.rgb_to_raw_method = spectral_upsampling_method.value
     params.settings.use_camera_lut = False
     params.settings.use_enlarger_lut = True
     params.settings.use_scanner_lut = True
