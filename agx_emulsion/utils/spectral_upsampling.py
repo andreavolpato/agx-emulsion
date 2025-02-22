@@ -167,9 +167,9 @@ def rgb_to_raw_hanatos2025(rgb, sensitivity,
                             apply_cctf_decoding=apply_cctf_decoding,
                             apply_cctf_encoding=False)
     rgb = np.clip(rgb, 0, None) # clip negatives, eg when ACES2065-1 >> rec2020
-    # rgb = np.nan_to_num(rgb) # safety
-    rgb_scale = np.max(rgb, axis=-1) # scale rgb by the max to be able to be interp with the lut    
+    rgb_scale = np.max(rgb, axis=-1) # scale rgb by the max to be able to be interp with the lut
     rgb /= rgb_scale[...,None]
+    rgb = np.nan_to_num(rgb) # temporary for safety, fix divide by zero
     raw = np.zeros_like(rgb)
     raw = apply_lut_cubic(raw_lut, rgb)
     raw *= rgb_scale[...,None] # scale the raw back with the scale factor
