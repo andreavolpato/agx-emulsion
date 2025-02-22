@@ -24,9 +24,9 @@ def set_serial_cutoffs(dimension, cutoff):
 # utilities to enable serial / parallel compilation of same function
 
 def sjit(func):
-    return numba.njit(func, parallel=False)
+    return numba.njit(func, parallel=False, cache=True)
 def pjit(func):
-    return numba.njit(func, parallel=True)
+    return numba.njit(func, parallel=True, cache=True)
 
 ################################################################################
 # utility to allow construction of TypedList with Float/Int types (always promoted to float)
@@ -588,7 +588,7 @@ def _fill2(f, fb, ox, oy):
         fb[ox:ox+nx, oy:oy+ny] = f
     else:
         __fill2(f, fb, ox, oy)
-@numba.njit(parallel=True)
+@numba.njit(parallel=True, cache=True)
 def __fill2(f, fb, ox, oy):
     nx = f.shape[0]
     ny = f.shape[1]
@@ -945,7 +945,7 @@ def _fill3(f, fb, ox, oy, oz):
         fb[ox:ox+nx, oy:oy+ny, oz:oz+nz] = f
     else:
         __fill3(f, fb, ox, oy, oz)
-@numba.njit(parallel=True)
+@numba.njit(parallel=True, cache=True)
 def __fill3(f, fb, ox, oy, oz):
     nx = f.shape[0]
     ny = f.shape[1]

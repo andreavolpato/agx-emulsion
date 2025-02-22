@@ -69,6 +69,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.io.upscale_factor = 1.0
     params.io.full_image = False
     params.io.compute_negative = False
+    params.io.compute_film_raw = False
     
     params.debug.deactivate_spatial_effects = False
     params.debug.deactivate_stochastic_effects = False
@@ -76,7 +77,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
     
-    params.settings.rgb_to_raw_method = 'hanatos2025'
+    params.settings.rgb_to_raw_method = 'hanatos2025_filter'
     params.settings.use_camera_lut = False
     params.settings.use_enlarger_lut = False
     params.settings.use_scanner_lut = False
@@ -124,16 +125,17 @@ class AgXPhoto():
         image, preview_resize_factor, pixel_size_um = self._crop_and_rescale(image)
         
         # film exposure in camera and chemical development
-        log_raw = self._expose_film(image, exposure_ev, pixel_size_um)
+        raw = self._expose_film(image, exposure_ev, pixel_size_um)
+        if self.io.compute_film_raw: return raw
+        
+        log_raw = np.log10(raw + 1e-10)
         density_cmy = self._develop_film(log_raw, pixel_size_um)
-        # print('film density_cmy:', density_cmy)
         if self.debug.return_negative_density_cmy: return density_cmy
         
         # print exposure with enlarger
         if not self.io.compute_negative:
             log_raw = self._expose_print(density_cmy)
             density_cmy = self._develop_print(log_raw)
-            # print('print density_cmy:', density_cmy)
             if self.debug.return_print_density_cmy: return density_cmy
         
         # scan
@@ -177,8 +179,7 @@ class AgXPhoto():
                                     use_lut=self.settings.use_camera_lut)
         raw = apply_gaussian_blur_um(raw, self.camera.lens_blur_um, pixel_size_um)
         raw = apply_halation_um(raw, self.negative.halation, pixel_size_um)
-        log_raw = np.log10(raw + 1e-10)
-        return log_raw
+        return raw
 
     def _develop_film(self, log_raw, pixel_size_um):
         film = Film(self.negative)
@@ -259,8 +260,7 @@ class AgXPhoto():
                                             apply_band_pass_filter=True)
         
         # set exposure level
-        raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
-        raw *= 2**exposure_ev / raw_midgray[1] # normalize with green channel
+        raw *= 2**exposure_ev
         return raw
 
     def _normalize_film_density(self, denisty_cmy):

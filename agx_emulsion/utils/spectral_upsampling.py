@@ -139,7 +139,9 @@ def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
                     apply_cctf_encoding=False)
     lrgb = np.clip(lrgb, 0, None)
     raw  = contract('ijk,lk,lm->ijm', lrgb, basis_set_with_illuminant, sensitivity)
-    return raw
+    
+    raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
+    return raw / raw_midgray[1] # normalize with green channel
 
 ################################################################################
 # Using hanatos irradiance spectra generation
@@ -153,23 +155,29 @@ def rgb_to_raw_hanatos2025(rgb, sensitivity,
     # get spectra lut, approx 2 milliseconds
     data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_rec2020_32size.npy')
     with data_path.open('rb') as file:
-        spectra_lut = np.load(file)
+        spectra_lut = np.double(np.load(file))
     raw_lut  = contract('ijkl,lm->ijkm', spectra_lut, sensitivity)
     h = 1/(spectra_lut.shape[0]-1) # lut_step
-        
+
+    # spectra lut is in linear rec2020
     rgb = colour.RGB_to_RGB(rgb, 
                             input_colourspace=color_space, 
                             output_colourspace='ITU-R BT.2020',
                             apply_cctf_decoding=apply_cctf_decoding,
                             apply_cctf_encoding=False)
-    rgb = np.clip(rgb, 0, None)
-    rgb_scale = np.nanmax(rgb, axis=-1)
+    rgb = np.clip(rgb, 0, None) # clip negatives, eg when ACES2065-1 >> rec2020
+    # rgb = np.nan_to_num(rgb) # safety
+    rgb_scale = np.max(rgb, axis=-1) # scale rgb by the max to be able to be interp with the lut    
     rgb /= rgb_scale[...,None]
     raw = np.zeros_like(rgb)
     for i in np.arange(3):
         raw[...,i] = interp3d([0]*3, [1]*3, [h]*3, raw_lut[...,i], k=3)(rgb[...,0], rgb[...,1], rgb[...,2])
-    raw *= rgb_scale[...,None]
-    return raw
+    raw *= rgb_scale[...,None] # scale the raw back with the scale factor
+    # raw = np.nan_to_num(raw) # make sure nans are removed
+    
+    illuminant = spectra_lut[-1,-1,-1]
+    raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
+    return raw / raw_midgray[1] # normalize with green channel
 
 if __name__=='__main__':
     lut_coeffs = load_coeffs_lut()

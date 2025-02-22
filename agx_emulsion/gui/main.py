@@ -80,7 +80,9 @@ def input_image(preview_resize_factor=0.3,
                 crop_center=(0.50,0.50),
                 crop_size=(0.1,0.1),
                 input_color_space=RGBColorSpaces.sRGB,
-                apply_cctf_decoding=True):
+                apply_cctf_decoding=True,
+                spectral_upsampling_method=RGBtoRAWMethod.hanatos2025,
+                ):
     return
 
 @magicgui(layout="vertical", call_button='None')
@@ -176,7 +178,6 @@ class ae_methods(Enum):
 def simulation(input_layer:Image,
                film_stock=FilmStocks.kodak_gold_200,
                film_format_mm=35.0,
-               spectral_upsampling_method=RGBtoRAWMethod.hanatos2025,
                camera_lens_blur_um=0.0,
                exposure_compensation_ev=0.0,
                auto_exposure=True,
@@ -194,6 +195,7 @@ def simulation(input_layer:Image,
                scan_unsharp_mask=(0.7,0.7),
                output_color_space=RGBColorSpaces.sRGB,
                output_cctf_encoding=True,
+               compute_film_raw=False,
                compute_negative=False,
                compute_full_image=False,
                )->ImageData:    
@@ -232,6 +234,7 @@ def simulation(input_layer:Image,
     params.io.output_cctf_encoding = output_cctf_encoding
     params.io.full_image = compute_full_image
     params.io.compute_negative = compute_negative
+    params.io.compute_film_raw = compute_film_raw
     
     # assign parameters to the film stock and paper
     params.negative.halation.active = halation.active.value
@@ -278,7 +281,7 @@ def simulation(input_layer:Image,
     params.scanner.lens_blur = scan_lens_blur
     params.scanner.unsharp_mask = scan_unsharp_mask
     
-    params.settings.rgb_to_raw_method = spectral_upsampling_method.value
+    params.settings.rgb_to_raw_method = input_image.spectral_upsampling_method.value.value
     params.settings.use_camera_lut = False
     params.settings.use_enlarger_lut = True
     params.settings.use_scanner_lut = True
@@ -287,7 +290,8 @@ def simulation(input_layer:Image,
 
     image = np.double(input_layer.data[:,:,:3])
     scan = photo_process(image, params)
-    scan = np.uint8(scan*255)
+    if params.io.compute_film_raw:
+        scan = np.vstack((scan[:, :, 0], scan[:, :, 1], scan[:, :, 2]))
     return scan
 
 # add our new magicgui widget to the viewer
