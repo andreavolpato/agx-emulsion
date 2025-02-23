@@ -58,8 +58,6 @@ class RGBColorSpaces(Enum):
 class RGBtoRAWMethod(Enum):
     mallett2019 = 'mallett2019'
     hanatos2025 = 'hanatos2025'
-    mallett2019_filter = 'mallett2019_filter'
-    hanatos2025_filter = 'hanatos2025_filter'
 
 @magicgui(layout="vertical", call_button='None')
 def grain(active=True,
@@ -79,9 +77,11 @@ def input_image(preview_resize_factor=0.3,
                 crop=False,
                 crop_center=(0.50,0.50),
                 crop_size=(0.1,0.1),
-                input_color_space=RGBColorSpaces.sRGB,
-                apply_cctf_decoding=True,
-                spectral_upsampling_method=RGBtoRAWMethod.hanatos2025_filter,
+                input_color_space=RGBColorSpaces.ITU_R_BT2020,
+                apply_cctf_decoding=False,
+                spectral_upsampling_method=RGBtoRAWMethod.hanatos2025,
+                filter_uv=(1,410,8),
+                filter_ir=(1,675,15),
                 ):
     return
 
@@ -223,6 +223,8 @@ def simulation(input_layer:Image,
     params.camera.auto_exposure = auto_exposure
     params.camera.auto_exposure_method = auto_exposure_method.value
     params.camera.film_format_mm = film_format_mm
+    params.camera.filter_uv = input_image.filter_uv.value
+    params.camera.filter_ir = input_image.filter_ir.value
     
     params.io.preview_resize_factor = input_image.preview_resize_factor.value
     params.io.upscale_factor = input_image.upscale_factor.value

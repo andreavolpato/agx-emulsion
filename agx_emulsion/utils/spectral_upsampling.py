@@ -98,10 +98,23 @@ def compute_lut(lut_size=32, color_space='ITU-R BT.2020'):
 
 def sigmoid_erf(x, center, width=1):
     return scipy.special.erf((x-center)/width)*0.5+0.5
-def compute_band_pass_filter(wl_min=410,   wl_max=675,
-                             width_min=8, width_max=15):
+def compute_band_pass_filter(filter_uv=[1, 410, 8], filter_ir=[1, 675, 15]):
+    amp_uv = filter_uv[0]
+    wl_uv = filter_uv[1]
+    width_uv = filter_uv[2]
+    
+    amp_ir = filter_ir[0]
+    wl_ir = filter_ir[1]
+    width_ir = filter_ir[2]
+    
+    amp_uv = np.clip(amp_uv, 0, 1)
+    amp_ir = np.clip(amp_ir, 0, 1)
+    
     wl = SPECTRAL_SHAPE.wavelengths
-    return sigmoid_erf(wl, wl_min, width=width_min) * sigmoid_erf(wl, wl_max, width=-width_max)
+    filter_uv  = 1-amp_uv + amp_uv*sigmoid_erf(wl, wl_uv, width=width_uv)
+    filter_ir  = 1-amp_ir + amp_ir*sigmoid_erf(wl, wl_ir, width=-width_ir)
+    band_pass_filter = filter_uv * filter_ir
+    return  band_pass_filter
 
 ################################################################################
 # From [Mallett2019]
@@ -109,7 +122,7 @@ def compute_band_pass_filter(wl_min=410,   wl_max=675,
 MALLETT2019_BASIS = colour.recovery.MSDS_BASIS_FUNCTIONS_sRGB_MALLETT2019.copy().align(SPECTRAL_SHAPE)
 def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
                            color_space='sRGB', apply_cctf_decoding=True,
-                           apply_band_pass_filter=False):
+                           band_pass_filter=None):
     """
     Converts an RGB color to a raw sensor response using the method described in Mallett et al. (2019).
 
@@ -131,8 +144,7 @@ def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
     raw : ndarray
         Raw sensor response.
     """
-    if apply_band_pass_filter:
-        band_pass_filter = compute_band_pass_filter()
+    if band_pass_filter is not None:
         sensitivity *= band_pass_filter[:,None]
     basis_set_with_illuminant = np.array(MALLETT2019_BASIS[:])*np.array(illuminant)[:, None]
     lrgb = colour.RGB_to_RGB(RGB, color_space, 'sRGB',
@@ -149,9 +161,8 @@ def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
 
 def rgb_to_raw_hanatos2025(rgb, sensitivity,
                            color_space, apply_cctf_decoding,
-                           apply_band_pass_filter=False):
-    if apply_band_pass_filter:
-        band_pass_filter = compute_band_pass_filter()
+                           band_pass_filter=None):
+    if band_pass_filter is not None:
         sensitivity *= band_pass_filter[:,None]
     # get spectra lut, approx 2 milliseconds
     data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_rec2020_32size.npy')

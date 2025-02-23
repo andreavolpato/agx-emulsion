@@ -8,7 +8,7 @@ from agx_emulsion.config import ENLARGER_STEPS, STANDARD_OBSERVER_CMFS
 from agx_emulsion.model.emulsion import Film, compute_density_spectral, develop_simple, compute_random_glare_amount
 from agx_emulsion.utils.autoexposure import measure_autoexposure_ev
 from agx_emulsion.utils.conversions import density_to_light
-from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_to_raw_hanatos2025
+from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_to_raw_hanatos2025, compute_band_pass_filter
 from agx_emulsion.utils.lut3d import compute_with_lut
 from agx_emulsion.model.diffusion import apply_gaussian_blur_um, apply_halation_um, apply_unsharp_mask, apply_gaussian_blur
 from agx_emulsion.model.color_filters import color_enlarger
@@ -35,6 +35,8 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.camera.auto_exposure_method = 'center_weighted'
     params.camera.lens_blur_um = 0.0 # about 5 um sigma for typical lenses, down to 2-4 um for high quality lenses, used for sharp simulations without lens blur.
     params.camera.film_format_mm = 35.0
+    params.camera.filter_uv = (1, 410, 8)
+    params.camera.filter_ir = (1, 675, 15)
     
     params.enlarger.illuminant = 'BB3200'
     params.enlarger.print_exposure = 1.0
@@ -77,7 +79,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
     
-    params.settings.rgb_to_raw_method = 'hanatos2025_filter'
+    params.settings.rgb_to_raw_method = 'hanatos2025'
     params.settings.use_camera_lut = False
     params.settings.use_enlarger_lut = False
     params.settings.use_scanner_lut = False
@@ -230,35 +232,25 @@ class AgXPhoto():
                          use_lut=False):
         sensitivity = 10**self.negative.data.log_sensitivity
         sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
-        
         method = self.settings.rgb_to_raw_method
+        
+        band_pass_filter = compute_band_pass_filter(self.camera.filter_uv,
+                                                    self.camera.filter_ir)
         raw = np.zeros_like(rgb)
         if method=='mallett2019':
             illuminant = standard_illuminant('D65')
             raw = rgb_to_raw_mallett2019(rgb,
-                                            illuminant,
-                                            sensitivity,
-                                            color_space=color_space,
-                                            apply_cctf_decoding=apply_cctf_decoding)
-        if method=='mallett2019_filter':
-            illuminant = standard_illuminant('D65')
-            raw = rgb_to_raw_mallett2019(rgb,
-                                            illuminant,
-                                            sensitivity,
-                                            color_space=color_space,
-                                            apply_cctf_decoding=apply_cctf_decoding,
-                                            apply_band_pass_filter=True)
+                                         illuminant,
+                                         sensitivity,
+                                         color_space=color_space,
+                                         apply_cctf_decoding=apply_cctf_decoding,
+                                         band_pass_filter=band_pass_filter)
         if method=='hanatos2025':
             raw = rgb_to_raw_hanatos2025(rgb,
-                                            sensitivity,
-                                            color_space=color_space,
-                                            apply_cctf_decoding=apply_cctf_decoding)
-        if method=='hanatos2025_filter':
-            raw = rgb_to_raw_hanatos2025(rgb,
-                                            sensitivity,
-                                            color_space=color_space,
-                                            apply_cctf_decoding=apply_cctf_decoding,
-                                            apply_band_pass_filter=True)
+                                         sensitivity,
+                                         color_space=color_space,
+                                         apply_cctf_decoding=apply_cctf_decoding,
+                                         band_pass_filter=band_pass_filter)
         
         # set exposure level
         raw *= 2**exposure_ev
