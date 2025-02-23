@@ -81,7 +81,7 @@ def input_image(preview_resize_factor=0.3,
                 crop_size=(0.1,0.1),
                 input_color_space=RGBColorSpaces.sRGB,
                 apply_cctf_decoding=True,
-                spectral_upsampling_method=RGBtoRAWMethod.hanatos2025,
+                spectral_upsampling_method=RGBtoRAWMethod.hanatos2025_filter,
                 ):
     return
 

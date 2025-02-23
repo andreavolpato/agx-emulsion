@@ -228,30 +228,31 @@ class AgXPhoto():
     def _rgb_to_film_raw(self, rgb, exposure_ev,
                          color_space='sRGB', apply_cctf_decoding=False,
                          use_lut=False):
-        illuminant = standard_illuminant(self.negative.info.reference_illuminant)
         sensitivity = 10**self.negative.data.log_sensitivity
         sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
         
         method = self.settings.rgb_to_raw_method
         raw = np.zeros_like(rgb)
         if method=='mallett2019':
+            illuminant = standard_illuminant('D65')
             raw = rgb_to_raw_mallett2019(rgb,
                                             illuminant,
                                             sensitivity,
                                             color_space=color_space,
                                             apply_cctf_decoding=apply_cctf_decoding)
-        if method=='hanatos2025':
-            raw = rgb_to_raw_hanatos2025(rgb,
-                                            sensitivity,
-                                            color_space=color_space,
-                                            apply_cctf_decoding=apply_cctf_decoding)
         if method=='mallett2019_filter':
+            illuminant = standard_illuminant('D65')
             raw = rgb_to_raw_mallett2019(rgb,
                                             illuminant,
                                             sensitivity,
                                             color_space=color_space,
                                             apply_cctf_decoding=apply_cctf_decoding,
                                             apply_band_pass_filter=True)
+        if method=='hanatos2025':
+            raw = rgb_to_raw_hanatos2025(rgb,
+                                            sensitivity,
+                                            color_space=color_space,
+                                            apply_cctf_decoding=apply_cctf_decoding)
         if method=='hanatos2025_filter':
             raw = rgb_to_raw_hanatos2025(rgb,
                                             sensitivity,
