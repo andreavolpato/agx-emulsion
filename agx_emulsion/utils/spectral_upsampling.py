@@ -63,9 +63,9 @@ def fetch_coeffs(rgb, lut_coeffs, color_space='ITU-R BT.2020', apply_cctf_decodi
         coeffs[...,i] = scipy.interpolate.RegularGridInterpolator((x,x), lut_coeffs[:,:,i], method='cubic')(tc)
     return coeffs[...,:3], b/coeffs[...,3]
 
-def compute_spectra_from_coeffs(coeffs, b):
+def compute_spectra_from_coeffs(coeffs, b, smooth_steps=1):
     wl = SPECTRAL_SHAPE.wavelengths
-    wl_up = np.arange(360,801) # upsampled wl for finer initial calculation
+    wl_up = np.linspace(360,800,881) # upsampled wl for finer initial calculation 0.5 nm
     x = (coeffs[...,0,None] * wl_up + coeffs[...,1,None])*  wl_up  + coeffs[...,2,None]
     y = 1.0 / np.sqrt(x * x + 1.0)
     spectra = 0.5 * x * y +  0.5
@@ -73,13 +73,13 @@ def compute_spectra_from_coeffs(coeffs, b):
     
     # smooth of half step sigma and downsample
     step = np.mean(np.diff(wl))
-    spectra = scipy.ndimage.gaussian_filter(spectra, step/2, axes=-1)
+    spectra = scipy.ndimage.gaussian_filter(spectra, step*smooth_steps, axes=-1)
     def interp_slice(a, wl, wl_up):
         return np.interp(wl, wl_up, a)
     spectra = np.apply_along_axis(interp_slice, axis=-1, wl=wl, wl_up=wl_up, arr=spectra)
     return spectra
 
-def compute_lut(lut_size=32, color_space='ITU-R BT.2020'):
+def compute_lut(lut_size=32, color_space='ITU-R BT.2020', smooth_steps=0.5):
     lut_coeffs = load_coeffs_lut()
     x = np.linspace(0,1,lut_size)
     r,g,b = np.meshgrid(x,x,x)
@@ -89,7 +89,7 @@ def compute_lut(lut_size=32, color_space='ITU-R BT.2020'):
     coeffs, b = fetch_coeffs(rgb_lut, lut_coeffs, color_space=color_space, apply_cctf_decoding=False)
     coeffs[0,0,0] = [0,0,0]
     b[0,0,0] = 0
-    lut_spectra = compute_spectra_from_coeffs(coeffs, b)
+    lut_spectra = compute_spectra_from_coeffs(coeffs, b, smooth_steps=smooth_steps)
     lut_spectra = np.array(lut_spectra, dtype=np.half)
     return lut_spectra
 

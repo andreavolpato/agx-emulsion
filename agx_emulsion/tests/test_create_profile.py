@@ -10,5 +10,6 @@ plt.show()
 
 p = load_profile('kodak_portra_400_auc')
 # p = load_profile('fujifilm_pro_400h_auc')
+p = load_profile('kodak_portra_endura')
 plot_profile(p)
 plt.show()
