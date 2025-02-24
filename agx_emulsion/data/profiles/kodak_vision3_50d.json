@@ -2691,6 +2691,10 @@
         ],
         "blur": 0.55,
         "blur_dye_clouds_um": 1.0,
+        "micro_structure": [
+            0.2,
+            0.5
+        ],
         "n_sub_layers": 1
     },
     "halation": {

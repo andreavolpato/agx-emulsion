@@ -11,6 +11,7 @@ from agx_emulsion.model.density_curves import interpolate_exposure_to_density
 from agx_emulsion.model.couplers import compute_exposure_correction_dir_couplers, compute_dir_couplers_matrix, compute_density_curves_before_dir_couplers
 from agx_emulsion.model.grain import apply_grain_to_density, apply_grain_to_density_layers
 # from agx_emulsion.model.parametric import parametric_density_curves_model
+from agx_emulsion.utils.fast_stats import fast_lognormal_from_mean_std
 
 ################################################################################
 # AgXEmusion main class
@@ -49,22 +50,22 @@ def remove_viewing_glare_comp(le, dc, factor=0.2, density=1.0, transition=0.3):
         dc_out[:,i] = np.interp(le_nl, le, dc[:,i])
     return dc_out
 
-def compute_random_glare_amount(amount, roughness, blur, shape):
-    def lognorm_from_mean_std(M, S):
-        """
-        Returns a frozen lognormal distribution object (scipy.stats.rv_frozen)
-        whose mean is M and std dev is S in linear space.
-        """
-        # 1. Compute sigma^2 in log-space
-        sigma_sq = np.log(1.0 + (S**2) / (M**2))
-        sigma = np.sqrt(sigma_sq)
-        # 2. Compute mu in log-space
-        mu = np.log(M) - 0.5 * sigma_sq
-        # 3. In scipy.lognorm, 's' = sigma (the shape), and 'scale' = exp(mu)
-        return scipy.stats.lognorm(s=sigma, scale=np.exp(mu))
+def lognorm_from_mean_std(M, S):
+    """
+    Returns a frozen lognormal distribution object (scipy.stats.rv_frozen)
+    whose mean is M and std dev is S in linear space.
+    """
+    # 1. Compute sigma^2 in log-space
+    sigma_sq = np.log(1.0 + (S**2) / (M**2))
+    sigma = np.sqrt(sigma_sq)
+    # 2. Compute mu in log-space
+    mu = np.log(M) - 0.5 * sigma_sq
+    # 3. In scipy.lognorm, 's' = sigma (the shape), and 'scale' = exp(mu)
+    return scipy.stats.lognorm(s=sigma, scale=np.exp(mu))
 
-    random_lognorm = lognorm_from_mean_std(amount, roughness*amount)
-    random_glare = random_lognorm.rvs(size=shape)
+def compute_random_glare_amount(amount, roughness, blur, shape):
+    random_glare = fast_lognormal_from_mean_std(amount*np.ones(shape),
+                                                roughness*amount*np.ones(shape))
     random_glare = scipy.ndimage.gaussian_filter(random_glare, blur) / 100
     return random_glare
 
@@ -269,6 +270,7 @@ class Film(AgXEmulsion):
                                                             grain_uniformity=self.grain.uniformity,
                                                             grain_blur=self.grain.blur,
                                                             grain_blur_dye_clouds_um=self.grain.blur_dye_clouds_um,
+                                                            grain_micro_structure=self.grain.micro_structure,
                                                             use_fast_stats=use_fast_stats)
         return density_cmy
 

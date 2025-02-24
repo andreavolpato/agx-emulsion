@@ -15,11 +15,11 @@ from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
 from agx_emulsion.model.parametric import parametric_density_curves_model
 from agx_emulsion.profiles.io import load_profile
 from agx_emulsion.profiles.factory import swap_channels
-from agx_emulsion.utils.fast_stats import fast_stats_warmup
+from agx_emulsion.utils.fast_stats import warmup_fast_stats
 from agx_emulsion.utils.lut3d import warmup_lut3d
 
 # precompile numba functions
-fast_stats_warmup()
+warmup_fast_stats()
 warmup_lut3d()
 
 # create a viewer and add a couple image layers
@@ -42,7 +42,7 @@ settings.appearance.theme = 'light'
 # viewer.add_image(cc_it87,
 #                  name="it87_test_chart",
 #                  contrast_limits=[0,1])
-portrait = load_image_16bit_32bit('img/test/portrait_leaves.png')
+portrait = load_image_16bit_32bit('img/test/portrait_leaves_linear_rec2020.png')
 viewer.add_image(portrait,
                  name="portrait")
 
@@ -68,7 +68,9 @@ def grain(active=True,
           density_min=(0.07, 0.08, 0.12),
           uniformity=(0.97,0.97,0.99),
           blur=0.6,
-          blur_dye_clouds_um=1.0):
+          blur_dye_clouds_um=1.0,
+          micro_structure=(0.1, 30),
+          ):
     return
 
 @magicgui(layout="vertical", call_button='None')
@@ -185,12 +187,12 @@ def simulation(input_layer:Image,
                auto_exposure_method=ae_methods.center_weighted,
                # print parameters
                print_paper=PrintPapers.kodak_portra_endura,
-               print_illuminant=Illuminants.lamp,
+            #    print_illuminant=Illuminants.lamp,
                print_exposure=1.0,
                print_exposure_compensation=True,
                print_y_filter_shift=0,
                print_m_filter_shift=0,
-               print_lens_blur=0.0,
+            #    print_lens_blur=0.0,
                # scanner
                scan_lens_blur=0.00,
                scan_unsharp_mask=(0.7,0.7),
@@ -255,6 +257,7 @@ def simulation(input_layer:Image,
     params.negative.grain.uniformity = grain.uniformity.value
     params.negative.grain.blur = grain.blur.value
     params.negative.grain.blur_dye_clouds_um = grain.blur_dye_clouds_um.value
+    params.negative.grain.micro_structure = grain.micro_structure.value
     
     params.negative.dir_couplers.active = couplers.active.value
     params.negative.dir_couplers.amount_rgb = couplers.dir_couplers_amount.value * np.array(couplers.dir_couplers_ratio.value)
@@ -270,12 +273,12 @@ def simulation(input_layer:Image,
     params.negative.parametric.density_curves.toe_size = curves.toe_size.value
     params.negative.parametric.density_curves.shoulder_size = curves.shoulder_size.value
 
-    params.enlarger.illuminant = print_illuminant.value
+    # params.enlarger.illuminant = print_illuminant.value
     params.enlarger.print_exposure = print_exposure
     params.enlarger.print_exposure_compensation = print_exposure_compensation
     params.enlarger.y_filter_shift = print_y_filter_shift
     params.enlarger.m_filter_shift = print_m_filter_shift
-    params.enlarger.print_lens_blur = print_lens_blur
+    # params.enlarger.print_lens_blur = print_lens_blur
     params.enlarger.preflash_exposure = preflashing.exposure.value
     params.enlarger.preflash_y_filter_shift = preflashing.y_filter_shift.value
     params.enlarger.preflash_m_filter_shift = preflashing.m_filter_shift.value
@@ -307,7 +310,7 @@ simulation.print_y_filter_shift.min = -ENLARGER_STEPS
 simulation.print_y_filter_shift.max = ENLARGER_STEPS
 simulation.print_m_filter_shift.min = -ENLARGER_STEPS
 simulation.print_m_filter_shift.max = ENLARGER_STEPS
-simulation.print_lens_blur.step = 0.05
+# simulation.print_lens_blur.step = 0.05
 simulation.scan_lens_blur.step = 0.05
 
 # tooltips to help users understand what the widgets do
@@ -317,12 +320,12 @@ simulation.auto_exposure.tooltip = 'Automatically adjust exposure based on the i
 simulation.film_format_mm.tooltip = 'Long edge of the film format in millimeters, e.g. 35mm or 60mm'
 simulation.camera_lens_blur_um.tooltip = 'Sigma of gaussian filter in um for the camera lens blur. About 5 um for typical lenses, down to 2-4 um for high quality lenses, used for sharp input simulations without lens blur.'
 simulation.print_paper.tooltip = 'Print paper to simulate'
-simulation.print_illuminant.tooltip = 'Print illuminant to simulate'
+# simulation.print_illuminant.tooltip = 'Print illuminant to simulate'
 simulation.print_exposure.tooltip = 'Exposure value for the print (proportional to seconds of exposure, not ev)'
 simulation.print_exposure_compensation.tooltip = 'Apply exposure compensation from negative exposure compensation ev, allow for changing of the negative exposure compensation while keeping constant print time.'
 simulation.print_y_filter_shift.tooltip = 'Y filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
 simulation.print_m_filter_shift.tooltip = 'M filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
-simulation.print_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the print lens blur'
+# simulation.print_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the print lens blur'
 simulation.scan_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the scanner lens blur'
 simulation.scan_unsharp_mask.tooltip = 'Apply unsharp mask to the scan, [sigma in pixel, amount]'
 simulation.output_color_space.tooltip = 'Color space of the output image'
@@ -366,8 +369,9 @@ grain.particle_scale.tooltip = 'Scale of particle area for the RGB layers, multi
 grain.particle_scale_layers.tooltip = 'Scale of particle area for the sublayers in every color layer, multiplies particle_area_um2'
 grain.density_min.tooltip = 'Minimum density of the grain, typical values (0.03-0.06)'
 grain.uniformity.tooltip = 'Uniformity of the grain, typical values (0.94-0.98)'
-grain.blur.tooltip = 'Sigma of gaussian blur in pixels for the grain, to be increased at high magnifications, (default 0.6).'
+grain.blur.tooltip = 'Sigma of gaussian blur in pixels for the grain, to be increased at high magnifications, (should be 0.8-0.9 at high resolution, reduce down to 0.6 for low res).'
 grain.blur_dye_clouds_um.tooltip = 'Scale the sigma of gaussian blur in um for the dye clouds, to be used at high magnifications, (default 1)'
+grain.micro_structure.tooltip = 'Parameter for micro-structure due to clumps at the molecular level, [sigma blur of micro-structure / ultimate light-resolution (0.10 um default), size of molecular clumps in nm (30 nm default)]. Only for insane magnifications.'
 
 preflashing.exposure.tooltip = 'Preflash exposure value in ev for the print'
 preflashing.just_preflash.tooltip = 'Only apply preflash to the print, to visualize the preflash effect'
