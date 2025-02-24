@@ -5,7 +5,7 @@ def _create_lut3d(function, xmin=0, xmax=1, steps=32):
     x = np.linspace(xmin, xmax, steps, endpoint=True)
     X = np.meshgrid(x,x,x, indexing='ij')
     X = np.stack(X, axis=3)
-    X = np.reshape(X, (steps**3, 1, 3)) # shape as an image to be compatible with normal processing
+    X = np.reshape(X, (steps**2, steps, 3)) # shape as an image to be compatible with image processing
     lut = np.reshape(function(X), (steps, steps, steps, 3))
     return lut
 
@@ -36,11 +36,6 @@ def warmup_lut3d():
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
-    def imshow_lut(lut):
-        steps = np.int32(np.size(lut, 0)**(1/3)+1)
-        lut_image = np.reshape(lut, (steps*4, np.int32(steps**2/4), 3))
-        plt.imshow(lut_image)
-        plt.axis('off')
         
     def mycalculation(x):
         y = np.zeros_like(x)
