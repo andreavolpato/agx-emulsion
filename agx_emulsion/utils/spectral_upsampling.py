@@ -163,10 +163,16 @@ def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
 
 def rgb_to_raw_hanatos2025(rgb, sensitivity,
                            color_space, apply_cctf_decoding,
+                           lut_color_space='ITU-R BT.2020',
                            band_pass_filter=None):
     if band_pass_filter is not None:
         sensitivity *= band_pass_filter[:,None]
     # get spectra lut, approx 2 milliseconds
+    # if lut_color_space=='ACES2065-1':
+    #     data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_aces2065-1_32size.npy')
+    # if lut_color_space=='ProPhoto RGB':
+    #     data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_prophoto_rgb_32size.npy')
+    # else:
     data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_rec2020_32size.npy')
     with data_path.open('rb') as file:
         spectra_lut = np.double(np.load(file))
@@ -176,7 +182,7 @@ def rgb_to_raw_hanatos2025(rgb, sensitivity,
     # spectra lut is in linear rec2020
     rgb = colour.RGB_to_RGB(rgb, 
                             input_colourspace=color_space, 
-                            output_colourspace='ITU-R BT.2020',
+                            output_colourspace=lut_color_space,
                             apply_cctf_decoding=apply_cctf_decoding,
                             apply_cctf_encoding=False)
     rgb = np.clip(rgb, 0, None) # clip negatives, eg when ACES2065-1 >> rec2020

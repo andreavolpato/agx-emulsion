@@ -271,7 +271,7 @@ def interpolate_exposure_to_density(log_exposure_rgb, density_curves, log_exposu
     #     density_cmy[:,:,channel] = np.interp(log_exposure_rgb[:,:,channel],
     #                                          log_exposure[sel]/gamma_factor[channel],
     #                                          density_curves[sel,channel])
-    density_cmy = fast_interp(log_exposure_rgb,
+    density_cmy = fast_interp(np.ascontiguousarray(log_exposure_rgb),
                               log_exposure[:,None]/gamma_factor[None,:],
                               density_curves)
     return density_cmy

@@ -10,7 +10,7 @@ from agx_emulsion.config import LOG_EXPOSURE, SPECTRAL_SHAPE
 # 16-bit PNG I/O
 ################################################################################
 
-def load_image_16bit_32bit(filename):
+def load_image_oiio(filename):
     # Open the image file
     in_img = oiio.ImageInput.open(filename)
     if not in_img:
@@ -51,7 +51,7 @@ def load_image_16bit_32bit(filename):
     finally:
         in_img.close()
 
-def save_image_16bit(filename, image_data):
+def save_image_oiio(filename, image_data, bit_depth=32):
     """
     Save a floating-point (double) image with 3 channels as a 16-bit image file.
     For PNG files, the image data is scaled to the [0,65535] range and saved as uint16.
@@ -74,12 +74,18 @@ def save_image_16bit(filename, image_data):
         img_uint16 = img_uint16.astype(np.uint16)
         spec = oiio.ImageSpec(width, height, nchannels, oiio.TypeDesc("uint16"))
         data_to_write = img_uint16
-    elif ext == "exr":
+    elif ext=="exr" and bit_depth==16:
         # Convert the image data to 16-bit half precision.
         # Note: numpy's float16 is used here; OpenImageIO accepts "half" for 16-bit floats.
         img_half = image_data.astype(np.float16)
         spec = oiio.ImageSpec(width, height, nchannels, oiio.TypeDesc("half"))
         data_to_write = img_half
+    elif ext=='exr' and bit_depth==32:
+        # Convert the image data to 16-bit half precision.
+        # Note: numpy's float16 is used here; OpenImageIO accepts "half" for 16-bit floats.
+        img_float = image_data.astype(np.float32)
+        spec = oiio.ImageSpec(width, height, nchannels, oiio.TypeDesc("float"))
+        data_to_write = img_float
     else:
         raise ValueError("Unsupported file extension: " + ext)
     

@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 from agx_emulsion.config import ENLARGER_STEPS
-from agx_emulsion.utils.io import load_image_16bit_32bit
+from agx_emulsion.utils.io import load_image_oiio
 from agx_emulsion.model.process import  photo_params, photo_process
 from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
 from agx_emulsion.model.parametric import parametric_density_curves_model
@@ -40,7 +40,7 @@ settings.appearance.theme = 'light'
 # viewer.add_image(cc_it87,
 #                  name="it87_test_chart",
 #                  contrast_limits=[0,1])
-# portrait = load_image_16bit_32bit('img/test/portrait_leaves_linear_rec2020.png')
+# portrait = load_image_oiio('img/test/portrait_leaves_linear_rec2020.png')
 # viewer.add_image(portrait,
 #                  name="portrait")
 
@@ -56,6 +56,8 @@ class RGBColorSpaces(Enum):
 class RGBtoRAWMethod(Enum):
     mallett2019 = 'mallett2019'
     hanatos2025 = 'hanatos2025'
+    # hanatos2025_aces = 'hanatos2025_aces'
+    # hanatos2025_prophoto = 'hanatos2025_prophoto'
 
 @magicgui(layout="vertical", call_button='None')
 def grain(active=True,
@@ -156,7 +158,7 @@ def fit_density_curves():
 
 @magicgui(filename={"mode": "r"}, call_button='load image (e.g. png/exr)')
 def filepicker(filename=Path("./")) -> ImageData:
-    img_array = load_image_16bit_32bit(str(filename))
+    img_array = load_image_oiio(str(filename))
     img_array = img_array[...,:3]
     return img_array
 

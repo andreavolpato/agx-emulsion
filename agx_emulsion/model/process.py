@@ -261,6 +261,20 @@ class AgXPhoto():
                                          color_space=color_space,
                                          apply_cctf_decoding=apply_cctf_decoding,
                                          band_pass_filter=band_pass_filter)
+        # if method=='hanatos2025_aces':
+        #     raw = rgb_to_raw_hanatos2025(rgb,
+        #                                  sensitivity,
+        #                                  color_space=color_space,
+        #                                  apply_cctf_decoding=apply_cctf_decoding,
+        #                                  lut_color_space='ACES2065-1',
+        #                                  band_pass_filter=band_pass_filter)
+        # if method=='hanatos2025_prophoto':
+        #     raw = rgb_to_raw_hanatos2025(rgb,
+        #                                  sensitivity,
+        #                                  color_space=color_space,
+        #                                  apply_cctf_decoding=apply_cctf_decoding,
+        #                                  lut_color_space='ProPhoto RGB',
+        #                                  band_pass_filter=band_pass_filter)
         
         # set exposure level
         raw *= 2**exposure_ev
@@ -425,13 +439,13 @@ def photo_process(image, params):
     
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    from agx_emulsion.utils.io import load_image_16bit_32bit
+    from agx_emulsion.utils.io import load_image_oiio
     from agx_emulsion.utils.numba_warmup import warmup
     warmup()
-    # image = load_image_16bit_32bit('img/targets/cc_halation.png')
+    # image = load_image_oiio('img/targets/cc_halation.png')
     # image = plt.imread('img/targets/it87_test_chart_2.jpg')
     # image = np.double(image[:,:,:3])/255
-    image = load_image_16bit_32bit('img/test/portrait_leaves_linear_rec2020.png')
+    image = load_image_oiio('img/test/portrait_leaves_linear_rec2020.png')
     # image = [[[0.184,0.184,0.184]]]
     # image = [[[0,0,0], [0.184,0.184,0.184], [1,1,1]]]
     params = photo_params(print_paper='kodak_portra_endura_uc')

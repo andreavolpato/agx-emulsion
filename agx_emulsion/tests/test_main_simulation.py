@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 from agx_emulsion.model.process import photo_params, photo_process
-from agx_emulsion.utils.io import load_image_16bit_32bit
+from agx_emulsion.utils.io import load_image_oiio
 
 def test_main_simulation():
-    image = load_image_16bit_32bit('img/targets/it87_test_chart_2.jpg')
+    image = load_image_oiio('img/targets/it87_test_chart_2.jpg')
     params = photo_params()
     params.negative.grain.sublayers_active = True
     params.settings.use_enlarger_lut = True
