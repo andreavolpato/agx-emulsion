@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.ndimage import gaussian_filter
+from agx_emulsion.utils.fast_gaussian_filter import fast_gaussian_filter
 from opt_einsum import contract
 
 def compute_density_curves_before_dir_couplers(density_curves, log_exposure, dir_couplers_matrix, high_exposure_couplers_shift=0.0):
@@ -67,7 +68,9 @@ def compute_exposure_correction_dir_couplers(log_raw, density_cmy, density_max, 
     norm_density = density_cmy/density_max
     norm_density += high_exposure_couplers_shift*norm_density**2
     log_raw_correction = contract('ijk, km->ijm', norm_density, dir_couplers_matrix)
-    log_raw_correction = gaussian_filter(log_raw_correction, (diffusion_size_pixel, diffusion_size_pixel, 0), truncate=7)
+    if diffusion_size_pixel>0:
+        # log_raw_correction = gaussian_filter(log_raw_correction, (diffusion_size_pixel, diffusion_size_pixel, 0))
+        log_raw_correction = fast_gaussian_filter(log_raw_correction, diffusion_size_pixel)
     log_raw_corrected = log_raw - log_raw_correction
     return log_raw_corrected
 

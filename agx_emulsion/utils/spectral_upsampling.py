@@ -5,7 +5,7 @@ import scipy
 import importlib.resources
 from opt_einsum import contract
 import scipy.interpolate
-from agx_emulsion.utils.interp_lut3d import apply_lut_cubic
+from agx_emulsion.utils.fast_interp_lut3d import apply_lut_cubic
 from agx_emulsion.config import SPECTRAL_SHAPE
 
 ################################################################################

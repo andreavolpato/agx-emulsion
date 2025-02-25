@@ -15,14 +15,10 @@ from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
 from agx_emulsion.model.parametric import parametric_density_curves_model
 from agx_emulsion.profiles.io import load_profile
 from agx_emulsion.profiles.factory import swap_channels
-from agx_emulsion.utils.fast_stats import warmup_fast_stats
-from agx_emulsion.utils.lut3d import warmup_lut3d
-from agx_emulsion.utils.fast_interp import warmup_fast_interp
+from agx_emulsion.utils.numba_warmup import warmup
 
 # precompile numba functions
-warmup_fast_stats()
-warmup_lut3d()
-warmup_fast_interp()
+warmup()
 
 # create a viewer and add a couple image layers
 viewer = napari.Viewer()

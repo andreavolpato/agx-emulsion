@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.ndimage
+from agx_emulsion.utils.fast_gaussian_filter import fast_gaussian_filter
 
 def apply_unsharp_mask(image, sigma=0.0, amount=0.0):
     """
@@ -13,7 +14,8 @@ def apply_unsharp_mask(image, sigma=0.0, amount=0.0):
     Returns:
     ndarray: The processed image after applying the unsharp mask.
     """
-    image_blur = scipy.ndimage.gaussian_filter(image, sigma=(sigma, sigma, 0))
+    # image_blur = scipy.ndimage.gaussian_filter(image, sigma=(sigma, sigma, 0))
+    image_blur = fast_gaussian_filter(image, sigma)
     image_sharp = image + amount * (image - image_blur)
     return image_sharp
 
@@ -52,13 +54,19 @@ def apply_halation_um(raw, halation, pixel_size_um):
 
 def apply_gaussian_blur(data, sigma):
     if sigma > 0:
-        return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
+        # return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
+        data = np.double(data)
+        data = np.ascontiguousarray(data)
+        return fast_gaussian_filter(data, sigma)
     else:
         return data
     
 def apply_gaussian_blur_um(data, sigma_um, pixel_size_um):
     sigma = sigma_um / pixel_size_um
     if sigma > 0:
-        return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
+        # return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
+        data = np.double(data)
+        data = np.ascontiguousarray(data)
+        return fast_gaussian_filter(data, sigma)
     else:
         return data
