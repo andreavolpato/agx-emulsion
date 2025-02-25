@@ -17,10 +17,12 @@ from agx_emulsion.profiles.io import load_profile
 from agx_emulsion.profiles.factory import swap_channels
 from agx_emulsion.utils.fast_stats import warmup_fast_stats
 from agx_emulsion.utils.lut3d import warmup_lut3d
+from agx_emulsion.utils.fast_interp import warmup_fast_interp
 
 # precompile numba functions
 warmup_fast_stats()
 warmup_lut3d()
+warmup_fast_interp()
 
 # create a viewer and add a couple image layers
 viewer = napari.Viewer()

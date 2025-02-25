@@ -386,7 +386,7 @@ if __name__ == '__main__':
     # paper = load_profile('fuji_crystal_archive_typeii_unmix_corrected')
     negatives = [
                  'kodak_portra_400',
-                 'fuji_pro_400h_v2',
+                 'fujifilm_pro_400h',
                  'kodak_vision3_50d'
                  ]
     for neg in negatives:

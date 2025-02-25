@@ -3,6 +3,7 @@ import scipy
 import matplotlib.pyplot as plt
 import scipy.special
 import scipy.stats
+from agx_emulsion.utils.fast_interp import fast_interp
 
 ################################################################################
 # Density curve models
@@ -263,12 +264,16 @@ def interpolate_exposure_to_density(log_exposure_rgb, density_curves, log_exposu
     """
     if np.size(gamma_factor)==1:
         gamma_factor = [gamma_factor, gamma_factor, gamma_factor]
+    gamma_factor = np.array(gamma_factor)
     density_cmy = np.zeros((log_exposure_rgb.shape[0], log_exposure_rgb.shape[1], 3))
-    for channel in np.arange(3):
-        sel = ~np.isnan(density_curves[:,channel])
-        density_cmy[:,:,channel] = np.interp(log_exposure_rgb[:,:,channel],
-                                             log_exposure[sel]/gamma_factor[channel],
-                                             density_curves[sel,channel])
+    # for channel in np.arange(3):
+    #     sel = ~np.isnan(density_curves[:,channel])
+    #     density_cmy[:,:,channel] = np.interp(log_exposure_rgb[:,:,channel],
+    #                                          log_exposure[sel]/gamma_factor[channel],
+    #                                          density_curves[sel,channel])
+    density_cmy = fast_interp(log_exposure_rgb,
+                              log_exposure[:,None]/gamma_factor[None,:],
+                              density_curves)
     return density_cmy
     
 # This method was used for multilayer grain, but it is not used anymore

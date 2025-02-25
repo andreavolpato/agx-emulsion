@@ -46,6 +46,18 @@ def layer_particle_model(density,
         grain = scipy.ndimage.gaussian_filter(grain, blur_particle*np.sqrt(od_particle))
     return grain
 
+def add_micro_structure(density_cmy_out, micro_structure, pixel_size_um):
+    grain_micro_structure_blur_pixel = micro_structure[0]/pixel_size_um
+    grain_micro_structure_sigma = micro_structure[1]*0.001/pixel_size_um  # grain microstructure[1] is in nm
+    if grain_micro_structure_sigma > 0.05:
+        clumping = fast_lognormal_from_mean_std(np.ones_like(density_cmy_out),
+                                                np.ones_like(density_cmy_out)*grain_micro_structure_sigma)
+        if grain_micro_structure_blur_pixel>0.4:
+            clumping = scipy.ndimage.gaussian_filter(clumping, (grain_micro_structure_blur_pixel,
+                                                                grain_micro_structure_blur_pixel, 0))
+        density_cmy_out *= clumping
+    return density_cmy_out
+
 def apply_grain_to_density(density_cmy,
                            pixel_size_um=10,
                            agx_particle_area_um2=0.2,
@@ -135,15 +147,7 @@ def apply_grain_to_density_layers(density_cmy_layers, # x,y,sublayers,rgb
                                                             use_fast_stats=use_fast_stats)
     
     # micro-structure
-    grain_micro_structure_blur_pixel = grain_micro_structure[0]/pixel_size_um
-    grain_micro_structure_sigma = grain_micro_structure[1]*0.001/pixel_size_um  # grain microstructure[1] is in nm
-    if grain_micro_structure_sigma > 0.05:
-        clumping = fast_lognormal_from_mean_std(np.ones_like(density_cmy_out),
-                                                np.ones_like(density_cmy_out)*grain_micro_structure_sigma)
-        if grain_micro_structure_blur_pixel>0.4:
-            clumping = scipy.ndimage.gaussian_filter(clumping, (grain_micro_structure_blur_pixel,
-                                                                grain_micro_structure_blur_pixel, 0))
-        density_cmy_out *= clumping
+    density_cmy_out = add_micro_structure(density_cmy_out, grain_micro_structure, pixel_size_um)
 
     # final
     density_cmy_out -= density_min

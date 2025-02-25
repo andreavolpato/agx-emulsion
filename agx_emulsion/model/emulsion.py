@@ -12,6 +12,7 @@ from agx_emulsion.model.couplers import compute_exposure_correction_dir_couplers
 from agx_emulsion.model.grain import apply_grain_to_density, apply_grain_to_density_layers
 # from agx_emulsion.model.parametric import parametric_density_curves_model
 from agx_emulsion.utils.fast_stats import fast_lognormal_from_mean_std
+from agx_emulsion.utils.fast_interp import fast_interp
 
 ################################################################################
 # AgXEmusion main class
@@ -283,10 +284,13 @@ class Film(AgXEmulsion):
 
 def interp_density_cmy_layers(density_cmy, density_curves, density_curves_layers):
     density_cmy_layers = np.zeros((density_cmy.shape[0], density_cmy.shape[1], 3, 3)) # x,y,layer,rgb
+    # for ch in np.arange(3):
+    #     for lr in np.arange(3):
+    #         density_cmy_layers[:,:,lr,ch] = np.interp(density_cmy[:,:,ch],
+    #                                                   density_curves[:,ch], density_curves_layers[:,lr,ch])
     for ch in np.arange(3):
-        for lr in np.arange(3):
-            density_cmy_layers[:,:,lr,ch] = np.interp(density_cmy[:,:,ch],
-                                                      density_curves[:,ch], density_curves_layers[:,lr,ch])
+            density_cmy_layers[:,:,:,ch] = fast_interp(np.repeat(density_cmy[:,:,ch,np.newaxis], 3, -1),
+                                                     density_curves[:,ch], density_curves_layers[:,:,ch])
     return density_cmy_layers
     
 ################################################################################

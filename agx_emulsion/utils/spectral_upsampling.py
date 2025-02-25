@@ -152,6 +152,8 @@ def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
                     apply_cctf_encoding=False)
     lrgb = np.clip(lrgb, 0, None)
     raw  = contract('ijk,lk,lm->ijm', lrgb, basis_set_with_illuminant, sensitivity)
+    raw = np.nan_to_num(raw)
+    raw = np.ascontiguousarray(raw)
     
     raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
     return raw / raw_midgray[1] # normalize with green channel
