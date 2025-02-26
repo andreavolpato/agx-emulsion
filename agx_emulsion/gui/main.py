@@ -40,9 +40,9 @@ settings.appearance.theme = 'light'
 # viewer.add_image(cc_it87,
 #                  name="it87_test_chart",
 #                  contrast_limits=[0,1])
-# portrait = load_image_oiio('img/test/portrait_leaves_linear_rec2020.png')
-# viewer.add_image(portrait,
-#                  name="portrait")
+portrait = load_image_oiio('img/test/portrait_leaves_linear_rec2020.png')
+viewer.add_image(portrait,
+                 name="portrait")
 
 class RGBColorSpaces(Enum):
     sRGB = 'sRGB'

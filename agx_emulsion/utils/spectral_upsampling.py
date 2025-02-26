@@ -5,8 +5,9 @@ import scipy
 import importlib.resources
 from opt_einsum import contract
 import scipy.interpolate
-from agx_emulsion.utils.fast_interp_lut3d import apply_lut_cubic
+from agx_emulsion.utils.fast_interp_lut import apply_lut_cubic_2d
 from agx_emulsion.config import SPECTRAL_SHAPE
+from agx_emulsion.model.illuminants import standard_illuminant
 
 ################################################################################
 # LUT generatation of irradiance spectra for any xy chromaticity
@@ -37,41 +38,50 @@ def load_coeffs_lut(filename='hanatos_irradiance_xy_coeffs_250221.lut'):
 def tri2quad(tc):
     # converts triangular coordinates into square coordinates.
     # for better sampling of the visible locus of xy chromaticities.
+    # the lut is represented in triangular coordinates
     tc = np.array(tc)
-    x = tc[...,0]
-    y = tc[...,1]
-    y = y / (1.0 - x)
-    x = (1.0 - x)*(1.0 - x)
+    tx = tc[...,0]
+    ty = tc[...,1]
+    y = ty / (1.0 - tx)
+    x = (1.0 - tx)*(1.0 - tx)
     x = np.clip(x, 0, 1)
     y = np.clip(y, 0, 1)
     return np.stack((x,y), axis=-1)
 
-def fetch_coeffs(rgb, lut_coeffs, color_space='ITU-R BT.2020', apply_cctf_decoding=False):
+def quad2tri(xy):
+    # converts square coordinates into triangular coordinates
+    x = xy[...,0]
+    y = xy[...,1]
+    tx = 1 - np.sqrt(x)
+    ty = y * np.sqrt(x)
+    return np.stack((tx,ty), axis=-1)
+
+def fetch_coeffs(tc, lut_coeffs):
     # find the coefficients for spectral upsampling of given rgb coordinates
-    if color_space!='ITU-R BT.2020' or apply_cctf_decoding:
-        rgb = colour.RGB_to_RGB(rgb, input_colourspace=color_space, apply_cctf_decoding=apply_cctf_decoding,
-                                        output_colourspace='ITU-R BT.2020', apply_cctf_encoding=False)
-        rgb = np.clip(rgb,0,1)
-    xyz = colour.RGB_to_XYZ(rgb, colourspace='ITU-R BT.2020', apply_cctf_decoding=False)
-    b = np.sum(xyz, axis=-1)
-    xy = xyz[...,0:2] / b[...,None]
-    tc = tri2quad(xy)
-    coeffs = np.zeros(np.concatenate((b.shape,[4])))
-    h = 1/(np.array(lut_coeffs.shape[:2])-1)
+    # if color_space!='ITU-R BT.2020' or apply_cctf_decoding:
+    #     rgb = colour.RGB_to_RGB(rgb, input_colourspace=color_space, apply_cctf_decoding=apply_cctf_decoding,
+    #                                     output_colourspace='ITU-R BT.2020', apply_cctf_encoding=False)
+    #     rgb = np.clip(rgb,0,1)
+    # xyz = colour.RGB_to_XYZ(rgb, colourspace='ITU-R BT.2020', apply_cctf_decoding=False)
+    # b = np.sum(xyz, axis=-1)
+    # xy = xyz[...,0:2] / b[...,None]
+    # tc = tri2quad(xy)
+    coeffs = np.zeros(np.concatenate((tc.shape[:-1],[4])))
+    # h = 1/(np.array(lut_coeffs.shape[:2])-1)
     x = np.linspace(0,1,lut_coeffs.shape[0])
     for i in np.arange(4):
         coeffs[...,i] = scipy.interpolate.RegularGridInterpolator((x,x), lut_coeffs[:,:,i], method='cubic')(tc)
-    return coeffs[...,:3], b/coeffs[...,3]
+    return coeffs
 
-def compute_spectra_from_coeffs(coeffs, b, smooth_steps=1):
+def compute_spectra_from_coeffs(coeffs, smooth_steps=1):
     wl = SPECTRAL_SHAPE.wavelengths
-    wl_up = np.linspace(360,800,881) # upsampled wl for finer initial calculation 0.5 nm
+    wl_up = np.linspace(360,800,441) # upsampled wl for finer initial calculation 0.5 nm
     x = (coeffs[...,0,None] * wl_up + coeffs[...,1,None])*  wl_up  + coeffs[...,2,None]
     y = 1.0 / np.sqrt(x * x + 1.0)
     spectra = 0.5 * x * y +  0.5
-    spectra *= b[...,None]
+    spectra /= coeffs[...,3][...,None]
     
-    # smooth of half step sigma and downsample
+    # gaussian smooth with smooth_step*sigmas and downsample
     step = np.mean(np.diff(wl))
     spectra = scipy.ndimage.gaussian_filter(spectra, step*smooth_steps, axes=-1)
     def interp_slice(a, wl, wl_up):
@@ -79,19 +89,33 @@ def compute_spectra_from_coeffs(coeffs, b, smooth_steps=1):
     spectra = np.apply_along_axis(interp_slice, axis=-1, wl=wl, wl_up=wl_up, arr=spectra)
     return spectra
 
-def compute_lut(lut_size=32, color_space='ITU-R BT.2020', smooth_steps=0.5):
+def compute_lut_spectra(lut_size=128, smooth_steps=1):
+    v = np.linspace(0,1,lut_size)
+    tx,ty = np.meshgrid(v,v, indexing='ij')
+    tc = np.stack((tx,ty), axis=-1)
     lut_coeffs = load_coeffs_lut()
-    x = np.linspace(0,1,lut_size)
-    r,g,b = np.meshgrid(x,x,x)
-    rgb_lut = np.stack((g,r,b), axis=-1)
-    rgb_lut[0,0,0] = [1,1,1]
-
-    coeffs, b = fetch_coeffs(rgb_lut, lut_coeffs, color_space=color_space, apply_cctf_decoding=False)
-    coeffs[0,0,0] = [0,0,0]
-    b[0,0,0] = 0
-    lut_spectra = compute_spectra_from_coeffs(coeffs, b, smooth_steps=smooth_steps)
+    coeffs = fetch_coeffs(tc, lut_coeffs)
+    lut_spectra = compute_spectra_from_coeffs(coeffs, smooth_steps=smooth_steps)
     lut_spectra = np.array(lut_spectra, dtype=np.half)
     return lut_spectra
+
+def rgb_to_tc_b(rgb, color_space='ITU-R BT.2020', apply_cctf_decoding=False, reference_illuminant='D55'):
+    # source_cs = colour.RGB_COLOURSPACES[color_space]
+    # target_cs = source_cs.copy()
+    # target_cs.whitepoint = ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D65']
+    # adapted_rgb = colour.RGB_to_RGB(rgb, input_colourspace=source_cs,
+    #                                 output_colourspace=target_cs,
+    #                                 adaptation_transform='Bradford')    
+    illu_xy = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer'][reference_illuminant]
+    xyz = colour.RGB_to_XYZ(rgb, colourspace=color_space,
+                            apply_cctf_decoding=apply_cctf_decoding,
+                            illuminant=illu_xy,
+                            chromatic_adaptation_transform='CAT02')
+    b = np.sum(xyz, axis=-1)
+    xy = xyz[...,0:2] / b[...,None]
+    xy = np.clip(xy,0,1)
+    tc = tri2quad(xy)
+    return tc, b
 
 ################################################################################
 # Band pass filter
@@ -120,9 +144,9 @@ def compute_band_pass_filter(filter_uv=[1, 410, 8], filter_ir=[1, 675, 15]):
 # From [Mallett2019]
 
 MALLETT2019_BASIS = colour.recovery.MSDS_BASIS_FUNCTIONS_sRGB_MALLETT2019.copy().align(SPECTRAL_SHAPE)
-def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
+def rgb_to_raw_mallett2019(RGB, sensitivity,
                            color_space='sRGB', apply_cctf_decoding=True,
-                           band_pass_filter=None):
+                           reference_illuminant='D65'):
     """
     Converts an RGB color to a raw sensor response using the method described in Mallett et al. (2019).
 
@@ -144,8 +168,7 @@ def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
     raw : ndarray
         Raw sensor response.
     """
-    if band_pass_filter is not None:
-        sensitivity *= band_pass_filter[:,None]
+    illuminant = standard_illuminant(reference_illuminant)[:]
     basis_set_with_illuminant = np.array(MALLETT2019_BASIS[:])*np.array(illuminant)[:, None]
     lrgb = colour.RGB_to_RGB(RGB, color_space, 'sRGB',
                     apply_cctf_decoding=apply_cctf_decoding,
@@ -162,44 +185,39 @@ def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity,
 # Using hanatos irradiance spectra generation
 
 def rgb_to_raw_hanatos2025(rgb, sensitivity,
-                           color_space, apply_cctf_decoding,
-                           lut_color_space='ITU-R BT.2020',
-                           band_pass_filter=None):
-    if band_pass_filter is not None:
-        sensitivity *= band_pass_filter[:,None]
-    # get spectra lut, approx 2 milliseconds
-    # if lut_color_space=='ACES2065-1':
-    #     data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_aces2065-1_32size.npy')
-    # if lut_color_space=='ProPhoto RGB':
-    #     data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_prophoto_rgb_32size.npy')
-    # else:
-    data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_rec2020_32size.npy')
+                           color_space, apply_cctf_decoding, reference_illuminant):
+    data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_xy_tc_128size.npy')
     with data_path.open('rb') as file:
         spectra_lut = np.double(np.load(file))
-    raw_lut  = contract('ijkl,lm->ijkm', spectra_lut, sensitivity)
-    h = 1/(spectra_lut.shape[0]-1) # lut_step
+    tc_lut  = contract('ijl,lm->ijm', spectra_lut, sensitivity)
 
     # spectra lut is in linear rec2020
-    rgb = colour.RGB_to_RGB(rgb, 
-                            input_colourspace=color_space, 
-                            output_colourspace=lut_color_space,
-                            apply_cctf_decoding=apply_cctf_decoding,
-                            apply_cctf_encoding=False)
-    rgb = np.clip(rgb, 0, None) # clip negatives, eg when ACES2065-1 >> rec2020
-    rgb_scale = np.max(rgb, axis=-1) # scale rgb by the max to be able to be interp with the lut
-    rgb /= rgb_scale[...,None]
-    rgb = np.nan_to_num(rgb) # temporary for safety, fix divide by zero
-    raw = np.zeros_like(rgb)
-    raw = apply_lut_cubic(raw_lut, rgb)
-    raw *= rgb_scale[...,None] # scale the raw back with the scale factor
+    tc_raw, b = rgb_to_tc_b(rgb, color_space=color_space, apply_cctf_decoding=apply_cctf_decoding, 
+                            reference_illuminant=reference_illuminant)
+    raw = apply_lut_cubic_2d(tc_lut, tc_raw)
+    raw *= b[...,None] # scale the raw back with the scale factor
     # raw = np.nan_to_num(raw) # make sure nans are removed
     
-    illuminant = spectra_lut[-1,-1,-1]
+    illuminant = compute_midgray_illuminant(spectra_lut, color_space=color_space, reference_illuminant=reference_illuminant)
     raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
     return raw / raw_midgray[1] # normalize with green channel
 
+def compute_midgray_illuminant(spectra_lut, color_space, reference_illuminant, midgray_value=0.184):
+    midgray_rgb = np.array([[[midgray_value]*3]])
+    tc_w, b_w = rgb_to_tc_b(midgray_rgb,
+                            color_space=color_space,
+                            apply_cctf_decoding=False,
+                            reference_illuminant=reference_illuminant)
+    # spectrum_w = apply_lut_cubic_2d(spectra_lut, tc_w)
+    v = np.linspace(0,1,spectra_lut.shape[0])
+    spectrum_w = scipy.interpolate.RegularGridInterpolator((v,v), spectra_lut)(tc_w)
+    spectrum_w *= b_w
+    return spectrum_w.flatten()
+    
+
 if __name__=='__main__':
     lut_coeffs = load_coeffs_lut()
-    coeffs, b = fetch_coeffs(np.array([[1,1,1]]) ,lut_coeffs)
-    spectra = compute_spectra_from_coeffs(coeffs, b)
-    lut_spectra = compute_lut(lut_size=32, color_space='ITU-R BT.2020')
+    coeffs = fetch_coeffs(np.array([[1,1]]) ,lut_coeffs)
+    spectra = compute_spectra_from_coeffs(coeffs)
+    lut_spectra = compute_lut_spectra(lut_size=128)
+    illu_w = compute_midgray_illuminant(lut_spectra)

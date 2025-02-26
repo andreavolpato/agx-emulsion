@@ -9,7 +9,7 @@ from agx_emulsion.model.emulsion import Film, compute_density_spectral, develop_
 from agx_emulsion.utils.autoexposure import measure_autoexposure_ev
 from agx_emulsion.utils.conversions import density_to_light
 from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_to_raw_hanatos2025, compute_band_pass_filter
-from agx_emulsion.utils.lut3d import compute_with_lut
+from agx_emulsion.utils.lut import compute_with_lut
 from agx_emulsion.model.diffusion import apply_gaussian_blur_um, apply_halation_um, apply_unsharp_mask, apply_gaussian_blur
 from agx_emulsion.model.color_filters import color_enlarger
 from agx_emulsion.utils.crop_resize import crop_image, resize_image
@@ -243,38 +243,26 @@ class AgXPhoto():
         sensitivity = 10**self.negative.data.log_sensitivity
         sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
         
-        band_pass_filter = compute_band_pass_filter(self.camera.filter_uv,
-                                                    self.camera.filter_ir)
+        # applu band pass filter
+        if self.camera.filter_uv[0]>0 or self.camera.filter_ir[0]>0:
+            band_pass_filter = compute_band_pass_filter(self.camera.filter_uv,
+                                                        self.camera.filter_ir)
+            sensitivity *= band_pass_filter[:,None]
+
         method = self.settings.rgb_to_raw_method
         raw = np.zeros_like(rgb)
         if method=='mallett2019':
-            illuminant = standard_illuminant('D65')
             raw = rgb_to_raw_mallett2019(rgb,
-                                         illuminant,
                                          sensitivity,
                                          color_space=color_space,
                                          apply_cctf_decoding=apply_cctf_decoding,
-                                         band_pass_filter=band_pass_filter)
+                                         reference_illuminant=self.negative.info.reference_illuminant)
         if method=='hanatos2025':
             raw = rgb_to_raw_hanatos2025(rgb,
                                          sensitivity,
                                          color_space=color_space,
                                          apply_cctf_decoding=apply_cctf_decoding,
-                                         band_pass_filter=band_pass_filter)
-        # if method=='hanatos2025_aces':
-        #     raw = rgb_to_raw_hanatos2025(rgb,
-        #                                  sensitivity,
-        #                                  color_space=color_space,
-        #                                  apply_cctf_decoding=apply_cctf_decoding,
-        #                                  lut_color_space='ACES2065-1',
-        #                                  band_pass_filter=band_pass_filter)
-        # if method=='hanatos2025_prophoto':
-        #     raw = rgb_to_raw_hanatos2025(rgb,
-        #                                  sensitivity,
-        #                                  color_space=color_space,
-        #                                  apply_cctf_decoding=apply_cctf_decoding,
-        #                                  lut_color_space='ProPhoto RGB',
-        #                                  band_pass_filter=band_pass_filter)
+                                         reference_illuminant=self.negative.info.reference_illuminant)
         
         # set exposure level
         raw *= 2**exposure_ev
@@ -455,7 +443,7 @@ if __name__ == '__main__':
     params.camera.exposure_compensation_ev = 0
     params.camera.auto_exposure = True
     params.io.preview_resize_factor = 1
-    params.io.upscale_factor = 3
+    params.io.upscale_factor = 1
     params.io.compute_negative = False
     params.negative.grain.agx_particle_area_um2 = 1
     params.enlarger.preflash_exposure = 0.0
