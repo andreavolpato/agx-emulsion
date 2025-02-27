@@ -186,7 +186,7 @@ def rgb_to_raw_mallett2019(RGB, sensitivity,
 
 def rgb_to_raw_hanatos2025(rgb, sensitivity,
                            color_space, apply_cctf_decoding, reference_illuminant):
-    data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_xy_tc_128size.npy')
+    data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_xy_tc.npy')
     with data_path.open('rb') as file:
         spectra_lut = np.double(np.load(file))
     tc_lut  = contract('ijl,lm->ijm', spectra_lut, sensitivity)

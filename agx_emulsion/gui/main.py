@@ -28,21 +28,9 @@ layer_list = viewer.window.qt_viewer.dockLayerList
 settings = get_settings()
 settings.appearance.theme = 'light'
 
-# cc_halation = np.double(iio.imread('img/targets/cc_halation.png')[:,:,0:3])/(2**8-1)
-# viewer.add_image(cc_halation,
-#                  name="halation_test",
-#                  contrast_limits=[0,1])
-# cc11 = np.double(tiff.imread('img/targets/cc11.tiff')[:,:,0:3])/(2**16-1)
-# viewer.add_image(cc11,
-#                  name="color_test",
-#                  contrast_limits=[0,1])
-# cc_it87 = np.double(iio.imread('img/targets/it87_test_chart_2.jpg')[:,:,0:3])/(2**8-1)
-# viewer.add_image(cc_it87,
-#                  name="it87_test_chart",
-#                  contrast_limits=[0,1])
-portrait = load_image_oiio('img/test/portrait_leaves_linear_rec2020.png')
-viewer.add_image(portrait,
-                 name="portrait")
+# portrait = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
+# viewer.add_image(portrait,
+#                  name="portrait")
 
 class RGBColorSpaces(Enum):
     sRGB = 'sRGB'
@@ -54,10 +42,8 @@ class RGBColorSpaces(Enum):
     ACES2065_1 = 'ACES2065-1'
 
 class RGBtoRAWMethod(Enum):
-    mallett2019 = 'mallett2019'
     hanatos2025 = 'hanatos2025'
-    # hanatos2025_aces = 'hanatos2025_aces'
-    # hanatos2025_prophoto = 'hanatos2025_prophoto'
+    mallett2019 = 'mallett2019'
 
 @magicgui(layout="vertical", call_button='None')
 def grain(active=True,
@@ -79,7 +65,7 @@ def input_image(preview_resize_factor=0.3,
                 crop=False,
                 crop_center=(0.50,0.50),
                 crop_size=(0.1,0.1),
-                input_color_space=RGBColorSpaces.ITU_R_BT2020,
+                input_color_space=RGBColorSpaces.ProPhotoRGB,
                 apply_cctf_decoding=False,
                 spectral_upsampling_method=RGBtoRAWMethod.hanatos2025,
                 filter_uv=(1,410,8),
@@ -121,39 +107,39 @@ def glare(active=True,
           compensation_removal_transition=0.3):
     return
 
-@magicgui(layout="vertical", call_button='plot curves')
-def curves(use_parametric_curves=False,
-           gamma=(0.7,0.7,0.7),
-           log_exposure_0=(-1.4,-1.4,-1.52),
-           density_max=(2.75,2.75,2.84),
-           toe_size=(0.3,0.3,0.3),
-           shoulder_size=(0.85,0.85,0.85),):
-    profile = load_profile(simulation.film_stock.value.value)
-    print(simulation.film_stock.value.value)
-    log_exposure = profile.data.log_exposure
-    density_curves = parametric_density_curves_model(log_exposure,
-                                gamma,
-                                log_exposure_0,
-                                density_max,
-                                toe_size,
-                                shoulder_size)
-    plt.figure()
-    colors = ['tab:red', 'tab:green', 'tab:blue']
-    labels = ['R', 'G', 'B']
-    gamma_factor = simulation.film_gamma_factor.value
-    for i in range(3):
-        plt.plot(log_exposure, density_curves[:,i], color=colors[i], label=labels[i])
-        plt.plot(log_exposure/gamma_factor[i], profile.data.density_curves, color=colors[i], linestyle='--', label=None)
-    plt.xlabel('log(Exposure)')
-    plt.ylabel('Density')
-    plt.legend()
-    plt.title(profile.info.stock)
-    plt.show()
-    return
+# @magicgui(layout="vertical", call_button='plot curves')
+# def curves(use_parametric_curves=False,
+#            gamma=(0.7,0.7,0.7),
+#            log_exposure_0=(-1.4,-1.4,-1.52),
+#            density_max=(2.75,2.75,2.84),
+#            toe_size=(0.3,0.3,0.3),
+#            shoulder_size=(0.85,0.85,0.85),):
+#     profile = load_profile(simulation.film_stock.value.value)
+#     print(simulation.film_stock.value.value)
+#     log_exposure = profile.data.log_exposure
+#     density_curves = parametric_density_curves_model(log_exposure,
+#                                 gamma,
+#                                 log_exposure_0,
+#                                 density_max,
+#                                 toe_size,
+#                                 shoulder_size)
+#     plt.figure()
+#     colors = ['tab:red', 'tab:green', 'tab:blue']
+#     labels = ['R', 'G', 'B']
+#     gamma_factor = simulation.film_gamma_factor.value
+#     for i in range(3):
+#         plt.plot(log_exposure, density_curves[:,i], color=colors[i], label=labels[i])
+#         plt.plot(log_exposure/gamma_factor[i], profile.data.density_curves, color=colors[i], linestyle='--', label=None)
+#     plt.xlabel('log(Exposure)')
+#     plt.ylabel('Density')
+#     plt.legend()
+#     plt.title(profile.info.stock)
+#     plt.show()
+#     return
 
-@magicgui(layout="vertical", call_button='fit negative density curves')
-def fit_density_curves():
-    return
+# @magicgui(layout="vertical", call_button='fit negative density curves')
+# def fit_density_curves():
+#     return
 
 
 @magicgui(filename={"mode": "r"}, call_button='load image (e.g. png/exr)')
@@ -265,13 +251,13 @@ def simulation(input_layer:Image,
     params.negative.dir_couplers.diffusion_interlayer = couplers.diffusion_interlayer.value
     params.negative.dir_couplers.high_exposure_shift = couplers.high_exposure_shift.value
         
-    # parametric curves
-    params.negative.parametric.density_curves.active = curves.use_parametric_curves.value
-    params.negative.parametric.density_curves.gamma = curves.gamma.value
-    params.negative.parametric.density_curves.log_exposure_0 = curves.log_exposure_0.value
-    params.negative.parametric.density_curves.density_max = curves.density_max.value
-    params.negative.parametric.density_curves.toe_size = curves.toe_size.value
-    params.negative.parametric.density_curves.shoulder_size = curves.shoulder_size.value
+    # # parametric curves
+    # params.negative.parametric.density_curves.active = curves.use_parametric_curves.value
+    # params.negative.parametric.density_curves.gamma = curves.gamma.value
+    # params.negative.parametric.density_curves.log_exposure_0 = curves.log_exposure_0.value
+    # params.negative.parametric.density_curves.density_max = curves.density_max.value
+    # params.negative.parametric.density_curves.toe_size = curves.toe_size.value
+    # params.negative.parametric.density_curves.shoulder_size = curves.shoulder_size.value
 
     # params.enlarger.illuminant = print_illuminant.value
     params.enlarger.print_exposure = print_exposure
@@ -387,6 +373,10 @@ input_image.crop_center.tooltip = 'Center of the crop region in relative coordin
 input_image.crop_size.tooltip = 'Normalized size of the crop region in x, y (0,1), as fraction of the long side.'
 input_image.input_color_space.tooltip = 'Color space of the input image, will be internally converted to sRGB and negative values clipped'
 input_image.apply_cctf_decoding.tooltip = 'Apply the inverse cctf transfer function of the color space'
+input_image.upscale_factor.tooltip = 'Scale image size up to increase resolution'
+input_image.spectral_upsampling_method.tooltip = 'Method to upsample the spectral resolution of the image, hanatos2025 works on the full visible locus, mallett2019 works only on sRGB (will clip input).'
+input_image.filter_uv.tooltip = 'Filter UV light, (amplitude, wavelength cutoff in nm, sigma in nm). It mainly helps for avoiding UV light ruining the reds. Changing this enlarger filters neutral will be affected.'
+input_image.filter_ir.tooltip = 'Filter IR light, (amplitude, wavelength cutoff in nm, sigma in nm). Changing this enlarger filters neutral will be affected.'
 
 # tab1 = Container(layout='vertical', widgets=[grain, preflashing])
 viewer.window.add_dock_widget(input_image, area="right", name='input', tabify=True)
@@ -402,4 +392,4 @@ viewer.window.add_dock_widget(filepicker, area="right", name='filepicker', tabif
 viewer.window.add_dock_widget(simulation, area="right", name='main', tabify=False)
 napari.run()
 
-# TODO: use magicclass to create collapsable widgets as in https://forum.image.sc/t/widgets-alignment-in-the-plugin-when-nested-magic-class-and-magicgui-are-used/62929
+# TODO: use magicclass to create collapsable widgets as in https://forum.image.sc/t/widgets-alignment-in-the-plugin-when-nested-magic-class-and-magicgui-are-used/62929 
