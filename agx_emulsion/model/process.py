@@ -61,7 +61,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.scanner.lens_blur = 0.55
     params.scanner.unsharp_mask = (0.7,1.0)
 
-    params.io.input_color_space = 'ITU-R BT.2020'
+    params.io.input_color_space = 'ProPhoto RGB'
     params.io.input_cctf_decoding = False
     params.io.output_color_space = 'sRGB'
     params.io.output_cctf_encoding = True

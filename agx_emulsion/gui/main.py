@@ -28,9 +28,9 @@ layer_list = viewer.window.qt_viewer.dockLayerList
 settings = get_settings()
 settings.appearance.theme = 'light'
 
-# portrait = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
-# viewer.add_image(portrait,
-#                  name="portrait")
+portrait = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
+viewer.add_image(portrait,
+                 name="portrait")
 
 class RGBColorSpaces(Enum):
     sRGB = 'sRGB'
@@ -246,7 +246,8 @@ def simulation(input_layer:Image,
     params.negative.grain.micro_structure = grain.micro_structure.value
     
     params.negative.dir_couplers.active = couplers.active.value
-    params.negative.dir_couplers.amount_rgb = couplers.dir_couplers_amount.value * np.array(couplers.dir_couplers_ratio.value)
+    params.negative.dir_couplers.amount = couplers.dir_couplers_amount.value 
+    params.negative.dir_couplers.ratio_rgb = couplers.dir_couplers_ratio.value
     params.negative.dir_couplers.diffusion_size_um = couplers.dir_couplers_diffusion_um.value
     params.negative.dir_couplers.diffusion_interlayer = couplers.diffusion_interlayer.value
     params.negative.dir_couplers.high_exposure_shift = couplers.high_exposure_shift.value

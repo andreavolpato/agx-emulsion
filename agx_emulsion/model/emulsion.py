@@ -235,7 +235,8 @@ class Film(AgXEmulsion):
     def _apply_density_correction_dir_couplers(self, density_cmy, log_raw, pixel_size_um):
         if self.dir_couplers.active:
             # compute inhibitors matrix with super a simplified diffusion model
-            M = compute_dir_couplers_matrix(self.dir_couplers.amount_rgb, self.dir_couplers.diffusion_interlayer)
+            dir_couplers_amount_rgb = self.dir_couplers.amount * np.array(self.dir_couplers.ratio_rgb)
+            M = compute_dir_couplers_matrix(dir_couplers_amount_rgb, self.dir_couplers.diffusion_interlayer)
             # compute density curves before dir couplers
             density_curves_0 = compute_density_curves_before_dir_couplers(self.density_curves, self.log_exposure, M, self.dir_couplers.high_exposure_shift)
             # compute exposure correction

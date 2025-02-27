@@ -231,16 +231,16 @@ def create_profile(stock='kodak_portra_400',
     profile.data.dye_density = d
     profile.data.tune.gamma_factor = 1.0
     profile.data.tune.dye_density_min_factor = 1.0
-    profile.data.tune.gamma_correction = [1.0,1.0,1.0] # affects colors when comparing different exposures
-    profile.data.tune.log_exposure_correction = [0.0,0.0,0.0] # affects color of underexposed areas
+    # profile.data.tune.gamma_correction = [1.0,1.0,1.0] # affects colors when comparing different exposures
+    # profile.data.tune.log_exposure_correction = [0.0,0.0,0.0] # affects color of underexposed areas
     profile.data.density_curves_layers = np.array((0,3,3))
     
-    profile.parametric.density_curves.active = False
-    profile.parametric.density_curves.gamma = [0.7,0.7,0.7]
-    profile.parametric.density_curves.log_exposure_0 = [-1.4,-1.4,-1.52]
-    profile.parametric.density_curves.density_max = [2.75,2.75,2.84]
-    profile.parametric.density_curves.toe_size = [0.3,0.3,0.3]
-    profile.parametric.density_curves.shoulder_size = [0.85,0.85,0.85]
+    # profile.parametric.density_curves.active = False
+    # profile.parametric.density_curves.gamma = [0.7,0.7,0.7]
+    # profile.parametric.density_curves.log_exposure_0 = [-1.4,-1.4,-1.52]
+    # profile.parametric.density_curves.density_max = [2.75,2.75,2.84]
+    # profile.parametric.density_curves.toe_size = [0.3,0.3,0.3]
+    # profile.parametric.density_curves.shoulder_size = [0.85,0.85,0.85]
     
     profile.glare.active = False
     profile.glare.percent = 0.0
@@ -268,7 +268,8 @@ def create_profile(stock='kodak_portra_400',
         profile.halation.scattering_size_um = [30,20,15]
 
         profile.dir_couplers.active = True
-        profile.dir_couplers.amount_rgb = [1.0,1.0,1.0]
+        profile.dir_couplers.amount = 1.0
+        profile.dir_couplers.ratio_rgb = (1.0,1.0,1.0)
         profile.dir_couplers.diffusion_interlayer = 2.0
         profile.dir_couplers.diffusion_size_um = 10.0
         profile.dir_couplers.high_exposure_shift = 0.0 # increase saturation and contrast with overexposure
@@ -465,17 +466,17 @@ def replace_fitted_density_curves(profile, control_plot=False):
         plt.ylabel('Density (over B+F)')
     return profile
 
-def apply_gamma_shift_correction(profile):
-    p = copy.copy(profile)
-    dc = p.data.density_curves
-    le = p.data.log_exposure
-    gc = p.data.tune.gamma_correction
-    les = p.data.tune.log_exposure_correction
-    dc_out = np.zeros_like(dc)
-    for i in np.arange(3):
-        dc_out[:,i] = np.interp(le, le/gc[i] + les[i], dc[:,i])
-    p.data.density_curves = dc_out
-    return p
+# def apply_gamma_shift_correction(profile):
+#     p = copy.copy(profile)
+#     dc = p.data.density_curves
+#     le = p.data.log_exposure
+#     gc = p.data.tune.gamma_correction
+#     les = p.data.tune.log_exposure_correction
+#     dc_out = np.zeros_like(dc)
+#     for i in np.arange(3):
+#         dc_out[:,i] = np.interp(le, le/gc[i] + les[i], dc[:,i])
+#     p.data.density_curves = dc_out
+#     return p
 
 
 ################################################################################
