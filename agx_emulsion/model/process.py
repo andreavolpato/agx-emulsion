@@ -3,6 +3,7 @@ import copy
 import colour
 from dotmap import DotMap
 from opt_einsum import contract
+import skimage.transform
 
 from agx_emulsion.config import ENLARGER_STEPS, STANDARD_OBSERVER_CMFS
 from agx_emulsion.model.emulsion import Film, compute_density_spectral, develop_simple, compute_random_glare_amount
@@ -12,7 +13,7 @@ from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_t
 from agx_emulsion.utils.lut import compute_with_lut
 from agx_emulsion.model.diffusion import apply_gaussian_blur_um, apply_halation_um, apply_unsharp_mask, apply_gaussian_blur
 from agx_emulsion.model.color_filters import color_enlarger
-from agx_emulsion.utils.crop_resize import crop_image, resize_image
+from agx_emulsion.utils.crop_resize import crop_image
 from agx_emulsion.model.illuminants import standard_illuminant
 from agx_emulsion.utils.io import read_neutral_ymc_filter_values
 from agx_emulsion.profiles.io import load_profile
@@ -129,6 +130,10 @@ class AgXPhoto():
         exposure_ev = self._auto_exposure(image)
         image, preview_resize_factor, pixel_size_um = self._crop_and_rescale(image)
         
+        if not self.io.full_image:
+            self.negative.grain.active = False
+            self.negative.halation.active = False
+        
         # film exposure in camera and chemical development
         raw = self._expose_film(image, exposure_ev, pixel_size_um)
         if self.io.compute_film_raw: return raw
@@ -175,7 +180,7 @@ class AgXPhoto():
         if self.io.full_image:
             preview_resize_factor = 1.0
         if preview_resize_factor*upscale_factor != 1.0:
-            image  = resize_image(image, preview_resize_factor*upscale_factor)
+            image  = skimage.transform.rescale(image, preview_resize_factor*upscale_factor, channel_axis=2)
             pixel_size_um /= preview_resize_factor*upscale_factor
         return image, preview_resize_factor, pixel_size_um
     
@@ -222,7 +227,7 @@ class AgXPhoto():
 
     def _rescale_to_original(self, scan, preview_resize_factor):
         if preview_resize_factor != 1.0:
-            scan = resize_image(scan, 1.0/preview_resize_factor)
+            scan = skimage.transform.rescale(scan, 1/preview_resize_factor, channel_axis=2)
         return scan
     
     def _spectral_lut_compute(self, data, spectral_calculation,
@@ -433,7 +438,7 @@ if __name__ == '__main__':
     # image = load_image_oiio('img/targets/cc_halation.png')
     # image = plt.imread('img/targets/it87_test_chart_2.jpg')
     # image = np.double(image[:,:,:3])/255
-    image = load_image_oiio('img/test/portrait_leaves_linear_rec2020.png')
+    image = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
     # image = [[[0.184,0.184,0.184]]]
     # image = [[[0,0,0], [0.184,0.184,0.184], [1,1,1]]]
     params = photo_params(print_paper='kodak_portra_endura_uc')
@@ -442,13 +447,14 @@ if __name__ == '__main__':
     params.debug.deactivate_stochastic_effects = False
     params.camera.exposure_compensation_ev = 0
     params.camera.auto_exposure = True
-    params.io.preview_resize_factor = 1
-    params.io.upscale_factor = 1
+    params.io.preview_resize_factor = 0.5
+    params.io.upscale_factor = 1.0
     params.io.compute_negative = False
     params.negative.grain.agx_particle_area_um2 = 1
     params.enlarger.preflash_exposure = 0.0
     params.enlarger.print_exposure_compensation = True
-    params.enlarger.print_exposure = 1
+    params.enlarger.print_exposure = 1.0
+    params.negative.grain.active = False
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
     

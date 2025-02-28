@@ -6,14 +6,14 @@ from napari.types import ImageData
 from napari.settings import get_settings
 from magicgui import magicgui
 from pathlib import Path
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 from agx_emulsion.config import ENLARGER_STEPS
 from agx_emulsion.utils.io import load_image_oiio
 from agx_emulsion.model.process import  photo_params, photo_process
 from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
-from agx_emulsion.model.parametric import parametric_density_curves_model
-from agx_emulsion.profiles.io import load_profile
+# from agx_emulsion.model.parametric import parametric_density_curves_model
+# from agx_emulsion.profiles.io import load_profile
 from agx_emulsion.profiles.factory import swap_channels
 from agx_emulsion.utils.numba_warmup import warmup
 
@@ -45,6 +45,10 @@ class RGBtoRAWMethod(Enum):
     hanatos2025 = 'hanatos2025'
     mallett2019 = 'mallett2019'
 
+class AutoExposureMethods(Enum):
+    median = 'median'
+    center_weighted = 'center_weighted'
+
 @magicgui(layout="vertical", call_button='None')
 def grain(active=True,
           sublayers_active=True,
@@ -53,7 +57,7 @@ def grain(active=True,
           particle_scale_layers=(2.5,1.0,0.5),
           density_min=(0.07, 0.08, 0.12),
           uniformity=(0.97,0.97,0.99),
-          blur=0.6,
+          blur=0.65,
           blur_dye_clouds_um=1.0,
           micro_structure=(0.1, 30),
           ):
@@ -157,9 +161,17 @@ def special(film_channel_swap=(0,1,2),
             ):
     return
 
-class ae_methods(Enum):
-    median = 'median'
-    center_weighted = 'center_weighted'
+import json
+
+def export_parameters(filepath, params):
+    dot_params = DotMap(params)
+    with open(filepath, 'w') as f:
+        json.dump(dot_params.toDict(), f, indent=4)
+
+def load_parameters(filepath):
+    with open(filepath, 'r') as f:
+        dot_params = DotMap(json.load(f))
+    return dot_params.toDict()
 
 # for details on why the `-> ImageData` return annotation works:
 # https://napari.org/guides/magicgui.html#return-annotations
@@ -170,7 +182,7 @@ def simulation(input_layer:Image,
                camera_lens_blur_um=0.0,
                exposure_compensation_ev=0.0,
                auto_exposure=True,
-               auto_exposure_method=ae_methods.center_weighted,
+               auto_exposure_method=AutoExposureMethods.center_weighted,
                # print parameters
                print_paper=PrintPapers.kodak_portra_endura,
             #    print_illuminant=Illuminants.lamp,
@@ -318,7 +330,8 @@ simulation.scan_unsharp_mask.tooltip = 'Apply unsharp mask to the scan, [sigma i
 simulation.output_color_space.tooltip = 'Color space of the output image'
 simulation.output_cctf_encoding.tooltip = 'Apply the cctf transfer function of the color space. If false, data is linear.'
 simulation.compute_negative.tooltip = 'Show a scan of the negative instead of the print'
-simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active'
+simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active. Note: grain and halation computed only when full image.'
+simulation.call_button.tooltip = 'Run the simulation. Note: grain and halation computed only when compute_full_image is clicked.'
 
 special.film_gamma_factor.tooltip = 'Gamma factor of the density curves of the negative, < 1 reduce contrast, > 1 increase contrast'
 special.print_gamma_factor.tooltip = 'Gamma factor of the print paper, < 1 reduce contrast, > 1 increase contrast'
@@ -356,7 +369,7 @@ grain.particle_scale.tooltip = 'Scale of particle area for the RGB layers, multi
 grain.particle_scale_layers.tooltip = 'Scale of particle area for the sublayers in every color layer, multiplies particle_area_um2'
 grain.density_min.tooltip = 'Minimum density of the grain, typical values (0.03-0.06)'
 grain.uniformity.tooltip = 'Uniformity of the grain, typical values (0.94-0.98)'
-grain.blur.tooltip = 'Sigma of gaussian blur in pixels for the grain, to be increased at high magnifications, (should be 0.8-0.9 at high resolution, reduce down to 0.6 for low res).'
+grain.blur.tooltip = 'Sigma of gaussian blur in pixels for the grain, to be increased at high magnifications, (should be 0.8-0.9 at high resolution, reduce down to 0.6 for lower res).'
 grain.blur_dye_clouds_um.tooltip = 'Scale the sigma of gaussian blur in um for the dye clouds, to be used at high magnifications, (default 1)'
 grain.micro_structure.tooltip = 'Parameter for micro-structure due to clumps at the molecular level, [sigma blur of micro-structure / ultimate light-resolution (0.10 um default), size of molecular clumps in nm (30 nm default)]. Only for insane magnifications.'
 

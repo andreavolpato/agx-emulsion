@@ -259,7 +259,6 @@ def create_profile(stock='kodak_portra_400',
         profile.grain.blur_dye_clouds_um = 1.0
         profile.grain.micro_structure = (0.2, 0.5)
         profile.grain.n_sub_layers = 1
-        # profile.grain.layers.particle_scale = [0.05,0.2,1]
         
         profile.halation.active = True
         profile.halation.strength = [0.08,0.005,0.001]
