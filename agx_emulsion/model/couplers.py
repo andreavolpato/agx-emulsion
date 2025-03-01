@@ -74,12 +74,12 @@ def compute_exposure_correction_dir_couplers(log_raw, density_cmy, density_max, 
     log_raw_corrected = log_raw - log_raw_correction
     return log_raw_corrected
 
-if __name__=='__main__':
-    # Test the raw correction coupler inhibitors
-    log_raw = np.ones((4,4,3))
-    density_cmy = np.ones((4,4,3))
-    density_max = 2.2
-    couplers_amount = [0.9,0.7,0.5]
-    diffusion_size_pixel = 2
-    log_raw = raw_correction_dir_couplers(log_raw, density_cmy, density_max, couplers_amount, diffusion_size_pixel)
-    print(log_raw)
+# if __name__=='__main__':
+    # # Test the raw correction coupler inhibitors
+    # log_raw = np.ones((4,4,3))
+    # density_cmy = np.ones((4,4,3))
+    # density_max = 2.2
+    # couplers_amount = [0.9,0.7,0.5]
+    # diffusion_size_pixel = 2
+    # log_raw = raw_correction_dir_couplers(log_raw, density_cmy, density_max, couplers_amount, diffusion_size_pixel)
+    # print(log_raw)

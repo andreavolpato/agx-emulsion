@@ -28,9 +28,9 @@ layer_list = viewer.window.qt_viewer.dockLayerList
 settings = get_settings()
 settings.appearance.theme = 'light'
 
-portrait = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
-viewer.add_image(portrait,
-                 name="portrait")
+# portrait = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
+# viewer.add_image(portrait,
+#                  name="portrait")
 
 class RGBColorSpaces(Enum):
     sRGB = 'sRGB'
