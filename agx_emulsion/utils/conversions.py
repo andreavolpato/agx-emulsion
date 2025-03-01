@@ -32,37 +32,6 @@ def compute_densitometer_correction(dye_density, type='status_A'):
     densitometer_correction = 1/np.sum(densitometer_responsivities[:] * dye_density, axis=0)
     return densitometer_correction
 
-MALLETT2019_BASIS = colour.recovery.MSDS_BASIS_FUNCTIONS_sRGB_MALLETT2019.copy().align(SPECTRAL_SHAPE)
-def rgb_to_raw_mallett2019(RGB, illuminant, sensitivity, color_space='sRGB', apply_cctf_decoding=True):
-    """
-    Converts an RGB color to a raw sensor response using the method described in Mallett et al. (2019).
-
-    Parameters
-    ----------
-    RGB : array_like
-        RGB color values.
-    illuminant : array_like
-        Illuminant spectral distribution.
-    sensitivity : array_like
-        Camera sensor spectral sensitivities.
-    color_space : str, optional
-        The color space of the input RGB values. Default is 'sRGB'.
-    apply_cctf_decoding : bool, optional
-        Whether to apply the color component transfer function (CCTF) decoding. Default is True.
-
-    Returns
-    -------
-    raw : ndarray
-        Raw sensor response.
-    """
-    basis_set_with_illuminant = np.array(MALLETT2019_BASIS[:])*np.array(illuminant)[:, None]
-    lrgb = colour.RGB_to_RGB(RGB, color_space, 'sRGB',
-                    apply_cctf_decoding=apply_cctf_decoding,
-                    apply_cctf_encoding=False)
-    lrgb = np.clip(lrgb, 0, None)
-    raw  = contract('ijk,lk,lm->ijm', lrgb, basis_set_with_illuminant, sensitivity)
-    return raw
-
 def compute_aces_conversion_matrix(sensitivity, illuminant):            
     """
     Computes the ACES (Academy Color Encoding System) conversion matrix.

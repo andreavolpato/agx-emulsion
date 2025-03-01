@@ -61,7 +61,7 @@ class DichroicFilters():
         ax.legend(('y','m','c'))
     
     def apply(self, illuminant, values=[0,0,0]):
-        dimmed_filters = 1 - (1-self.filters)*np.array(values) # following durst 605 wheels values, with 130 max
+        dimmed_filters = 1 - (1-self.filters)*np.array(values) # following durst 605 wheels values, with 170 max
         total_filter = np.prod(dimmed_filters, axis=1)
         filtered_illuminant = illuminant*total_filter
         return filtered_illuminant

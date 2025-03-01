@@ -3,18 +3,21 @@ import copy
 import colour
 from dotmap import DotMap
 from opt_einsum import contract
+import skimage.transform
 
 from agx_emulsion.config import ENLARGER_STEPS, STANDARD_OBSERVER_CMFS
 from agx_emulsion.model.emulsion import Film, compute_density_spectral, develop_simple, compute_random_glare_amount
 from agx_emulsion.utils.autoexposure import measure_autoexposure_ev
-from agx_emulsion.utils.conversions import rgb_to_raw_mallett2019, density_to_light
-from agx_emulsion.utils.lut3d import compute_with_lut
+from agx_emulsion.utils.conversions import density_to_light
+from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_to_raw_hanatos2025, compute_band_pass_filter
+from agx_emulsion.utils.lut import compute_with_lut
 from agx_emulsion.model.diffusion import apply_gaussian_blur_um, apply_halation_um, apply_unsharp_mask, apply_gaussian_blur
 from agx_emulsion.model.color_filters import color_enlarger
-from agx_emulsion.utils.crop_resize import crop_image, resize_image
+from agx_emulsion.utils.crop_resize import crop_image
 from agx_emulsion.model.illuminants import standard_illuminant
 from agx_emulsion.utils.io import read_neutral_ymc_filter_values
 from agx_emulsion.profiles.io import load_profile
+from agx_emulsion.utils.timings import timeit, plot_timings
 
 ymc_filters = read_neutral_ymc_filter_values()
 
@@ -34,6 +37,8 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.camera.auto_exposure_method = 'center_weighted'
     params.camera.lens_blur_um = 0.0 # about 5 um sigma for typical lenses, down to 2-4 um for high quality lenses, used for sharp simulations without lens blur.
     params.camera.film_format_mm = 35.0
+    params.camera.filter_uv = (1, 410, 8)
+    params.camera.filter_ir = (1, 675, 15)
     
     params.enlarger.illuminant = 'BB3200'
     params.enlarger.print_exposure = 1.0
@@ -57,8 +62,8 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.scanner.lens_blur = 0.55
     params.scanner.unsharp_mask = (0.7,1.0)
 
-    params.io.input_color_space = 'sRGB'
-    params.io.input_cctf_decoding = True
+    params.io.input_color_space = 'ProPhoto RGB'
+    params.io.input_cctf_decoding = False
     params.io.output_color_space = 'sRGB'
     params.io.output_cctf_encoding = True
     params.io.crop = False
@@ -68,14 +73,16 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.io.upscale_factor = 1.0
     params.io.full_image = False
     params.io.compute_negative = False
+    params.io.compute_film_raw = False
     
     params.debug.deactivate_spatial_effects = False
     params.debug.deactivate_stochastic_effects = False
     params.debug.input_negative_density_cmy = False
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
+    params.debug.print_timings = False
     
-    params.settings.rgb_to_raw_method = 'mallett2019'
+    params.settings.rgb_to_raw_method = 'hanatos2025'
     params.settings.use_camera_lut = False
     params.settings.use_enlarger_lut = False
     params.settings.use_scanner_lut = False
@@ -87,14 +94,17 @@ def photo_params(negative='kodak_vision3_50d_uc',
 class AgXPhoto():
     def __init__(self, params):
         self._params = copy.deepcopy(params)
-        self.negative = params.negative
-        self.print_paper = params.print_paper
+        # main components
         self.camera = params.camera
+        self.negative = params.negative
         self.enlarger = params.enlarger
+        self.print_paper = params.print_paper
         self.scanner = params.scanner
+        # auxiliary and special
         self.io = params.io
         self.debug = params.debug
         self.settings = params.settings
+        self.timings = {} # dictionary to hold timing info
         self._apply_debug_switches()
 
     def _apply_debug_switches(self):
@@ -122,17 +132,27 @@ class AgXPhoto():
         exposure_ev = self._auto_exposure(image)
         image, preview_resize_factor, pixel_size_um = self._crop_and_rescale(image)
         
+        # apply special effects to profiles
+        # self._apply_special_things()
+        
+        if not self.io.full_image: # activate grain, halation, and glare only with full image
+            self.negative.grain.active = False
+            self.negative.halation.active = False
+            # self.negative.glare.active = False
+            # self.print_paper.glare.active = False
+        
         # film exposure in camera and chemical development
-        log_raw = self._expose_film(image, exposure_ev, pixel_size_um)
+        raw = self._expose_film(image, exposure_ev, pixel_size_um)
+        if self.io.compute_film_raw: return raw
+        
+        log_raw = np.log10(raw + 1e-10)
         density_cmy = self._develop_film(log_raw, pixel_size_um)
-        # print('film density_cmy:', density_cmy)
         if self.debug.return_negative_density_cmy: return density_cmy
         
         # print exposure with enlarger
         if not self.io.compute_negative:
             log_raw = self._expose_print(density_cmy)
             density_cmy = self._develop_print(log_raw)
-            # print('print density_cmy:', density_cmy)
             if self.debug.return_print_density_cmy: return density_cmy
         
         # scan
@@ -143,7 +163,8 @@ class AgXPhoto():
         return scan
 
     ################################################################################
-            
+    
+    @timeit('_auto_exposure')        
     def _auto_exposure(self, image):
         if self.camera.auto_exposure:
             input_color_space = self.io.input_color_space
@@ -155,6 +176,7 @@ class AgXPhoto():
             exposure_ev = self.camera.exposure_compensation_ev
         return exposure_ev
     
+    @timeit('_crop_and_rescale')        
     def _crop_and_rescale(self, image):
         preview_resize_factor = self.io.preview_resize_factor
         upscale_factor = self.io.upscale_factor
@@ -165,10 +187,11 @@ class AgXPhoto():
         if self.io.full_image:
             preview_resize_factor = 1.0
         if preview_resize_factor*upscale_factor != 1.0:
-            image  = resize_image(image, preview_resize_factor*upscale_factor)
+            image  = skimage.transform.rescale(image, preview_resize_factor*upscale_factor, channel_axis=2)
             pixel_size_um /= preview_resize_factor*upscale_factor
         return image, preview_resize_factor, pixel_size_um
     
+    @timeit('_expose_film')
     def _expose_film(self, image, exposure_ev, pixel_size_um):
         raw = self._rgb_to_film_raw(image, exposure_ev,
                                     color_space=self.io.input_color_space,
@@ -176,15 +199,16 @@ class AgXPhoto():
                                     use_lut=self.settings.use_camera_lut)
         raw = apply_gaussian_blur_um(raw, self.camera.lens_blur_um, pixel_size_um)
         raw = apply_halation_um(raw, self.negative.halation, pixel_size_um)
-        log_raw = np.log10(raw + 1e-10)
-        return log_raw
+        return raw
 
+    @timeit('_develop_film')
     def _develop_film(self, log_raw, pixel_size_um):
         film = Film(self.negative)
         density_cmy = film.develop(log_raw, pixel_size_um,
                                    use_fast_stats=self.settings.use_fast_stats)
         return density_cmy
     
+    @timeit('_expose_print')
     def _expose_print(self, film_density_cmy):
         film_density_cmy_normalized = self._normalize_film_density(film_density_cmy) # 0-1 density for lut
         def spectral_calculation(density_cmy_n):
@@ -194,10 +218,12 @@ class AgXPhoto():
                                              use_lut=self.settings.use_enlarger_lut)
         return log_raw
     
+    @timeit('_develop_print')
     def _develop_print(self, log_raw):
         density_cmy = develop_simple(self.print_paper, log_raw)
         return density_cmy
     
+    @timeit('_scan')
     def _scan(self, density_cmy):
         rgb = self._density_cmy_to_rgb(density_cmy, use_lut=self.settings.use_scanner_lut)
         rgb = self._apply_blur_and_unsharp(rgb)
@@ -208,7 +234,7 @@ class AgXPhoto():
 
     def _rescale_to_original(self, scan, preview_resize_factor):
         if preview_resize_factor != 1.0:
-            scan = resize_image(scan, 1.0/preview_resize_factor)
+            scan = skimage.transform.rescale(scan, 1/preview_resize_factor, channel_axis=2)
         return scan
     
     def _spectral_lut_compute(self, data, spectral_calculation,
@@ -226,31 +252,32 @@ class AgXPhoto():
     def _rgb_to_film_raw(self, rgb, exposure_ev,
                          color_space='sRGB', apply_cctf_decoding=False,
                          use_lut=False):
-        illuminant = standard_illuminant(self.negative.info.reference_illuminant)
         sensitivity = 10**self.negative.data.log_sensitivity
         sensitivity = np.nan_to_num(sensitivity) # replace nans with zeros
         
+        # applu band pass filter
+        if self.camera.filter_uv[0]>0 or self.camera.filter_ir[0]>0:
+            band_pass_filter = compute_band_pass_filter(self.camera.filter_uv,
+                                                        self.camera.filter_ir)
+            sensitivity *= band_pass_filter[:,None]
+
         method = self.settings.rgb_to_raw_method
-        def spectral_calculation(rgb):
-            raw = np.zeros_like(rgb)
-            if method=='mallett2019':
-                raw = rgb_to_raw_mallett2019(rgb,
-                                             illuminant,
-                                             sensitivity,
-                                             color_space=color_space,
-                                             apply_cctf_decoding=apply_cctf_decoding)
-            # if method=='jakob2019':
-            #     raw = rgb_to_raw_jakob2019(rgb,
-            #                                illuminant,
-            #                                sensitivity,
-            #                                color_space=color_space,
-            #                                apply_cctf_decoding=apply_cctf_decoding)
-            return raw
-        raw = self._spectral_lut_compute(rgb, spectral_calculation, use_lut)
+        raw = np.zeros_like(rgb)
+        if method=='mallett2019':
+            raw = rgb_to_raw_mallett2019(rgb,
+                                         sensitivity,
+                                         color_space=color_space,
+                                         apply_cctf_decoding=apply_cctf_decoding,
+                                         reference_illuminant=self.negative.info.reference_illuminant)
+        if method=='hanatos2025':
+            raw = rgb_to_raw_hanatos2025(rgb,
+                                         sensitivity,
+                                         color_space=color_space,
+                                         apply_cctf_decoding=apply_cctf_decoding,
+                                         reference_illuminant=self.negative.info.reference_illuminant)
         
         # set exposure level
-        raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
-        raw *= 2**exposure_ev / raw_midgray[1] # normalize with green channel
+        raw *= 2**exposure_ev
         return raw
 
     def _normalize_film_density(self, denisty_cmy):
@@ -404,15 +431,21 @@ def add_glare(xyz, illuminant_xyz, profile):
 
 def photo_process(image, params):
     photo = AgXPhoto(params)
-    return photo.process(image)
+    image_out = photo.process(image)
+    if params.debug.print_timings:
+        print(photo.timings)
+        plot_timings(photo.timings)
+    return image_out
     
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    from agx_emulsion.utils.io import load_image_16bit_32bit
-    # image = load_image_16bit_32bit('img/targets/cc_halation.png')
+    from agx_emulsion.utils.io import load_image_oiio
+    from agx_emulsion.utils.numba_warmup import warmup
+    warmup()
+    # image = load_image_oiio('img/targets/cc_halation.png')
     # image = plt.imread('img/targets/it87_test_chart_2.jpg')
     # image = np.double(image[:,:,:3])/255
-    image = load_image_16bit_32bit('img/test/portrait_leaves.png')
+    image = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
     # image = [[[0.184,0.184,0.184]]]
     # image = [[[0,0,0], [0.184,0.184,0.184], [1,1,1]]]
     params = photo_params(print_paper='kodak_portra_endura_uc')
@@ -421,13 +454,15 @@ if __name__ == '__main__':
     params.debug.deactivate_stochastic_effects = False
     params.camera.exposure_compensation_ev = 0
     params.camera.auto_exposure = True
-    params.io.preview_resize_factor = 1
-    params.io.upscale_factor = 1
+    params.io.preview_resize_factor = 0.3
+    params.io.upscale_factor = 3.0
+    params.io.full_image = False
     params.io.compute_negative = False
     params.negative.grain.agx_particle_area_um2 = 1
     params.enlarger.preflash_exposure = 0.0
     params.enlarger.print_exposure_compensation = True
-    params.enlarger.print_exposure = 1
+    params.enlarger.print_exposure = 1.0
+    params.negative.grain.active = False
     params.debug.return_negative_density_cmy = False
     params.debug.return_print_density_cmy = False
     
@@ -435,7 +470,8 @@ if __name__ == '__main__':
     params.settings.use_camera_lut = True
     params.settings.use_enlarger_lut = True
     params.settings.use_scanner_lut = True
-    params.settings.lut_resolution = 16
+    params.settings.lut_resolution = 32
+    params.debug.print_timings = True
     image = photo_process(image, params)
     # plt.imshow(image[:,:,1])
     plt.imshow(image)

@@ -3,6 +3,7 @@ import scipy
 import matplotlib.pyplot as plt
 import scipy.special
 import scipy.stats
+from agx_emulsion.utils.fast_interp import fast_interp
 
 ################################################################################
 # Density curve models
@@ -263,12 +264,16 @@ def interpolate_exposure_to_density(log_exposure_rgb, density_curves, log_exposu
     """
     if np.size(gamma_factor)==1:
         gamma_factor = [gamma_factor, gamma_factor, gamma_factor]
+    gamma_factor = np.array(gamma_factor)
     density_cmy = np.zeros((log_exposure_rgb.shape[0], log_exposure_rgb.shape[1], 3))
-    for channel in np.arange(3):
-        sel = ~np.isnan(density_curves[:,channel])
-        density_cmy[:,:,channel] = np.interp(log_exposure_rgb[:,:,channel],
-                                             log_exposure[sel]/gamma_factor[channel],
-                                             density_curves[sel,channel])
+    # for channel in np.arange(3):
+    #     sel = ~np.isnan(density_curves[:,channel])
+    #     density_cmy[:,:,channel] = np.interp(log_exposure_rgb[:,:,channel],
+    #                                          log_exposure[sel]/gamma_factor[channel],
+    #                                          density_curves[sel,channel])
+    density_cmy = fast_interp(np.ascontiguousarray(log_exposure_rgb),
+                              log_exposure[:,None]/gamma_factor[None,:],
+                              density_curves)
     return density_cmy
     
 # This method was used for multilayer grain, but it is not used anymore
@@ -301,19 +306,19 @@ def apply_gamma_shift_correction(log_exposure, density_curves, gamma_correction,
 ################################################################################
 # Fit stocks and evaluate results
 ################################################################################
-if __name__=='__main__':
-    # TODO: fix the multilayer situation. Now the fitting is performed in unmix_profile() inside profiles.py
-    from agx_emulsion.profiles.factory import load_agx_emulsion_data
-    np.set_printoptions(precision=2, suppress='True')
-    save_flag = False
-    types =  ['negative',          'negative',         'paper',                'paper',               'positive']
-    stocks = ['kodak_vision3_50d', 'kodak_portra_400', 'kodak_ektacolor_edge', 'kodak_portra_endura', 'fujifilm_provia_100f']
-    models = ['norm_cdfs',         'norm_cdfs',        'norm_cdfs',            'norm_cdfs',           'norm_cdfs']
-    for type, stock, model in zip(types,stocks,models):
-        print(stock+' - '+type)
-        _, _, _, c, _ = load_agx_emulsion_data(data_folder='agx_emulsion/data/', stock=stock, type=type)
-        fitted_parameters = fit_density_curves(c, plotting=True, type=type, stock=stock, model=model)
-        if save_flag:
-            np.savetxt('agx_emulsion/data/color/'+type+'/'+stock+'/density_curves_fitted_parameters.csv', fitted_parameters)
-            plt.savefig('agx_emulsion/data/color/'+type+'/'+stock+'/density_curves_fitted_model.png')
-    plt.show()
+# if __name__=='__main__':
+    # # TODO: fix the multilayer situation. Now the fitting is performed in unmix_profile() inside profiles.py
+    # from agx_emulsion.profiles.factory import load_agx_emulsion_data
+    # np.set_printoptions(precision=2, suppress='True')
+    # save_flag = False
+    # types =  ['negative',          'negative',         'paper',                'paper',               'positive']
+    # stocks = ['kodak_vision3_50d', 'kodak_portra_400', 'kodak_ektacolor_edge', 'kodak_portra_endura', 'fujifilm_provia_100f']
+    # models = ['norm_cdfs',         'norm_cdfs',        'norm_cdfs',            'norm_cdfs',           'norm_cdfs']
+    # for type, stock, model in zip(types,stocks,models):
+    #     print(stock+' - '+type)
+    #     _, _, _, c, _ = load_agx_emulsion_data(data_folder='agx_emulsion/data/', stock=stock, type=type)
+    #     fitted_parameters = fit_density_curves(c, plotting=True, type=type, stock=stock, model=model)
+    #     if save_flag:
+    #         np.savetxt('agx_emulsion/data/color/'+type+'/'+stock+'/density_curves_fitted_parameters.csv', fitted_parameters)
+    #         plt.savefig('agx_emulsion/data/color/'+type+'/'+stock+'/density_curves_fitted_model.png')
+    # plt.show()

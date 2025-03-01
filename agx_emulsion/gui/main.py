@@ -6,21 +6,19 @@ from napari.types import ImageData
 from napari.settings import get_settings
 from magicgui import magicgui
 from pathlib import Path
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 from agx_emulsion.config import ENLARGER_STEPS
-from agx_emulsion.utils.io import load_image_16bit_32bit
+from agx_emulsion.utils.io import load_image_oiio
 from agx_emulsion.model.process import  photo_params, photo_process
 from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
-from agx_emulsion.model.parametric import parametric_density_curves_model
-from agx_emulsion.profiles.io import load_profile
+# from agx_emulsion.model.parametric import parametric_density_curves_model
+# from agx_emulsion.profiles.io import load_profile
 from agx_emulsion.profiles.factory import swap_channels
-from agx_emulsion.utils.fast_stats import fast_stats_warmup
-from agx_emulsion.utils.fast_interp import fast_interp_warmup
+from agx_emulsion.utils.numba_warmup import warmup
 
 # precompile numba functions
-fast_stats_warmup()
-fast_interp_warmup()
+warmup()
 
 # create a viewer and add a couple image layers
 viewer = napari.Viewer()
@@ -30,19 +28,7 @@ layer_list = viewer.window.qt_viewer.dockLayerList
 settings = get_settings()
 settings.appearance.theme = 'light'
 
-# cc_halation = np.double(iio.imread('img/targets/cc_halation.png')[:,:,0:3])/(2**8-1)
-# viewer.add_image(cc_halation,
-#                  name="halation_test",
-#                  contrast_limits=[0,1])
-# cc11 = np.double(tiff.imread('img/targets/cc11.tiff')[:,:,0:3])/(2**16-1)
-# viewer.add_image(cc11,
-#                  name="color_test",
-#                  contrast_limits=[0,1])
-# cc_it87 = np.double(iio.imread('img/targets/it87_test_chart_2.jpg')[:,:,0:3])/(2**8-1)
-# viewer.add_image(cc_it87,
-#                  name="it87_test_chart",
-#                  contrast_limits=[0,1])
-# portrait = load_image_16bit_32bit('img/test/portrait_leaves.png')
+# portrait = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
 # viewer.add_image(portrait,
 #                  name="portrait")
 
@@ -51,8 +37,17 @@ class RGBColorSpaces(Enum):
     DCI_P3 = 'DCI-P3'
     DisplayP3 = 'Display P3'
     AdobeRGB = 'Adobe RGB (1998)'
+    ITU_R_BT2020 = 'ITU-R BT.2020'
     ProPhotoRGB = 'ProPhoto RGB'
     ACES2065_1 = 'ACES2065-1'
+
+class RGBtoRAWMethod(Enum):
+    hanatos2025 = 'hanatos2025'
+    mallett2019 = 'mallett2019'
+
+class AutoExposureMethods(Enum):
+    median = 'median'
+    center_weighted = 'center_weighted'
 
 @magicgui(layout="vertical", call_button='None')
 def grain(active=True,
@@ -62,8 +57,10 @@ def grain(active=True,
           particle_scale_layers=(2.5,1.0,0.5),
           density_min=(0.07, 0.08, 0.12),
           uniformity=(0.97,0.97,0.99),
-          blur=0.6,
-          blur_dye_clouds_um=1.0):
+          blur=0.65,
+          blur_dye_clouds_um=1.0,
+          micro_structure=(0.1, 30),
+          ):
     return
 
 @magicgui(layout="vertical", call_button='None')
@@ -72,8 +69,12 @@ def input_image(preview_resize_factor=0.3,
                 crop=False,
                 crop_center=(0.50,0.50),
                 crop_size=(0.1,0.1),
-                input_color_space=RGBColorSpaces.sRGB,
-                apply_cctf_decoding=True):
+                input_color_space=RGBColorSpaces.ProPhotoRGB,
+                apply_cctf_decoding=False,
+                spectral_upsampling_method=RGBtoRAWMethod.hanatos2025,
+                filter_uv=(1,410,8),
+                filter_ir=(1,675,15),
+                ):
     return
 
 @magicgui(layout="vertical", call_button='None')
@@ -110,44 +111,45 @@ def glare(active=True,
           compensation_removal_transition=0.3):
     return
 
-@magicgui(layout="vertical", call_button='plot curves')
-def curves(use_parametric_curves=False,
-           gamma=(0.7,0.7,0.7),
-           log_exposure_0=(-1.4,-1.4,-1.52),
-           density_max=(2.75,2.75,2.84),
-           toe_size=(0.3,0.3,0.3),
-           shoulder_size=(0.85,0.85,0.85),):
-    profile = load_profile(simulation.film_stock.value.value)
-    print(simulation.film_stock.value.value)
-    log_exposure = profile.data.log_exposure
-    density_curves = parametric_density_curves_model(log_exposure,
-                                gamma,
-                                log_exposure_0,
-                                density_max,
-                                toe_size,
-                                shoulder_size)
-    plt.figure()
-    colors = ['tab:red', 'tab:green', 'tab:blue']
-    labels = ['R', 'G', 'B']
-    gamma_factor = simulation.film_gamma_factor.value
-    for i in range(3):
-        plt.plot(log_exposure, density_curves[:,i], color=colors[i], label=labels[i])
-        plt.plot(log_exposure/gamma_factor[i], profile.data.density_curves, color=colors[i], linestyle='--', label=None)
-    plt.xlabel('log(Exposure)')
-    plt.ylabel('Density')
-    plt.legend()
-    plt.title(profile.info.stock)
-    plt.show()
-    return
+# @magicgui(layout="vertical", call_button='plot curves')
+# def curves(use_parametric_curves=False,
+#            gamma=(0.7,0.7,0.7),
+#            log_exposure_0=(-1.4,-1.4,-1.52),
+#            density_max=(2.75,2.75,2.84),
+#            toe_size=(0.3,0.3,0.3),
+#            shoulder_size=(0.85,0.85,0.85),):
+#     profile = load_profile(simulation.film_stock.value.value)
+#     print(simulation.film_stock.value.value)
+#     log_exposure = profile.data.log_exposure
+#     density_curves = parametric_density_curves_model(log_exposure,
+#                                 gamma,
+#                                 log_exposure_0,
+#                                 density_max,
+#                                 toe_size,
+#                                 shoulder_size)
+#     plt.figure()
+#     colors = ['tab:red', 'tab:green', 'tab:blue']
+#     labels = ['R', 'G', 'B']
+#     gamma_factor = simulation.film_gamma_factor.value
+#     for i in range(3):
+#         plt.plot(log_exposure, density_curves[:,i], color=colors[i], label=labels[i])
+#         plt.plot(log_exposure/gamma_factor[i], profile.data.density_curves, color=colors[i], linestyle='--', label=None)
+#     plt.xlabel('log(Exposure)')
+#     plt.ylabel('Density')
+#     plt.legend()
+#     plt.title(profile.info.stock)
+#     plt.show()
+#     return
 
-@magicgui(layout="vertical", call_button='fit negative density curves')
-def fit_density_curves():
-    return
+# @magicgui(layout="vertical", call_button='fit negative density curves')
+# def fit_density_curves():
+#     return
 
 
 @magicgui(filename={"mode": "r"}, call_button='load image (e.g. png/exr)')
 def filepicker(filename=Path("./")) -> ImageData:
-    img_array = load_image_16bit_32bit(str(filename))
+    img_array = load_image_oiio(str(filename))
+    img_array = img_array[...,:3]
     return img_array
 
 @magicgui(layout="vertical", call_button='None')
@@ -159,9 +161,17 @@ def special(film_channel_swap=(0,1,2),
             ):
     return
 
-class ae_methods(Enum):
-    median = 'median'
-    center_weighted = 'center_weighted'
+import json
+
+def export_parameters(filepath, params):
+    dot_params = DotMap(params)
+    with open(filepath, 'w') as f:
+        json.dump(dot_params.toDict(), f, indent=4)
+
+def load_parameters(filepath):
+    with open(filepath, 'r') as f:
+        dot_params = DotMap(json.load(f))
+    return dot_params.toDict()
 
 # for details on why the `-> ImageData` return annotation works:
 # https://napari.org/guides/magicgui.html#return-annotations
@@ -172,20 +182,21 @@ def simulation(input_layer:Image,
                camera_lens_blur_um=0.0,
                exposure_compensation_ev=0.0,
                auto_exposure=True,
-               auto_exposure_method=ae_methods.center_weighted,
+               auto_exposure_method=AutoExposureMethods.center_weighted,
                # print parameters
                print_paper=PrintPapers.kodak_portra_endura,
-               print_illuminant=Illuminants.lamp,
+            #    print_illuminant=Illuminants.lamp,
                print_exposure=1.0,
                print_exposure_compensation=True,
                print_y_filter_shift=0,
                print_m_filter_shift=0,
-               print_lens_blur=0.0,
+            #    print_lens_blur=0.0,
                # scanner
                scan_lens_blur=0.00,
                scan_unsharp_mask=(0.7,0.7),
                output_color_space=RGBColorSpaces.sRGB,
                output_cctf_encoding=True,
+            #    compute_film_raw=False,
                compute_negative=False,
                compute_full_image=False,
                )->ImageData:    
@@ -212,6 +223,8 @@ def simulation(input_layer:Image,
     params.camera.auto_exposure = auto_exposure
     params.camera.auto_exposure_method = auto_exposure_method.value
     params.camera.film_format_mm = film_format_mm
+    params.camera.filter_uv = input_image.filter_uv.value
+    params.camera.filter_ir = input_image.filter_ir.value
     
     params.io.preview_resize_factor = input_image.preview_resize_factor.value
     params.io.upscale_factor = input_image.upscale_factor.value
@@ -224,6 +237,7 @@ def simulation(input_layer:Image,
     params.io.output_cctf_encoding = output_cctf_encoding
     params.io.full_image = compute_full_image
     params.io.compute_negative = compute_negative
+    # params.io.compute_film_raw = compute_film_raw
     
     # assign parameters to the film stock and paper
     params.negative.halation.active = halation.active.value
@@ -241,27 +255,29 @@ def simulation(input_layer:Image,
     params.negative.grain.uniformity = grain.uniformity.value
     params.negative.grain.blur = grain.blur.value
     params.negative.grain.blur_dye_clouds_um = grain.blur_dye_clouds_um.value
+    params.negative.grain.micro_structure = grain.micro_structure.value
     
     params.negative.dir_couplers.active = couplers.active.value
-    params.negative.dir_couplers.amount_rgb = couplers.dir_couplers_amount.value * np.array(couplers.dir_couplers_ratio.value)
+    params.negative.dir_couplers.amount = couplers.dir_couplers_amount.value 
+    params.negative.dir_couplers.ratio_rgb = couplers.dir_couplers_ratio.value
     params.negative.dir_couplers.diffusion_size_um = couplers.dir_couplers_diffusion_um.value
     params.negative.dir_couplers.diffusion_interlayer = couplers.diffusion_interlayer.value
     params.negative.dir_couplers.high_exposure_shift = couplers.high_exposure_shift.value
         
-    # parametric curves
-    params.negative.parametric.density_curves.active = curves.use_parametric_curves.value
-    params.negative.parametric.density_curves.gamma = curves.gamma.value
-    params.negative.parametric.density_curves.log_exposure_0 = curves.log_exposure_0.value
-    params.negative.parametric.density_curves.density_max = curves.density_max.value
-    params.negative.parametric.density_curves.toe_size = curves.toe_size.value
-    params.negative.parametric.density_curves.shoulder_size = curves.shoulder_size.value
+    # # parametric curves
+    # params.negative.parametric.density_curves.active = curves.use_parametric_curves.value
+    # params.negative.parametric.density_curves.gamma = curves.gamma.value
+    # params.negative.parametric.density_curves.log_exposure_0 = curves.log_exposure_0.value
+    # params.negative.parametric.density_curves.density_max = curves.density_max.value
+    # params.negative.parametric.density_curves.toe_size = curves.toe_size.value
+    # params.negative.parametric.density_curves.shoulder_size = curves.shoulder_size.value
 
-    params.enlarger.illuminant = print_illuminant.value
+    # params.enlarger.illuminant = print_illuminant.value
     params.enlarger.print_exposure = print_exposure
     params.enlarger.print_exposure_compensation = print_exposure_compensation
     params.enlarger.y_filter_shift = print_y_filter_shift
     params.enlarger.m_filter_shift = print_m_filter_shift
-    params.enlarger.print_lens_blur = print_lens_blur
+    # params.enlarger.print_lens_blur = print_lens_blur
     params.enlarger.preflash_exposure = preflashing.exposure.value
     params.enlarger.preflash_y_filter_shift = preflashing.y_filter_shift.value
     params.enlarger.preflash_m_filter_shift = preflashing.m_filter_shift.value
@@ -270,7 +286,7 @@ def simulation(input_layer:Image,
     params.scanner.lens_blur = scan_lens_blur
     params.scanner.unsharp_mask = scan_unsharp_mask
     
-    params.settings.rgb_to_raw_method = 'mallett2019'
+    params.settings.rgb_to_raw_method = input_image.spectral_upsampling_method.value.value
     params.settings.use_camera_lut = False
     params.settings.use_enlarger_lut = True
     params.settings.use_scanner_lut = True
@@ -279,6 +295,8 @@ def simulation(input_layer:Image,
 
     image = np.double(input_layer.data[:,:,:3])
     scan = photo_process(image, params)
+    # if params.io.compute_film_raw:
+    #     scan = np.vstack((scan[:, :, 0], scan[:, :, 1], scan[:, :, 2]))
     scan = np.uint8(scan*255)
     return scan
 
@@ -291,7 +309,7 @@ simulation.print_y_filter_shift.min = -ENLARGER_STEPS
 simulation.print_y_filter_shift.max = ENLARGER_STEPS
 simulation.print_m_filter_shift.min = -ENLARGER_STEPS
 simulation.print_m_filter_shift.max = ENLARGER_STEPS
-simulation.print_lens_blur.step = 0.05
+# simulation.print_lens_blur.step = 0.05
 simulation.scan_lens_blur.step = 0.05
 
 # tooltips to help users understand what the widgets do
@@ -301,18 +319,19 @@ simulation.auto_exposure.tooltip = 'Automatically adjust exposure based on the i
 simulation.film_format_mm.tooltip = 'Long edge of the film format in millimeters, e.g. 35mm or 60mm'
 simulation.camera_lens_blur_um.tooltip = 'Sigma of gaussian filter in um for the camera lens blur. About 5 um for typical lenses, down to 2-4 um for high quality lenses, used for sharp input simulations without lens blur.'
 simulation.print_paper.tooltip = 'Print paper to simulate'
-simulation.print_illuminant.tooltip = 'Print illuminant to simulate'
+# simulation.print_illuminant.tooltip = 'Print illuminant to simulate'
 simulation.print_exposure.tooltip = 'Exposure value for the print (proportional to seconds of exposure, not ev)'
 simulation.print_exposure_compensation.tooltip = 'Apply exposure compensation from negative exposure compensation ev, allow for changing of the negative exposure compensation while keeping constant print time.'
 simulation.print_y_filter_shift.tooltip = 'Y filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
 simulation.print_m_filter_shift.tooltip = 'M filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
-simulation.print_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the print lens blur'
+# simulation.print_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the print lens blur'
 simulation.scan_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the scanner lens blur'
 simulation.scan_unsharp_mask.tooltip = 'Apply unsharp mask to the scan, [sigma in pixel, amount]'
 simulation.output_color_space.tooltip = 'Color space of the output image'
 simulation.output_cctf_encoding.tooltip = 'Apply the cctf transfer function of the color space. If false, data is linear.'
 simulation.compute_negative.tooltip = 'Show a scan of the negative instead of the print'
-simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active'
+simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active.'
+simulation.call_button.tooltip = 'Run the simulation. Note: grain and halation computed only when compute_full_image is clicked.'
 
 special.film_gamma_factor.tooltip = 'Gamma factor of the density curves of the negative, < 1 reduce contrast, > 1 increase contrast'
 special.print_gamma_factor.tooltip = 'Gamma factor of the print paper, < 1 reduce contrast, > 1 increase contrast'
@@ -350,8 +369,9 @@ grain.particle_scale.tooltip = 'Scale of particle area for the RGB layers, multi
 grain.particle_scale_layers.tooltip = 'Scale of particle area for the sublayers in every color layer, multiplies particle_area_um2'
 grain.density_min.tooltip = 'Minimum density of the grain, typical values (0.03-0.06)'
 grain.uniformity.tooltip = 'Uniformity of the grain, typical values (0.94-0.98)'
-grain.blur.tooltip = 'Sigma of gaussian blur in pixels for the grain, to be increased at high magnifications, (default 0.6).'
+grain.blur.tooltip = 'Sigma of gaussian blur in pixels for the grain, to be increased at high magnifications, (should be 0.8-0.9 at high resolution, reduce down to 0.6 for lower res).'
 grain.blur_dye_clouds_um.tooltip = 'Scale the sigma of gaussian blur in um for the dye clouds, to be used at high magnifications, (default 1)'
+grain.micro_structure.tooltip = 'Parameter for micro-structure due to clumps at the molecular level, [sigma blur of micro-structure / ultimate light-resolution (0.10 um default), size of molecular clumps in nm (30 nm default)]. Only for insane magnifications.'
 
 preflashing.exposure.tooltip = 'Preflash exposure value in ev for the print'
 preflashing.just_preflash.tooltip = 'Only apply preflash to the print, to visualize the preflash effect'
@@ -367,6 +387,10 @@ input_image.crop_center.tooltip = 'Center of the crop region in relative coordin
 input_image.crop_size.tooltip = 'Normalized size of the crop region in x, y (0,1), as fraction of the long side.'
 input_image.input_color_space.tooltip = 'Color space of the input image, will be internally converted to sRGB and negative values clipped'
 input_image.apply_cctf_decoding.tooltip = 'Apply the inverse cctf transfer function of the color space'
+input_image.upscale_factor.tooltip = 'Scale image size up to increase resolution'
+input_image.spectral_upsampling_method.tooltip = 'Method to upsample the spectral resolution of the image, hanatos2025 works on the full visible locus, mallett2019 works only on sRGB (will clip input).'
+input_image.filter_uv.tooltip = 'Filter UV light, (amplitude, wavelength cutoff in nm, sigma in nm). It mainly helps for avoiding UV light ruining the reds. Changing this enlarger filters neutral will be affected.'
+input_image.filter_ir.tooltip = 'Filter IR light, (amplitude, wavelength cutoff in nm, sigma in nm). Changing this enlarger filters neutral will be affected.'
 
 # tab1 = Container(layout='vertical', widgets=[grain, preflashing])
 viewer.window.add_dock_widget(input_image, area="right", name='input', tabify=True)
@@ -382,4 +406,4 @@ viewer.window.add_dock_widget(filepicker, area="right", name='filepicker', tabif
 viewer.window.add_dock_widget(simulation, area="right", name='main', tabify=False)
 napari.run()
 
-# TODO: use magicclass to create collapsable widgets as in https://forum.image.sc/t/widgets-alignment-in-the-plugin-when-nested-magic-class-and-magicgui-are-used/62929
+# TODO: use magicclass to create collapsable widgets as in https://forum.image.sc/t/widgets-alignment-in-the-plugin-when-nested-magic-class-and-magicgui-are-used/62929 

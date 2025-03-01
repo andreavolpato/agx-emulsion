@@ -139,9 +139,9 @@ class TestStrip:
 
 
 if __name__ == '__main__':
-    from agx_emulsion.utils.io import load_image_16bit_32bit
+    from agx_emulsion.utils.io import load_image_oiio
     
-    image = load_image_16bit_32bit('img/targets/cc11.tiff')
+    image = load_image_oiio('img/targets/cc11.tiff')
     p = photo_params(negative='kodak_portra_400_auc')
     p.io.input_cctf_decoding = True
       

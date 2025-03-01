@@ -1,14 +1,16 @@
 import matplotlib.pyplot as plt
 from agx_emulsion.model.process import photo_params, photo_process
-from agx_emulsion.utils.io import read_png
+from agx_emulsion.utils.io import load_image_oiio
 
 def test_main_simulation():
-    image = read_png('img/targets/it87_test_chart_2.jpg')
+    image = load_image_oiio('img/test/portrait_leaves_32bit_linear_prophoto_rgb.tif')
     params = photo_params()
     params.negative.grain.sublayers_active = True
+    params.settings.use_enlarger_lut = True
+    params.settings.use_scanner_lut = True
     params.io.preview_resize_factor = 1.0
     params.camera.exposure_compensation_ev = 2
-    params.enlarger.print_exposure = 0.5
+    params.enlarger.print_exposure = 1.0
     params.camera.film_format_mm = 35
     params.print_paper.glare.active = True
     print_scan = photo_process(image, params)
