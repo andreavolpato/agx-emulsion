@@ -112,7 +112,7 @@ def rgb_to_tc_b(rgb, color_space='ITU-R BT.2020', apply_cctf_decoding=False, ref
                             illuminant=illu_xy,
                             chromatic_adaptation_transform='CAT02')
     b = np.sum(xyz, axis=-1)
-    xy = xyz[...,0:2] / b[...,None]
+    xy = xyz[...,0:2] / np.fmax(b[...,None], 1e-10)
     xy = np.clip(xy,0,1)
     tc = tri2quad(xy)
     b = np.nan_to_num(b)
