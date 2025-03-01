@@ -330,7 +330,7 @@ simulation.scan_unsharp_mask.tooltip = 'Apply unsharp mask to the scan, [sigma i
 simulation.output_color_space.tooltip = 'Color space of the output image'
 simulation.output_cctf_encoding.tooltip = 'Apply the cctf transfer function of the color space. If false, data is linear.'
 simulation.compute_negative.tooltip = 'Show a scan of the negative instead of the print'
-simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active. Note: grain and halation computed only when full image.'
+simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active.'
 simulation.call_button.tooltip = 'Run the simulation. Note: grain and halation computed only when compute_full_image is clicked.'
 
 special.film_gamma_factor.tooltip = 'Gamma factor of the density curves of the negative, < 1 reduce contrast, > 1 increase contrast'

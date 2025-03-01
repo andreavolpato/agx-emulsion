@@ -94,11 +94,13 @@ def photo_params(negative='kodak_vision3_50d_uc',
 class AgXPhoto():
     def __init__(self, params):
         self._params = copy.deepcopy(params)
-        self.negative = params.negative
-        self.print_paper = params.print_paper
+        # main components
         self.camera = params.camera
+        self.negative = params.negative
         self.enlarger = params.enlarger
+        self.print_paper = params.print_paper
         self.scanner = params.scanner
+        # auxiliary and special
         self.io = params.io
         self.debug = params.debug
         self.settings = params.settings
@@ -130,9 +132,14 @@ class AgXPhoto():
         exposure_ev = self._auto_exposure(image)
         image, preview_resize_factor, pixel_size_um = self._crop_and_rescale(image)
         
-        if not self.io.full_image:
+        # apply special effects to profiles
+        # self._apply_special_things()
+        
+        if not self.io.full_image: # activate grain, halation, and glare only with full image
             self.negative.grain.active = False
             self.negative.halation.active = False
+            # self.negative.glare.active = False
+            # self.print_paper.glare.active = False
         
         # film exposure in camera and chemical development
         raw = self._expose_film(image, exposure_ev, pixel_size_um)
@@ -447,8 +454,9 @@ if __name__ == '__main__':
     params.debug.deactivate_stochastic_effects = False
     params.camera.exposure_compensation_ev = 0
     params.camera.auto_exposure = True
-    params.io.preview_resize_factor = 0.5
-    params.io.upscale_factor = 1.0
+    params.io.preview_resize_factor = 0.3
+    params.io.upscale_factor = 3.0
+    params.io.full_image = False
     params.io.compute_negative = False
     params.negative.grain.agx_particle_area_um2 = 1
     params.enlarger.preflash_exposure = 0.0
