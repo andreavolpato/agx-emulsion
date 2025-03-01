@@ -144,8 +144,8 @@ class AgXPhoto():
         # film exposure in camera and chemical development
         raw = self._expose_film(image, exposure_ev, pixel_size_um)
         if self.io.compute_film_raw: return raw
-        
-        log_raw = np.log10(raw + 1e-10)
+
+        log_raw = np.log10(np.fmax(raw, 0.0) + 1e-10)
         density_cmy = self._develop_film(log_raw, pixel_size_um)
         if self.debug.return_negative_density_cmy: return density_cmy
         
