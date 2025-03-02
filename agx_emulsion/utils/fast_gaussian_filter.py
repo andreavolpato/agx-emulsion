@@ -26,7 +26,7 @@ def gaussian_kernel_1d(sigma, truncate):
     return kernel, radius
 
 # --- Convolution using Kahan summation ---
-@njit(parallel=True, fastmath=True, cache=True)
+@njit(parallel=False, fastmath=True, cache=True)
 def convolve_vertical_kahan(image, output, kernel, radius):
     n, m = image.shape
     for i in prange(n):
@@ -46,7 +46,7 @@ def convolve_vertical_kahan(image, output, kernel, radius):
                 sum_val = t
             output[i, j] = sum_val
 
-@njit(parallel=True, fastmath=True, cache=True)
+@njit(parallel=False, fastmath=True, cache=True)
 def convolve_horizontal_kahan(image, output, kernel, radius):
     n, m = image.shape
     for i in prange(n):
@@ -76,7 +76,7 @@ def _gaussian_filter_2d_kahan(image, sigma, truncate):
     return output
 
 # --- 3D Filtering with scalar sigma ---
-@njit(parallel=True, fastmath=True, cache=True)
+@njit(parallel=False, fastmath=True, cache=True)
 def fast_gaussian_filter_3d_kahan(image, sigma, truncate):
     n, m, c = image.shape
     output = np.empty_like(image)
@@ -90,7 +90,7 @@ def fast_gaussian_filter_3d_kahan(image, sigma, truncate):
     return output
 
 # --- 3D Filtering with per-channel sigma ---
-@njit(parallel=True, fastmath=True, cache=True)
+@njit(parallel=False, fastmath=True, cache=True)
 def fast_gaussian_filter_3d_multi_kahan(image, sigma_arr, truncate):
     n, m, c = image.shape
     output = np.empty_like(image)

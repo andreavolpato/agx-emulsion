@@ -2,7 +2,7 @@ import numpy as np
 import scipy
 import scipy.ndimage
 from agx_emulsion.utils.fast_stats import fast_binomial, fast_poisson, fast_lognormal_from_mean_std
-from agx_emulsion.utils.fast_gaussian_filter import fast_gaussian_filter
+# from agx_emulsion.utils.fast_gaussian_filter import fast_gaussian_filter
 
 ################################################################################
 # Grain (very simple model)
@@ -44,8 +44,8 @@ def layer_particle_model(density,
         grain = np.double(grain)*od_particle*saturation
     
     if blur_particle>0:
-        # grain = scipy.ndimage.gaussian_filter(grain, blur_particle*np.sqrt(od_particle))
-        grain = fast_gaussian_filter(grain, blur_particle*np.sqrt(od_particle))
+        grain = scipy.ndimage.gaussian_filter(grain, blur_particle*np.sqrt(od_particle))
+        # grain = fast_gaussian_filter(grain, blur_particle*np.sqrt(od_particle))
     return grain
 
 def add_micro_structure(density_cmy_out, micro_structure, pixel_size_um):
@@ -154,8 +154,8 @@ def apply_grain_to_density_layers(density_cmy_layers, # x,y,sublayers,rgb
     # final
     density_cmy_out -= density_min
     if grain_blur>0:
-        # density_cmy_out = scipy.ndimage.gaussian_filter(density_cmy_out, (grain_blur, grain_blur, 0))
-        density_cmy_out = fast_gaussian_filter(density_cmy_out, grain_blur)
+        density_cmy_out = scipy.ndimage.gaussian_filter(density_cmy_out, (grain_blur, grain_blur, 0))
+        # density_cmy_out = fast_gaussian_filter(density_cmy_out, grain_blur)
     return density_cmy_out
 
 # TODO: make grain parameter with RMS granularity

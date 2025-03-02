@@ -13,7 +13,7 @@ from agx_emulsion.model.grain import apply_grain_to_density, apply_grain_to_dens
 # from agx_emulsion.model.parametric import parametric_density_curves_model
 from agx_emulsion.utils.fast_stats import fast_lognormal_from_mean_std
 from agx_emulsion.utils.fast_interp import fast_interp
-from agx_emulsion.utils.fast_gaussian_filter import fast_gaussian_filter
+# from agx_emulsion.utils.fast_gaussian_filter import fast_gaussian_filter
 
 ################################################################################
 # AgXEmusion main class
@@ -68,8 +68,8 @@ def lognorm_from_mean_std(M, S):
 def compute_random_glare_amount(amount, roughness, blur, shape):
     random_glare = fast_lognormal_from_mean_std(amount*np.ones(shape),
                                                 roughness*amount*np.ones(shape))
-    # random_glare = scipy.ndimage.gaussian_filter(random_glare, blur)
-    random_glare = fast_gaussian_filter(random_glare, blur)
+    random_glare = scipy.ndimage.gaussian_filter(random_glare, blur)
+    # random_glare = fast_gaussian_filter(random_glare, blur)
     random_glare /= 100
     return random_glare
 
