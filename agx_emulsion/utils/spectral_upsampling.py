@@ -13,7 +13,7 @@ from agx_emulsion.model.illuminants import standard_illuminant
 # LUT generatation of irradiance spectra for any xy chromaticity
 # Thanks to hanatos for providing luts and sample code to develop this. I am grateful.
 
-def load_coeffs_lut(filename='hanatos_irradiance_xy_coeffs_250221.lut'):
+def load_coeffs_lut(filename='hanatos_irradiance_xy_coeffs_250304.lut'):
     # load lut of coefficients for efficient computations of irradiance spectra
     # formatting
     header_fmt = '=4i'
@@ -89,11 +89,11 @@ def compute_spectra_from_coeffs(coeffs, smooth_steps=1):
     spectra = np.apply_along_axis(interp_slice, axis=-1, wl=wl, wl_up=wl_up, arr=spectra)
     return spectra
 
-def compute_lut_spectra(lut_size=128, smooth_steps=1):
+def compute_lut_spectra(lut_size=128, smooth_steps=1, lut_coeffs_filename='hanatos_irradiance_xy_coeffs_250304.lut'):
     v = np.linspace(0,1,lut_size)
     tx,ty = np.meshgrid(v,v, indexing='ij')
     tc = np.stack((tx,ty), axis=-1)
-    lut_coeffs = load_coeffs_lut()
+    lut_coeffs = load_coeffs_lut(lut_coeffs_filename)
     coeffs = fetch_coeffs(tc, lut_coeffs)
     lut_spectra = compute_spectra_from_coeffs(coeffs, smooth_steps=smooth_steps)
     lut_spectra = np.array(lut_spectra, dtype=np.half)
