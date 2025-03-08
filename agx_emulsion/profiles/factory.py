@@ -284,7 +284,7 @@ def create_profile(stock='kodak_portra_400',
         profile.glare.percent = 0.1
         profile.glare.roughness = 0.4
         profile.glare.blur = 0.5
-        profile.glare.compensation_removal_factor = 0.1
+        profile.glare.compensation_removal_factor = 0.0
         profile.glare.compensation_removal_density = 1.2
         profile.glare.compensation_removal_transition = 0.3
         

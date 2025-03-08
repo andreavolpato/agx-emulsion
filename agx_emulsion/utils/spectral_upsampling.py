@@ -190,11 +190,11 @@ def rgb_to_raw_hanatos2025(rgb, sensitivity,
     data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_xy_tc.npy')
     with data_path.open('rb') as file:
         spectra_lut = np.double(np.load(file))
-    tc_lut  = contract('ijl,lm->ijm', spectra_lut, sensitivity)
 
     # spectra lut is in linear rec2020
     tc_raw, b = rgb_to_tc_b(rgb, color_space=color_space, apply_cctf_decoding=apply_cctf_decoding, 
                             reference_illuminant=reference_illuminant)
+    tc_lut  = contract('ijl,lm->ijm', spectra_lut, sensitivity)
     raw = apply_lut_cubic_2d(tc_lut, tc_raw)
     raw *= b[...,None] # scale the raw back with the scale factor
     # raw = np.nan_to_num(raw) # make sure nans are removed

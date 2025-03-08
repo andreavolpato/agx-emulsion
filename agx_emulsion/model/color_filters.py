@@ -51,6 +51,10 @@ class DichroicFilters():
         
         if brand=='thorlabs':
             self.filters = load_dichroic_filters(self.wavelengths, brand)
+        
+        # set max value of filters to 1, to increase the range
+        for i in np.arange(3):
+            self.filters[:,i] = self.filters[:,i]/np.max(self.filters[:,i])
             
     def plot(self):
         _, ax = plt.subplots()
