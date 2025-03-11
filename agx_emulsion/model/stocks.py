@@ -48,6 +48,7 @@ def fit_print_filters(profile):
     p = copy.copy(profile)
     p.debug.deactivate_spatial_effects = True
     p.debug.deactivate_stochastic_effects = True
+    p.print_paper.glare.compensation_removal_factor = 0.0
     p.io.input_cctf_decoding = False
     p.io.resize_factor = 1.0
     p.camera.auto_exposure = False

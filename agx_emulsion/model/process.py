@@ -6,7 +6,7 @@ from opt_einsum import contract
 import skimage.transform
 
 from agx_emulsion.config import ENLARGER_STEPS, STANDARD_OBSERVER_CMFS
-from agx_emulsion.model.emulsion import Film, compute_density_spectral, develop_simple, compute_random_glare_amount
+from agx_emulsion.model.emulsion import Film, compute_density_spectral, develop_simple, compute_random_glare_amount, remove_viewing_glare_comp
 from agx_emulsion.utils.autoexposure import measure_autoexposure_ev
 from agx_emulsion.utils.conversions import density_to_light
 from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_to_raw_hanatos2025, compute_band_pass_filter
@@ -133,8 +133,8 @@ class AgXPhoto():
         exposure_ev = self._auto_exposure(image)
         image, preview_resize_factor, pixel_size_um = self._crop_and_rescale(image)
         
-        # apply special effects to profiles
-        # self._apply_special_things()
+        # apply profiles changes
+        self._apply_profiles_changes()
         
         if not self.io.full_image: # activate grain, halation, and glare only with full image
             self.negative.grain.active = False
@@ -192,6 +192,17 @@ class AgXPhoto():
             pixel_size_um /= preview_resize_factor*upscale_factor
         return image, preview_resize_factor, pixel_size_um
     
+    @timeit('_apply_profiles_changes')
+    def _apply_profiles_changes(self):
+        if self.print_paper.glare.compensation_removal_factor>0:
+            le = self.print_paper.data.log_exposure
+            dc = self.print_paper.data.density_curves
+            dc_out = remove_viewing_glare_comp(le, dc,
+                                      factor=self.print_paper.glare.compensation_removal_factor,
+                                      density=self.print_paper.glare.compensation_removal_density,
+                                      transition=self.print_paper.glare.compensation_removal_transition)
+            self.print_paper.data.density_curves = dc_out    
+                
     @timeit('_expose_film')
     def _expose_film(self, image, exposure_ev, pixel_size_um):
         raw = self._rgb_to_film_raw(image, exposure_ev,
