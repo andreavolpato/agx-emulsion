@@ -2624,7 +2624,7 @@
         "percent": 0.1,
         "roughness": 0.4,
         "blur": 0.5,
-        "compensation_removal_factor": 0.1,
+        "compensation_removal_factor": 0.0,
         "compensation_removal_density": 1.2,
         "compensation_removal_transition": 0.3
     }

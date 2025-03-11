@@ -52,9 +52,9 @@ class DichroicFilters():
         if brand=='thorlabs':
             self.filters = load_dichroic_filters(self.wavelengths, brand)
         
-        # set max value of filters to 1, to increase the range
-        for i in np.arange(3):
-            self.filters[:,i] = self.filters[:,i]/np.max(self.filters[:,i])
+        # # set max value of filters to 1, to increase the range
+        # for i in np.arange(3):
+        #     self.filters[:,i] = self.filters[:,i]/np.max(self.filters[:,i])
             
     def plot(self):
         _, ax = plt.subplots()
@@ -97,7 +97,7 @@ schott_kg5_heat_filter = GenericFilter(name='KG5', type='heat_absorbing', brand=
 def color_enlarger(light_source, y_filter_value, m_filter_value, c_filter_value=0,
                    enlarger_steps=ENLARGER_STEPS,
                    filters=thorlabs_dichroic_filters,
-                   heat_filter=schott_kg5_heat_filter):
+                   heat_filter=schott_kg3_heat_filter):
     ymc_filter_values = np.array([y_filter_value, m_filter_value, c_filter_value]) / enlarger_steps
     filtered_illuminant = filters.apply(light_source, values=ymc_filter_values)
     filtered_illuminant = heat_filter.apply(filtered_illuminant)
