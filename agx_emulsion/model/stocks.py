@@ -36,9 +36,12 @@ class PrintPapers(Enum):
     kodak_supra_endura = 'kodak_supra_endura_uc'
     kodak_portra_endura = 'kodak_portra_endura_uc'
     fujifilm_crystal_archive_typeii = 'fujifilm_crystal_archive_typeii_uc'
+    kodak_2393 = 'kodak_2393_uc'
 
 class Illuminants(Enum):
     lamp = 'BB3200'
+    # bulb = 'T'
+    # cine = 'K75P'
     # led_rgb = 'LED-RGB1'
 
 def fit_print_filters(profile):
@@ -49,6 +52,7 @@ def fit_print_filters(profile):
     p.io.resize_factor = 1.0
     p.camera.auto_exposure = False
     p.enlarger.print_exposure_compensation = False
+    p.settings.rgb_to_raw_method = 'mallett2019'
     midgray_rgb = np.array([[[0.184, 0.184, 0.184]]])
     c_filter = p.enlarger.c_filter_neutral
     
@@ -95,7 +99,7 @@ if __name__=='__main__':
         portra_endura.plot_midgray_density_test()
         # provia100f.plot_midgray_density_test()
     
-    def make_ymc_filters_dictionary():
+    def make_ymc_filters_dictionary(PrintPapers, Illuminants, FilmStocks):
         ymc_filters_0 = {}
         residues = {}
         for paper in PrintPapers:
@@ -132,9 +136,8 @@ if __name__=='__main__':
                             y0 = np.clip(y0, 0, 1)*(1-r) + np.random.uniform(0,1)*r
                             m0 = np.clip(m0, 0, 1)*(1-r) + np.random.uniform(0,1)*r
                             
-                            p = photo_params(negative=stock.value, print_paper=paper.value)
+                            p = photo_params(negative=stock.value, print_paper=paper.value, ymc_filters_from_database=False)
                             p.enlarger.illuminant = light.value
-                            p.scanner.illuminant = 'D55'
                             p.enlarger.y_filter_neutral = y0
                             p.enlarger.m_filter_neutral = m0
                             p.enlarger.c_filter_neutral = c0
@@ -144,7 +147,7 @@ if __name__=='__main__':
                             residues[paper.value][light.value][stock.value] = np.sum(np.abs(res))
         return ymc_filters_out
     
-    ymc_filters, residues = make_ymc_filters_dictionary()
+    ymc_filters, residues = make_ymc_filters_dictionary(PrintPapers, Illuminants, FilmStocks)
     ymc_filters = fit_all_stocks(ymc_filters, residues, iterations=20)
     save_ymc_filter_values(ymc_filters)
 

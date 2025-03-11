@@ -63,8 +63,8 @@ def apply_halation_um(raw, halation, pixel_size_um):
 def apply_gaussian_blur(data, sigma):
     if sigma > 0:
         return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
-        data = np.double(data)
-        data = np.ascontiguousarray(data)
+        # data = np.double(data)
+        # data = np.ascontiguousarray(data)
         # return fast_gaussian_filter(data, sigma)
     else:
         return data
@@ -72,9 +72,9 @@ def apply_gaussian_blur(data, sigma):
 def apply_gaussian_blur_um(data, sigma_um, pixel_size_um):
     sigma = sigma_um / pixel_size_um
     if sigma > 0:
-        # return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
+        return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
         # data = np.double(data)
         # data = np.ascontiguousarray(data)
-        return fast_gaussian_filter(data, sigma)
+        # return fast_gaussian_filter(data, sigma)
     else:
         return data

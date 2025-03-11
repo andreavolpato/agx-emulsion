@@ -5,7 +5,7 @@ import scipy.interpolate
 import matplotlib.pyplot as plt
 import importlib
 from agx_emulsion.config import SPECTRAL_SHAPE, ENLARGER_STEPS
-from agx_emulsion.utils.io import load_dichroic_filters
+from agx_emulsion.utils.io import load_dichroic_filters, load_filter
 
 ################################################################################
 # Color Filter class
@@ -66,17 +66,39 @@ class DichroicFilters():
         filtered_illuminant = illuminant*total_filter
         return filtered_illuminant
 
+class GenericFilter():
+    def __init__(self,
+                 name='KG3',
+                 type='heat_absorbing',
+                 brand='schott'):
+        self.wavelengths = SPECTRAL_SHAPE.wavelengths
+        self.type = type
+        self.brand = brand
+        self.transmittance = load_filter(self.wavelengths, name, brand, type)
+    
+    def apply(self, illuminant, value=1.0):
+        dimmed_filter = 1 - (1-self.transmittance)*value
+        filtered_illuminant = illuminant*dimmed_filter
+        return filtered_illuminant
+
 # color filter variables
 dichroic_filters = DichroicFilters()
 thorlabs_dichroic_filters = DichroicFilters(brand='thorlabs')
+schott_kg3_heat_filter = GenericFilter(name='KG3', type='heat_absorbing', brand='schott')
+schott_kg5_heat_filter = GenericFilter(name='KG5', type='heat_absorbing', brand='schott')
+
 
 ################################################################################
 
 def color_enlarger(light_source, y_filter_value, m_filter_value, c_filter_value=0,
-                   enlarger_steps=ENLARGER_STEPS, filters=thorlabs_dichroic_filters):
+                   enlarger_steps=ENLARGER_STEPS,
+                   filters=thorlabs_dichroic_filters,
+                   heat_filter=schott_kg5_heat_filter):
     ymc_filter_values = np.array([y_filter_value, m_filter_value, c_filter_value]) / enlarger_steps
     filtered_illuminant = filters.apply(light_source, values=ymc_filter_values)
+    filtered_illuminant = heat_filter.apply(filtered_illuminant)
     return filtered_illuminant
+
         
 if __name__=="__main__":
     from agx_emulsion.model.illuminants import standard_illuminant

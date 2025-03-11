@@ -514,7 +514,7 @@ def process_negative_profile(raw_profile,
     plot_profile(profile, unmixed=True, original=raw_profile)
     return profile
 
-def process_paper_profile(raw_profile, align_midscale_exposures=True):
+def process_paper_profile(raw_profile, align_midscale_exposures=False):
     profile = copy.copy(raw_profile)
     profile = remove_density_min(profile)
     profile = adjust_log_exposure(profile)

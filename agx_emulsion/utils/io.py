@@ -112,6 +112,9 @@ def interpolate_to_common_axis(data, new_x,
     sorted_indexes = np.argsort(x)
     x = x[sorted_indexes]
     y = y[sorted_indexes]
+    unique_index = np.unique(x, return_index=True)[1]
+    x = x[unique_index]
+    y = y[unique_index]
     if method=='cubic':
         interpolator = scipy.interpolate.CubicSpline(x, y, extrapolate=extrapolate)
     elif method=='linear':
@@ -253,8 +256,26 @@ def load_dichroic_filters(wavelengths, brand='thorlabs'):
             filters[:,i] = scipy.interpolate.CubicSpline(data[:,0], data[:,1]/100)(wavelengths)
     return filters
 
+def load_filter(wavelengths, name='KG3', brand='schott', filter_type='heat_absorbing', percent_transmittance=False):
+    transmittance = np.zeros_like(wavelengths)
+    package = pkg_resources.files('agx_emulsion.data.filters.'+filter_type)
+    filename = brand+'/'+name+'.csv'
+    resource = package / filename
+    if percent_transmittance: scale = 100
+    else: scale = 1
+    with resource.open("r") as file:
+        data = np.loadtxt(file, delimiter=',')
+        unique_index = np.unique(data[:,0], return_index=True)[1]
+        data = data[unique_index,:]
+        transmittance = scipy.interpolate.CubicSpline(data[:,0], data[:,1]/scale)(wavelengths)
+    return transmittance
+
 if __name__ == '__main__':
-    load_agx_emulsion_data()
-    read_neutral_ymc_filter_values()
+    import matplotlib.pyplot as plt
+    # load_agx_emulsion_data()
+    # read_neutral_ymc_filter_values()
     # load_densitometer_data()
+    kg3 = load_filter(SPECTRAL_SHAPE.wavelengths)
+    plt.plot(SPECTRAL_SHAPE.wavelengths, kg3)
+    plt.show()
     

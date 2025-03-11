@@ -185,7 +185,7 @@ def simulation(input_layer:Image,
                auto_exposure_method=AutoExposureMethods.center_weighted,
                # print parameters
                print_paper=PrintPapers.kodak_portra_endura,
-            #    print_illuminant=Illuminants.lamp,
+               print_illuminant=Illuminants.lamp,
                print_exposure=1.0,
                print_exposure_compensation=True,
                print_y_filter_shift=0,
@@ -272,7 +272,7 @@ def simulation(input_layer:Image,
     # params.negative.parametric.density_curves.toe_size = curves.toe_size.value
     # params.negative.parametric.density_curves.shoulder_size = curves.shoulder_size.value
 
-    # params.enlarger.illuminant = print_illuminant.value
+    params.enlarger.illuminant = print_illuminant.value
     params.enlarger.print_exposure = print_exposure
     params.enlarger.print_exposure_compensation = print_exposure_compensation
     params.enlarger.y_filter_shift = print_y_filter_shift
@@ -319,7 +319,7 @@ simulation.auto_exposure.tooltip = 'Automatically adjust exposure based on the i
 simulation.film_format_mm.tooltip = 'Long edge of the film format in millimeters, e.g. 35mm or 60mm'
 simulation.camera_lens_blur_um.tooltip = 'Sigma of gaussian filter in um for the camera lens blur. About 5 um for typical lenses, down to 2-4 um for high quality lenses, used for sharp input simulations without lens blur.'
 simulation.print_paper.tooltip = 'Print paper to simulate'
-# simulation.print_illuminant.tooltip = 'Print illuminant to simulate'
+simulation.print_illuminant.tooltip = 'Print illuminant to simulate'
 simulation.print_exposure.tooltip = 'Exposure value for the print (proportional to seconds of exposure, not ev)'
 simulation.print_exposure_compensation.tooltip = 'Apply exposure compensation from negative exposure compensation ev, allow for changing of the negative exposure compensation while keeping constant print time.'
 simulation.print_y_filter_shift.tooltip = 'Y filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
