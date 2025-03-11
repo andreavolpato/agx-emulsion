@@ -41,6 +41,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.camera.filter_ir = (1, 675, 15)
     
     params.enlarger.illuminant = 'BB3200'
+    params.enlarger.heat_filter = 'KG3'
     params.enlarger.print_exposure = 1.0
     params.enlarger.print_exposure_compensation = True
     params.enlarger.y_filter_shift = 0.0
