@@ -10,9 +10,14 @@ from agx_emulsion.utils.io import save_ymc_filter_values
 # TODO: move this file to scripts to produce YMC neutral values
 
 class FilmStocks(Enum):
+    kodak_ektar_100 = 'kodak_ektar_100_auc'
+    kodak_portra_160 = 'kodak_portra_160_auc'
     kodak_portra_400 = 'kodak_portra_400_auc'
-    kodak_ultramax_400 = 'kodak_ultramax_400_auc'
+    kodak_portra_800 = 'kodak_portra_800_auc'
+    kodak_portra_800_push1 = 'kodak_portra_800_push1_auc'
+    kodak_portra_800_push2 = 'kodak_portra_800_push2_auc'
     kodak_gold_200 = 'kodak_gold_200_auc'
+    kodak_ultramax_400 = 'kodak_ultramax_400_auc'
     kodak_vision3_50d = 'kodak_vision3_50d_uc'
     # kodak_vision3_50d_uh = 'kodak_vision3_50d_uh'
     # kodak_vision3_50d_uhc = 'kodak_vision3_50d_uhc'
@@ -36,10 +41,11 @@ class PrintPapers(Enum):
     kodak_supra_endura = 'kodak_supra_endura_uc'
     kodak_portra_endura = 'kodak_portra_endura_uc'
     fujifilm_crystal_archive_typeii = 'fujifilm_crystal_archive_typeii_uc'
+    kodak_2383 = 'kodak_2383_uc'
     kodak_2393 = 'kodak_2393_uc'
 
 class Illuminants(Enum):
-    lamp = 'BB3200'
+    lamp = 'TH-KG3'
     # bulb = 'T'
     # cine = 'K75P'
     # led_rgb = 'LED-RGB1'
@@ -50,10 +56,10 @@ def fit_print_filters(profile):
     p.debug.deactivate_stochastic_effects = True
     p.print_paper.glare.compensation_removal_factor = 0.0
     p.io.input_cctf_decoding = False
+    p.io.input_color_space = 'sRGB'
     p.io.resize_factor = 1.0
     p.camera.auto_exposure = False
     p.enlarger.print_exposure_compensation = False
-    p.settings.rgb_to_raw_method = 'mallett2019'
     midgray_rgb = np.array([[[0.184, 0.184, 0.184]]])
     c_filter = p.enlarger.c_filter_neutral
     
@@ -71,7 +77,9 @@ def fit_print_filters(profile):
     y_filter = p.enlarger.y_filter_neutral
     m_filter = p.enlarger.m_filter_neutral
     x0 = [y_filter, m_filter, 1.0]
-    x = scipy.optimize.least_squares(evaluate_residues, x0, bounds=([0, 0, 0], [1, 1, 10]), ftol=1e-6, xtol=1e-6, gtol=1e-6)
+    x = scipy.optimize.least_squares(evaluate_residues, x0, bounds=([0, 0, 0], [1, 1, 10]),
+                                     ftol=1e-6, xtol=1e-6, gtol=1e-6,
+                                     method='trf')
     print(p.negative.info.stock)
     print('Total residues:',np.sum(np.abs(evaluate_residues(x.x))),'<-',evaluate_residues(x0))
     print('Fitted Filters :'+f"[ {x.x[0]:.2f}, {x.x[1]:.2f}, {c_filter:.2f} ]")
@@ -110,7 +118,7 @@ if __name__=='__main__':
                 ymc_filters_0[paper.value][light.value] = {}
                 residues[paper.value][light.value] = {}
                 for film in FilmStocks:
-                    ymc_filters_0[paper.value][light.value][film.value] = [0.60, 0.60, 0.35]
+                    ymc_filters_0[paper.value][light.value][film.value] = [0.90, 0.70, 0.35]
                     residues[paper.value][light.value][film.value] = 0.184
         ymc_filters = copy.copy(ymc_filters_0)
         save_ymc_filter_values(ymc_filters)

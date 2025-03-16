@@ -11,6 +11,7 @@ from agx_emulsion.profiles.correct import align_midscale_neutral_exposures
 from agx_emulsion.model.density_curves import fit_density_curve, compute_density_curves, compute_density_curves_layers
 from agx_emulsion.utils.io import load_agx_emulsion_data, load_densitometer_data
 from agx_emulsion.profiles.io import load_profile
+from agx_emulsion.model.illuminants import standard_illuminant
 
 ################################################################################
 # Fittings
@@ -110,7 +111,7 @@ def fit_log_scaled_absortion_coefficients(sensitivity, crosstalk_matrix, density
     log_absorption_coefficients = np.zeros(sensitivity_log_exposures.shape)
     log_absorption_coefficients_0 = np.log10(sensitivity)
     log_absorption_coefficients_0[np.isnan(log_absorption_coefficients_0)] = np.nanmin(log_absorption_coefficients_0)-6
-    for i in np.arange(sensitivity_log_exposures.shape[0]):
+    for i in np.arange(sensitivity_log_exposures.shape[0]): # for every i-th wavelength
         def residues(log_absorption_coefficients_rgb):
             res = target - densitometer_densities_at_sensitivity_log_exposures(log_absorption_coefficients_rgb, sensitivity_log_exposures[i,:])
             return res
@@ -146,6 +147,7 @@ def unmix_sensitivity(profile, control_plot=False):
     type = profile.info.type
     sensitivity_density_level = profile.info.log_sensitivity_density_over_min
     sensitivity = 10**log_sensitivity
+    illuminant = standard_illuminant(profile.info.reference_illuminant)
 
     # cross talk matrix
     dr = load_densitometer_data(type=profile.info.densitometer)
@@ -169,7 +171,8 @@ def unmix_sensitivity(profile, control_plot=False):
 
     # save sensitivity
     print(log_absorption_coefficients.shape)
-    profile.data.log_sensitivity = log_absorption_coefficients
+    # log_sensitivity = np.log10(10**log_absorption_coefficients / illuminant[:,None]) # correct by illuminant
+    profile.data.log_sensitivity = log_sensitivity
     
     if control_plot:
         _, ax = plt.subplots()
@@ -197,7 +200,7 @@ def create_profile(stock='kodak_portra_400',
                    denisty_curves_donor=None,
                    dye_density_cmy_donor=None,
                    dye_density_min_mid_donor=None,
-                   reference_illuminant='D55',
+                   reference_illuminant='D55-KG3',
                    viewing_illuminant='D50',
                    ):
     ls, d, wl, c, le = load_agx_emulsion_data(stock=stock,
@@ -308,7 +311,7 @@ def remove_density_min(profile):
     # if positive or paper, add b+f to the dye_density min and mid
     if type=='paper' or type=='positive':
         status_a_max_peak = [445, 530, 610] # nm, plus two far values for extrapolation
-        smin = np.interp(wl, status_a_max_peak, dc_min)
+        smin = np.interp(wl, status_a_max_peak, np.flip(dc_min))
         sigma = 20 # nm
         sigma_points = sigma / np.mean(np.diff(wl))
         smin = scipy.ndimage.gaussian_filter1d(smin, sigma_points)

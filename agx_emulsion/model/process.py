@@ -21,7 +21,7 @@ from agx_emulsion.utils.timings import timeit, plot_timings
 
 ymc_filters = read_neutral_ymc_filter_values()
 
-def photo_params(negative='kodak_vision3_50d_uc',
+def photo_params(negative='kodak_portra_400_auc',
                  print_paper='kodak_portra_endura_uc',
                  ymc_filters_from_database=True):
     params = DotMap()
@@ -40,8 +40,7 @@ def photo_params(negative='kodak_vision3_50d_uc',
     params.camera.filter_uv = (1, 410, 8)
     params.camera.filter_ir = (1, 675, 15)
     
-    params.enlarger.illuminant = 'BB3200'
-    params.enlarger.heat_filter = 'KG3'
+    params.enlarger.illuminant = 'TH-KG3'
     params.enlarger.print_exposure = 1.0
     params.enlarger.print_exposure_compensation = True
     params.enlarger.y_filter_shift = 0.0
@@ -51,8 +50,8 @@ def photo_params(negative='kodak_vision3_50d_uc',
         params.enlarger.m_filter_neutral = ymc_filters[print_paper][params.enlarger.illuminant][negative][1]
         params.enlarger.c_filter_neutral = ymc_filters[print_paper][params.enlarger.illuminant][negative][2]
     else:
-        params.enlarger.y_filter_neutral = 0.6
-        params.enlarger.m_filter_neutral = 0.4
+        params.enlarger.y_filter_neutral = 0.9
+        params.enlarger.m_filter_neutral = 0.5
         params.enlarger.c_filter_neutral = 0.35
     params.enlarger.lens_blur = 0.0
     params.enlarger.preflash_exposure = 0.0

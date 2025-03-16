@@ -6,7 +6,7 @@ import importlib.resources
 from opt_einsum import contract
 import scipy.interpolate
 from agx_emulsion.utils.fast_interp_lut import apply_lut_cubic_2d
-from agx_emulsion.config import SPECTRAL_SHAPE
+from agx_emulsion.config import SPECTRAL_SHAPE, STANDARD_OBSERVER_CMFS
 from agx_emulsion.model.illuminants import standard_illuminant
 
 ################################################################################
@@ -99,6 +99,14 @@ def compute_lut_spectra(lut_size=128, smooth_steps=1, lut_coeffs_filename='hanat
     lut_spectra = np.array(lut_spectra, dtype=np.half)
     return lut_spectra
 
+def illuminant_to_xy(illuminant_label):
+    illu = standard_illuminant(illuminant_label)
+    xyz = np.zeros((3))
+    for i in np.arange(3):
+        xyz[i] = np.sum(illu * STANDARD_OBSERVER_CMFS[:][:,i])
+    xy = xyz[0:2] / np.sum(xyz)
+    return xy
+
 def rgb_to_tc_b(rgb, color_space='ITU-R BT.2020', apply_cctf_decoding=False, reference_illuminant='D55'):
     # source_cs = colour.RGB_COLOURSPACES[color_space]
     # target_cs = source_cs.copy()
@@ -106,7 +114,8 @@ def rgb_to_tc_b(rgb, color_space='ITU-R BT.2020', apply_cctf_decoding=False, ref
     # adapted_rgb = colour.RGB_to_RGB(rgb, input_colourspace=source_cs,
     #                                 output_colourspace=target_cs,
     #                                 adaptation_transform='Bradford')    
-    illu_xy = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer'][reference_illuminant]
+    # illu_xy = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer'][reference_illuminant]
+    illu_xy = illuminant_to_xy(reference_illuminant)
     xyz = colour.RGB_to_XYZ(rgb, colourspace=color_space,
                             apply_cctf_decoding=apply_cctf_decoding,
                             illuminant=illu_xy,

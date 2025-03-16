@@ -1,0 +1,4 @@
+Kodak Professional Ektar 100
+e4046 2016
+log_sensitivity: 0.2D over min
+Status M

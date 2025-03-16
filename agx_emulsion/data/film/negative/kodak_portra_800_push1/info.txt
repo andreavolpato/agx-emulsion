@@ -1,0 +1,4 @@
+Kodak Portra 800 (Push 1)
+datasheet: e4040 2016
+0.2D over min
+status M

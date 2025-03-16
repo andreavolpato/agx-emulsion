@@ -106,7 +106,7 @@ def save_image_oiio(filename, image_data, bit_depth=32):
 ################################################################################
 
 def interpolate_to_common_axis(data, new_x,
-                               extrapolate=False, method='cubic'):
+                               extrapolate=False, method='akima'):
     x = data[0]
     y = data[1]
     sorted_indexes = np.argsort(x)
@@ -117,6 +117,8 @@ def interpolate_to_common_axis(data, new_x,
     y = y[unique_index]
     if method=='cubic':
         interpolator = scipy.interpolate.CubicSpline(x, y, extrapolate=extrapolate)
+    if method=='akima':
+        interpolator = scipy.interpolate.Akima1DInterpolator(x, y, extrapolate=extrapolate)
     elif method=='linear':
         def interpolator(x_new):
             return np.interp(x_new, x, y) #, left=np.nan, right=np.nan)
@@ -253,6 +255,8 @@ def load_dichroic_filters(wavelengths, brand='thorlabs'):
         resource = package / filename
         with resource.open("r") as file:
             data = np.loadtxt(file, delimiter=',')
+            unique_index = np.unique(data[:,0], return_index=True)[1]
+            data = data[unique_index,:]
             filters[:,i] = scipy.interpolate.CubicSpline(data[:,0], data[:,1]/100)(wavelengths)
     return filters
 

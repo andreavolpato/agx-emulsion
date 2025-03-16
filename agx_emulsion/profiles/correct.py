@@ -75,13 +75,13 @@ def fit_corrections_from_grey_ramp(p0, data_trustability=1.0, stretch_curves=Fal
 def gray_ramp(p0, density_scale=[1,1,1], shift_corr=[0,0,0], stretch_corr=[1,1,1]):
     pl = copy.copy(p0)
     pl.io.input_cctf_decoding = False
+    pl.io.input_color_space = 'sRGB'
     pl.debug.deactivate_spatial_effects = True
     pl.debug.deactivate_stochastic_effects = True
     pl.print_paper.glare.active = False
     pl.io.output_cctf_encoding = False
     pl.settings.rgb_to_raw_method = 'mallett2019'
     pl.negative = apply_scale_shift_stretch_density_curves(pl.negative, density_scale, shift_corr, stretch_corr)
-    # fit_print_filters(pl)
     midgray_rgb = np.array([[[0.184,0.184,0.184]]])
     # gradient = (2**np.linspace(-2,2,5))[None,:,None]
     # reference = midgray_rgb*gradient

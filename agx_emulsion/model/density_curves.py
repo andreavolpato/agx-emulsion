@@ -74,7 +74,7 @@ def guess_start_and_bounds_norm_cdfs(loge, data, type):
             ]
         x_ub = [
             np.max(data), np.max(data), np.max(data),
-            2.7, 2.7, 2.7,
+            5.0, 5.0, 5.0,
             1, 1, 1,
             ]
     elif type=='negative':

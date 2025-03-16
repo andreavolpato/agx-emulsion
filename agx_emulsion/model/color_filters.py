@@ -3,7 +3,6 @@ import scipy
 import colour
 import scipy.interpolate
 import matplotlib.pyplot as plt
-import importlib
 from agx_emulsion.config import SPECTRAL_SHAPE, ENLARGER_STEPS
 from agx_emulsion.utils.io import load_dichroic_filters, load_filter
 
@@ -47,14 +46,7 @@ class DichroicFilters():
                  brand='thorlabs'):
         self.wavelengths = SPECTRAL_SHAPE.wavelengths
         self.filters = np.zeros((np.size(self.wavelengths), 3))
-        channels = ['y','m','c']
-        
-        if brand=='thorlabs':
-            self.filters = load_dichroic_filters(self.wavelengths, brand)
-        
-        # # set max value of filters to 1, to increase the range
-        # for i in np.arange(3):
-        #     self.filters[:,i] = self.filters[:,i]/np.max(self.filters[:,i])
+        self.filters = load_dichroic_filters(self.wavelengths, brand)
             
     def plot(self):
         _, ax = plt.subplots()
@@ -88,6 +80,9 @@ class GenericFilter():
 # color filter variables
 dichroic_filters = DichroicFilters()
 thorlabs_dichroic_filters = DichroicFilters(brand='thorlabs')
+edmund_optics_dichroic_filters = DichroicFilters(brand='edmund_optics')
+durst_digital_light_dicrhoic_filters = DichroicFilters(brand='durst_digital_light')
+schott_kg1_heat_filter = GenericFilter(name='KG1', type='heat_absorbing', brand='schott')
 schott_kg3_heat_filter = GenericFilter(name='KG3', type='heat_absorbing', brand='schott')
 schott_kg5_heat_filter = GenericFilter(name='KG5', type='heat_absorbing', brand='schott')
 
@@ -96,24 +91,22 @@ schott_kg5_heat_filter = GenericFilter(name='KG5', type='heat_absorbing', brand=
 
 def color_enlarger(light_source, y_filter_value, m_filter_value, c_filter_value=0,
                    enlarger_steps=ENLARGER_STEPS,
-                   filters=thorlabs_dichroic_filters,
-                   heat_filter=schott_kg3_heat_filter):
+                   filters=durst_digital_light_dicrhoic_filters):
     ymc_filter_values = np.array([y_filter_value, m_filter_value, c_filter_value]) / enlarger_steps
     filtered_illuminant = filters.apply(light_source, values=ymc_filter_values)
-    filtered_illuminant = heat_filter.apply(filtered_illuminant)
     return filtered_illuminant
 
         
 if __name__=="__main__":
     from agx_emulsion.model.illuminants import standard_illuminant
     
-    filters = DichroicFilters()
+    filters = DichroicFilters(brand='durst_digital_light')
     filters.plot()
     
     plt.figure()
-    d65 = standard_illuminant('D65')
+    d65 = standard_illuminant('D55')
     plt.plot(SPECTRAL_SHAPE.wavelengths, d65)
-    plt.plot(SPECTRAL_SHAPE.wavelengths, filters.apply(d65, [0,0,100])[:])
+    plt.plot(SPECTRAL_SHAPE.wavelengths, filters.apply(d65, [0.8,0.0,0])[:])
     plt.xlabel('Wavelength (nm)')
     plt.ylabel('Intensity')
     plt.legend(('Illuminant', 'Filtered Illuminant'))
