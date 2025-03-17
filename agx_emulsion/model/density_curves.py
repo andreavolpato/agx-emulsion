@@ -213,6 +213,7 @@ def fit_density_curve(loge, data,
     loge = loge[~nan_sel]
     data = data[~nan_sel]
     x0, bounds = guesses(loge, data, type)
+    print('density curves x0',x0)
     residues = lambda x: data - model_function(loge, x, type)
     fit = scipy.optimize.least_squares(residues,x0,bounds=bounds)
     return fit.x

@@ -347,8 +347,7 @@ def adjust_log_exposure(profile,
     print('Log exposure refenrece:', le_speed_point)
     le_over_speed_point = np.log10(2**stops_over_speed_point)
     le_midgray = le_speed_point + le_over_speed_point
-    le -= le_midgray
-    profile.data.log_exposure = le
+    profile.data.log_exposure = le - le_midgray
     return profile
 
 def apply_masking_couplers(profile, control_plot=True, effectiveness=1.0, model='erf'):

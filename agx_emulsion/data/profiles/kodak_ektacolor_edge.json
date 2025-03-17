@@ -6,7 +6,7 @@
         "color": true,
         "densitometer": "status_A",
         "log_sensitivity_density_over_min": 1.0,
-        "reference_illuminant": "TH-KG3",
+        "reference_illuminant": "TH-KG3-L",
         "viewing_illuminant": "D50"
     },
     "data": {

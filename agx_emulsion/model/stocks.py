@@ -45,7 +45,7 @@ class PrintPapers(Enum):
     kodak_2393 = 'kodak_2393_uc'
 
 class Illuminants(Enum):
-    lamp = 'TH-KG3'
+    lamp = 'TH-KG3-L'
     # bulb = 'T'
     # cine = 'K75P'
     # led_rgb = 'LED-RGB1'

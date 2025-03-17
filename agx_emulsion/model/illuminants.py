@@ -1,7 +1,7 @@
 import numpy as np
 import colour
 from agx_emulsion.config import SPECTRAL_SHAPE
-from agx_emulsion.model.color_filters import schott_kg3_heat_filter, schott_kg1_heat_filter
+from agx_emulsion.model.color_filters import schott_kg3_heat_filter, schott_kg1_heat_filter, generic_lens_transmission
 
 def black_body_spectrum(temperature):
     values = colour.colorimetry.blackbody.planck_law(SPECTRAL_SHAPE.wavelengths*1e-9, temperature) # to emulate an halogen lamp
@@ -19,15 +19,10 @@ def standard_illuminant(type='D65', return_class=False):
     elif type=='TH-KG3':
         spectral_intensity = black_body_spectrum(3200)
         spectral_intensity.values = schott_kg3_heat_filter.apply(spectral_intensity.values)
-    elif type=='TH-KG1':
+    elif type=='TH-KG3-L': # enlarger source with heat filter and lens transmittance
         spectral_intensity = black_body_spectrum(3200)
         spectral_intensity.values = schott_kg3_heat_filter.apply(spectral_intensity.values)
-    elif type=='D55-KG3':
-        spectral_intensity = colour.SDS_ILLUMINANTS['D55'].copy().align(SPECTRAL_SHAPE)
-        spectral_intensity.values = schott_kg3_heat_filter.apply(spectral_intensity.values)
-    elif type=='D65-KG3':
-        spectral_intensity = colour.SDS_ILLUMINANTS['D65'].copy().align(SPECTRAL_SHAPE)
-        spectral_intensity.values = schott_kg3_heat_filter.apply(spectral_intensity.values)
+        spectral_intensity.values = generic_lens_transmission.apply(spectral_intensity.values)
     else:
         spectral_intensity = colour.SDS_ILLUMINANTS[type].copy().align(SPECTRAL_SHAPE)
     spectral_intensity.name = type

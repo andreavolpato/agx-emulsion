@@ -9,10 +9,10 @@ from agx_emulsion.config import ENLARGER_STEPS, STANDARD_OBSERVER_CMFS
 from agx_emulsion.model.emulsion import Film, compute_density_spectral, develop_simple, compute_random_glare_amount, remove_viewing_glare_comp
 from agx_emulsion.utils.autoexposure import measure_autoexposure_ev
 from agx_emulsion.utils.conversions import density_to_light
-from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_to_raw_hanatos2025, compute_band_pass_filter
+from agx_emulsion.utils.spectral_upsampling import rgb_to_raw_mallett2019, rgb_to_raw_hanatos2025
 from agx_emulsion.utils.lut import compute_with_lut
 from agx_emulsion.model.diffusion import apply_gaussian_blur_um, apply_halation_um, apply_unsharp_mask, apply_gaussian_blur
-from agx_emulsion.model.color_filters import color_enlarger
+from agx_emulsion.model.color_filters import color_enlarger, compute_band_pass_filter
 from agx_emulsion.utils.crop_resize import crop_image
 from agx_emulsion.model.illuminants import standard_illuminant
 from agx_emulsion.utils.io import read_neutral_ymc_filter_values
@@ -40,7 +40,7 @@ def photo_params(negative='kodak_portra_400_auc',
     params.camera.filter_uv = (1, 410, 8)
     params.camera.filter_ir = (1, 675, 15)
     
-    params.enlarger.illuminant = 'TH-KG3'
+    params.enlarger.illuminant = 'TH-KG3-L'
     params.enlarger.print_exposure = 1.0
     params.enlarger.print_exposure_compensation = True
     params.enlarger.y_filter_shift = 0.0

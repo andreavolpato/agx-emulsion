@@ -156,7 +156,7 @@ def load_agx_emulsion_data(stock='kodak_portra_400',
                            type='negative',
                            color=True,
                            spectral_shape=SPECTRAL_SHAPE,
-                           log_exposure=LOG_EXPOSURE,
+                           log_exposure=np.copy(LOG_EXPOSURE),
                            ):
     if    color and type=='negative': maindatapkg = "agx_emulsion.data.film.negative"
     elif  color and type=='positive': maindatapkg = "agx_emulsion.data.film.positive"
@@ -257,7 +257,8 @@ def load_dichroic_filters(wavelengths, brand='thorlabs'):
             data = np.loadtxt(file, delimiter=',')
             unique_index = np.unique(data[:,0], return_index=True)[1]
             data = data[unique_index,:]
-            filters[:,i] = scipy.interpolate.CubicSpline(data[:,0], data[:,1]/100)(wavelengths)
+            # filters[:,i] = scipy.interpolate.CubicSpline(data[:,0], data[:,1]/100)(wavelengths)
+            filters[:,i] = scipy.interpolate.Akima1DInterpolator(data[:,0], data[:,1]/100)(wavelengths)
     return filters
 
 def load_filter(wavelengths, name='KG3', brand='schott', filter_type='heat_absorbing', percent_transmittance=False):
@@ -271,7 +272,8 @@ def load_filter(wavelengths, name='KG3', brand='schott', filter_type='heat_absor
         data = np.loadtxt(file, delimiter=',')
         unique_index = np.unique(data[:,0], return_index=True)[1]
         data = data[unique_index,:]
-        transmittance = scipy.interpolate.CubicSpline(data[:,0], data[:,1]/scale)(wavelengths)
+        # transmittance = scipy.interpolate.CubicSpline(data[:,0], data[:,1]/scale)(wavelengths)
+        transmittance = scipy.interpolate.Akima1DInterpolator(data[:,0], data[:,1]/scale)(wavelengths)
     return transmittance
 
 if __name__ == '__main__':

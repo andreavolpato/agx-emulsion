@@ -37,6 +37,7 @@ def correct_negative_curves_with_gray_ramp(negative_profile,
     # get the parameters
     pl = photo_params(print_paper=target_paper, ymc_filters_from_database=False)
     pl.negative = copy.deepcopy(negative_profile)
+    pl.settings.rgb_to_raw_method = 'mallett2019'
     fit_print_filters(pl)
     
     density_scale, shift_corr, stretch_corr = fit_corrections_from_grey_ramp(pl, data_trustability, stretch_curves)
