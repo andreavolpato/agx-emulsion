@@ -8,4 +8,10 @@ setup(name='agx-emulsion',
       license='GPLv3',
       packages=find_packages(),
       package_data={'agx_emulsion': ['data/**/*']},
-      zip_safe=False)
+      zip_safe=False,
+      entry_points={
+          'console_scripts': [
+              'agx-emulsion = agx_emulsion.gui.main:main',
+          ]
+      },
+      )
