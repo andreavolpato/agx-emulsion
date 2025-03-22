@@ -42,7 +42,7 @@ def tri2quad(tc):
     tc = np.array(tc)
     tx = tc[...,0]
     ty = tc[...,1]
-    y = ty / (1.0 - tx)
+    y = ty / np.fmax(1.0 - tx, 1e-10)
     x = (1.0 - tx)*(1.0 - tx)
     x = np.clip(x, 0, 1)
     y = np.clip(y, 0, 1)
