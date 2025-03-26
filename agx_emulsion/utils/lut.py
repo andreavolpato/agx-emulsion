@@ -19,7 +19,7 @@ def _create_lut_3d(function, xmin=0, xmax=1, steps=32):
 
 def compute_with_lut(data, function, xmin=0, xmax=1, steps=32):
     lut = _create_lut_3d(function, xmin, xmax, steps)
-    return apply_lut_cubic_3d(lut, data)
+    return apply_lut_cubic_3d(lut, data), lut
 
 def warmup_luts():
     """

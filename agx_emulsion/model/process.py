@@ -86,7 +86,7 @@ def photo_params(negative='kodak_portra_400_auc',
     params.settings.use_camera_lut = False
     params.settings.use_enlarger_lut = False
     params.settings.use_scanner_lut = False
-    params.settings.lut_resolution = 32
+    params.settings.lut_resolution = 17
     params.settings.use_fast_stats = False
     
     return params
@@ -226,7 +226,8 @@ class AgXPhoto():
             density_cmy = self._denormalize_film_density(density_cmy_n)
             return self._film_density_cmy_to_print_log_raw(density_cmy)
         log_raw = self._spectral_lut_compute(film_density_cmy_normalized, spectral_calculation,
-                                             use_lut=self.settings.use_enlarger_lut)
+                                             use_lut=self.settings.use_enlarger_lut,
+                                             save_enlarger_lut=True)
         return log_raw
     
     @timeit('_develop_print')
@@ -249,10 +250,16 @@ class AgXPhoto():
         return scan
     
     def _spectral_lut_compute(self, data, spectral_calculation,
-                              use_lut=False):
+                              use_lut=False, 
+                              save_enlarger_lut=False,
+                              save_scanner_lut=False):
         steps = self.settings.lut_resolution
         if use_lut:
-            data_out = compute_with_lut(data, spectral_calculation, steps=steps)
+            data_out, lut = compute_with_lut(data, spectral_calculation, steps=steps)
+            if save_enlarger_lut:
+                self.debug.luts.enlarger_lut = lut
+            if save_scanner_lut:
+                self.debug.luts.scanner_lut = lut
         else:                                   
             data_out = spectral_calculation(data)
         return data_out
@@ -403,7 +410,7 @@ class AgXPhoto():
             log_xyz = np.log10(xyz + 1e-10)
             return log_xyz
         log_xyz = self._spectral_lut_compute(density_cmy_n, spectral_calculation,
-                                             use_lut=use_lut)
+                                             use_lut=use_lut, save_scanner_lut=True)
         xyz = 10**log_xyz
         
         illuminant_xyz = contract('k,kl->l', scan_illuminant, STANDARD_OBSERVER_CMFS[:]) / normalization

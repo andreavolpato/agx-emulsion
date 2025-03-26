@@ -184,7 +184,7 @@ def simulation(input_layer:Image,
                auto_exposure=True,
                auto_exposure_method=AutoExposureMethods.center_weighted,
                # print parameters
-               print_paper=PrintPapers.kodak_portra_endura,
+               print_paper=PrintPapers.kodak_supra_endura,
                print_illuminant=Illuminants.lamp,
                print_exposure=1.0,
                print_exposure_compensation=True,
