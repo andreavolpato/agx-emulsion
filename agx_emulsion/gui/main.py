@@ -300,110 +300,115 @@ def simulation(input_layer:Image,
     scan = np.uint8(scan*255)
     return scan
 
-# add our new magicgui widget to the viewer
-simulation.exposure_compensation_ev.min = -100
-simulation.exposure_compensation_ev.max = 100
-simulation.exposure_compensation_ev.step = 0.5
-simulation.print_exposure.step = 0.05
-simulation.print_y_filter_shift.min = -ENLARGER_STEPS
-simulation.print_y_filter_shift.max = ENLARGER_STEPS
-simulation.print_m_filter_shift.min = -ENLARGER_STEPS
-simulation.print_m_filter_shift.max = ENLARGER_STEPS
-# simulation.print_lens_blur.step = 0.05
-simulation.scan_lens_blur.step = 0.05
+def main():
+    # add our new magicgui widget to the viewer
+    simulation.exposure_compensation_ev.min = -100
+    simulation.exposure_compensation_ev.max = 100
+    simulation.exposure_compensation_ev.step = 0.5
+    simulation.print_exposure.step = 0.05
+    simulation.print_y_filter_shift.min = -ENLARGER_STEPS
+    simulation.print_y_filter_shift.max = ENLARGER_STEPS
+    simulation.print_m_filter_shift.min = -ENLARGER_STEPS
+    simulation.print_m_filter_shift.max = ENLARGER_STEPS
+    # simulation.print_lens_blur.step = 0.05
+    simulation.scan_lens_blur.step = 0.05
 
-# tooltips to help users understand what the widgets do
-simulation.film_stock.tooltip = 'Film stock to simulate'
-simulation.exposure_compensation_ev.tooltip = 'Exposure compensation value in ev of the negative'
-simulation.auto_exposure.tooltip = 'Automatically adjust exposure based on the image content'
-simulation.film_format_mm.tooltip = 'Long edge of the film format in millimeters, e.g. 35mm or 60mm'
-simulation.camera_lens_blur_um.tooltip = 'Sigma of gaussian filter in um for the camera lens blur. About 5 um for typical lenses, down to 2-4 um for high quality lenses, used for sharp input simulations without lens blur.'
-simulation.print_paper.tooltip = 'Print paper to simulate'
-simulation.print_illuminant.tooltip = 'Print illuminant to simulate'
-simulation.print_exposure.tooltip = 'Exposure value for the print (proportional to seconds of exposure, not ev)'
-simulation.print_exposure_compensation.tooltip = 'Apply exposure compensation from negative exposure compensation ev, allow for changing of the negative exposure compensation while keeping constant print time.'
-simulation.print_y_filter_shift.tooltip = 'Y filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
-simulation.print_m_filter_shift.tooltip = 'M filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
-# simulation.print_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the print lens blur'
-simulation.scan_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the scanner lens blur'
-simulation.scan_unsharp_mask.tooltip = 'Apply unsharp mask to the scan, [sigma in pixel, amount]'
-simulation.output_color_space.tooltip = 'Color space of the output image'
-simulation.output_cctf_encoding.tooltip = 'Apply the cctf transfer function of the color space. If false, data is linear.'
-simulation.compute_negative.tooltip = 'Show a scan of the negative instead of the print'
-simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active.'
-simulation.call_button.tooltip = 'Run the simulation. Note: grain and halation computed only when compute_full_image is clicked.'
+    # tooltips to help users understand what the widgets do
+    simulation.film_stock.tooltip = 'Film stock to simulate'
+    simulation.exposure_compensation_ev.tooltip = 'Exposure compensation value in ev of the negative'
+    simulation.auto_exposure.tooltip = 'Automatically adjust exposure based on the image content'
+    simulation.film_format_mm.tooltip = 'Long edge of the film format in millimeters, e.g. 35mm or 60mm'
+    simulation.camera_lens_blur_um.tooltip = 'Sigma of gaussian filter in um for the camera lens blur. About 5 um for typical lenses, down to 2-4 um for high quality lenses, used for sharp input simulations without lens blur.'
+    simulation.print_paper.tooltip = 'Print paper to simulate'
+    simulation.print_illuminant.tooltip = 'Print illuminant to simulate'
+    simulation.print_exposure.tooltip = 'Exposure value for the print (proportional to seconds of exposure, not ev)'
+    simulation.print_exposure_compensation.tooltip = 'Apply exposure compensation from negative exposure compensation ev, allow for changing of the negative exposure compensation while keeping constant print time.'
+    simulation.print_y_filter_shift.tooltip = 'Y filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
+    simulation.print_m_filter_shift.tooltip = 'M filter shift of the color enlarger from a neutral position, enlarger has 170 steps'
+    # simulation.print_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the print lens blur'
+    simulation.scan_lens_blur.tooltip = 'Sigma of gaussian filter in pixel for the scanner lens blur'
+    simulation.scan_unsharp_mask.tooltip = 'Apply unsharp mask to the scan, [sigma in pixel, amount]'
+    simulation.output_color_space.tooltip = 'Color space of the output image'
+    simulation.output_cctf_encoding.tooltip = 'Apply the cctf transfer function of the color space. If false, data is linear.'
+    simulation.compute_negative.tooltip = 'Show a scan of the negative instead of the print'
+    simulation.compute_full_image.tooltip = 'Do not apply preview resize, compute full resolution image. Keeps the crop if active.'
+    simulation.call_button.tooltip = 'Run the simulation. Note: grain and halation computed only when compute_full_image is clicked.'
 
-special.film_gamma_factor.tooltip = 'Gamma factor of the density curves of the negative, < 1 reduce contrast, > 1 increase contrast'
-special.print_gamma_factor.tooltip = 'Gamma factor of the print paper, < 1 reduce contrast, > 1 increase contrast'
-special.print_gamma_factor.step = 0.05
-special.print_density_min_factor.tooltip = 'Minimum density factor of the print paper (0-1), make the white less white'
-special.print_density_min_factor.min = 0
-special.print_density_min_factor.step = 0.2
-special.print_density_min_factor.max = 1
+    special.film_gamma_factor.tooltip = 'Gamma factor of the density curves of the negative, < 1 reduce contrast, > 1 increase contrast'
+    special.print_gamma_factor.tooltip = 'Gamma factor of the print paper, < 1 reduce contrast, > 1 increase contrast'
+    special.print_gamma_factor.step = 0.05
+    special.print_density_min_factor.tooltip = 'Minimum density factor of the print paper (0-1), make the white less white'
+    special.print_density_min_factor.min = 0
+    special.print_density_min_factor.step = 0.2
+    special.print_density_min_factor.max = 1
 
-glare.active.tooltip = 'Add glare to the print'
-glare.percent.tooltip = 'Percentage of the glare light (typically 0.1-0.25)'
-glare.percent.step = 0.05
-glare.roughness.tooltip = 'Roughness of the glare light (0-1)'
-glare.blur.tooltip = 'Sigma of gaussian blur in pixels for the glare'
-glare.compensation_removal_factor.tooltip = 'Factor of glare compensation removal from the print, e.g. 0.2=20% underexposed print in the shadows, typical values (0.0-0.2). To be used instead of stochastic glare (i.e. when percent=0).'
-glare.compensation_removal_factor.step = 0.05
-glare.compensation_removal_density.tooltip = 'Density of the glare compensation removal from the print, typical values (1.0-1.5).'
-glare.compensation_removal_transition.tooltip = 'Transition density range of the glare compensation removal from the print, typical values (0.1-0.5).'
+    glare.active.tooltip = 'Add glare to the print'
+    glare.percent.tooltip = 'Percentage of the glare light (typically 0.1-0.25)'
+    glare.percent.step = 0.05
+    glare.roughness.tooltip = 'Roughness of the glare light (0-1)'
+    glare.blur.tooltip = 'Sigma of gaussian blur in pixels for the glare'
+    glare.compensation_removal_factor.tooltip = 'Factor of glare compensation removal from the print, e.g. 0.2=20% underexposed print in the shadows, typical values (0.0-0.2). To be used instead of stochastic glare (i.e. when percent=0).'
+    glare.compensation_removal_factor.step = 0.05
+    glare.compensation_removal_density.tooltip = 'Density of the glare compensation removal from the print, typical values (1.0-1.5).'
+    glare.compensation_removal_transition.tooltip = 'Transition density range of the glare compensation removal from the print, typical values (0.1-0.5).'
 
-halation.scattering_strength.tooltip = 'Fraction of scattered light (0-100, percentage) for each channel [R,G,B]'
-halation.scattering_size_um.tooltip = 'Size of the scattering effect in micrometers for each channel [R,G,B], sigma of gaussian filter.'
-halation.halation_strength.tooltip = 'Fraction of halation light (0-100, percentage) for each channel [R,G,B]'
-halation.halation_size_um.tooltip = 'Size of the halation effect in micrometers for each channel [R,G,B], sigma of gaussian filter.'
+    halation.scattering_strength.tooltip = 'Fraction of scattered light (0-100, percentage) for each channel [R,G,B]'
+    halation.scattering_size_um.tooltip = 'Size of the scattering effect in micrometers for each channel [R,G,B], sigma of gaussian filter.'
+    halation.halation_strength.tooltip = 'Fraction of halation light (0-100, percentage) for each channel [R,G,B]'
+    halation.halation_size_um.tooltip = 'Size of the halation effect in micrometers for each channel [R,G,B], sigma of gaussian filter.'
 
-couplers.dir_couplers_amount.tooltip = 'Amount of coupler inhibitors, control saturation, typical values (0.8-1.2).'
-couplers.dir_couplers_amount.step = 0.05
-couplers.dir_couplers_diffusion_um.tooltip = 'Sigma in um for the diffusion of the couplers, (5-20 um), controls sharpness and affects saturation.'
-couplers.dir_couplers_diffusion_um.step = 5
-couplers.diffusion_interlayer.tooltip = 'Sigma in number of layers for diffusion across the rgb layers (typical layer thickness 3-5 um, so roughly 1.0-4.0 layers), affects saturation.'
+    couplers.dir_couplers_amount.tooltip = 'Amount of coupler inhibitors, control saturation, typical values (0.8-1.2).'
+    couplers.dir_couplers_amount.step = 0.05
+    couplers.dir_couplers_diffusion_um.tooltip = 'Sigma in um for the diffusion of the couplers, (5-20 um), controls sharpness and affects saturation.'
+    couplers.dir_couplers_diffusion_um.step = 5
+    couplers.diffusion_interlayer.tooltip = 'Sigma in number of layers for diffusion across the rgb layers (typical layer thickness 3-5 um, so roughly 1.0-4.0 layers), affects saturation.'
 
-grain.active.tooltip = 'Add grain to the negative'
-grain.particle_area_um2.tooltip = 'Area of the particles in um2, relates to ISO. Approximately 0.1 for ISO 100, 0.1 for ISO 200, 0.4 for ISO 400 and so on.'
-grain.particle_area_um2.step = 0.1
-grain.particle_scale.tooltip = 'Scale of particle area for the RGB layers, multiplies particle_area_um2'
-grain.particle_scale_layers.tooltip = 'Scale of particle area for the sublayers in every color layer, multiplies particle_area_um2'
-grain.density_min.tooltip = 'Minimum density of the grain, typical values (0.03-0.06)'
-grain.uniformity.tooltip = 'Uniformity of the grain, typical values (0.94-0.98)'
-grain.blur.tooltip = 'Sigma of gaussian blur in pixels for the grain, to be increased at high magnifications, (should be 0.8-0.9 at high resolution, reduce down to 0.6 for lower res).'
-grain.blur_dye_clouds_um.tooltip = 'Scale the sigma of gaussian blur in um for the dye clouds, to be used at high magnifications, (default 1)'
-grain.micro_structure.tooltip = 'Parameter for micro-structure due to clumps at the molecular level, [sigma blur of micro-structure / ultimate light-resolution (0.10 um default), size of molecular clumps in nm (30 nm default)]. Only for insane magnifications.'
+    grain.active.tooltip = 'Add grain to the negative'
+    grain.particle_area_um2.tooltip = 'Area of the particles in um2, relates to ISO. Approximately 0.1 for ISO 100, 0.1 for ISO 200, 0.4 for ISO 400 and so on.'
+    grain.particle_area_um2.step = 0.1
+    grain.particle_scale.tooltip = 'Scale of particle area for the RGB layers, multiplies particle_area_um2'
+    grain.particle_scale_layers.tooltip = 'Scale of particle area for the sublayers in every color layer, multiplies particle_area_um2'
+    grain.density_min.tooltip = 'Minimum density of the grain, typical values (0.03-0.06)'
+    grain.uniformity.tooltip = 'Uniformity of the grain, typical values (0.94-0.98)'
+    grain.blur.tooltip = 'Sigma of gaussian blur in pixels for the grain, to be increased at high magnifications, (should be 0.8-0.9 at high resolution, reduce down to 0.6 for lower res).'
+    grain.blur_dye_clouds_um.tooltip = 'Scale the sigma of gaussian blur in um for the dye clouds, to be used at high magnifications, (default 1)'
+    grain.micro_structure.tooltip = 'Parameter for micro-structure due to clumps at the molecular level, [sigma blur of micro-structure / ultimate light-resolution (0.10 um default), size of molecular clumps in nm (30 nm default)]. Only for insane magnifications.'
 
-preflashing.exposure.tooltip = 'Preflash exposure value in ev for the print'
-preflashing.just_preflash.tooltip = 'Only apply preflash to the print, to visualize the preflash effect'
-preflashing.y_filter_shift.tooltip = 'Shift the Y filter of the enlarger from the neutral position for the preflash, typical values (-20-20), enlarger has 170 steps'
-preflashing.m_filter_shift.tooltip = 'Shift the M filter of the enlarger from the neutral position for the preflash, typical values (-20-20), enlarger has 170 steps'
-preflashing.exposure.step = 0.005
-preflashing.y_filter_shift.min = -ENLARGER_STEPS
-preflashing.m_filter_shift.min = -ENLARGER_STEPS
+    preflashing.exposure.tooltip = 'Preflash exposure value in ev for the print'
+    preflashing.just_preflash.tooltip = 'Only apply preflash to the print, to visualize the preflash effect'
+    preflashing.y_filter_shift.tooltip = 'Shift the Y filter of the enlarger from the neutral position for the preflash, typical values (-20-20), enlarger has 170 steps'
+    preflashing.m_filter_shift.tooltip = 'Shift the M filter of the enlarger from the neutral position for the preflash, typical values (-20-20), enlarger has 170 steps'
+    preflashing.exposure.step = 0.005
+    preflashing.y_filter_shift.min = -ENLARGER_STEPS
+    preflashing.m_filter_shift.min = -ENLARGER_STEPS
 
-input_image.preview_resize_factor.tooltip = 'Scale image size down (0-1) to speed up preview processing'
-input_image.crop.tooltip = 'Crop image to a fraction of the original size to preview details at full scale'
-input_image.crop_center.tooltip = 'Center of the crop region in relative coordinates in x, y (0-1)'
-input_image.crop_size.tooltip = 'Normalized size of the crop region in x, y (0,1), as fraction of the long side.'
-input_image.input_color_space.tooltip = 'Color space of the input image, will be internally converted to sRGB and negative values clipped'
-input_image.apply_cctf_decoding.tooltip = 'Apply the inverse cctf transfer function of the color space'
-input_image.upscale_factor.tooltip = 'Scale image size up to increase resolution'
-input_image.spectral_upsampling_method.tooltip = 'Method to upsample the spectral resolution of the image, hanatos2025 works on the full visible locus, mallett2019 works only on sRGB (will clip input).'
-input_image.filter_uv.tooltip = 'Filter UV light, (amplitude, wavelength cutoff in nm, sigma in nm). It mainly helps for avoiding UV light ruining the reds. Changing this enlarger filters neutral will be affected.'
-input_image.filter_ir.tooltip = 'Filter IR light, (amplitude, wavelength cutoff in nm, sigma in nm). Changing this enlarger filters neutral will be affected.'
+    input_image.preview_resize_factor.tooltip = 'Scale image size down (0-1) to speed up preview processing'
+    input_image.crop.tooltip = 'Crop image to a fraction of the original size to preview details at full scale'
+    input_image.crop_center.tooltip = 'Center of the crop region in relative coordinates in x, y (0-1)'
+    input_image.crop_size.tooltip = 'Normalized size of the crop region in x, y (0,1), as fraction of the long side.'
+    input_image.input_color_space.tooltip = 'Color space of the input image, will be internally converted to sRGB and negative values clipped'
+    input_image.apply_cctf_decoding.tooltip = 'Apply the inverse cctf transfer function of the color space'
+    input_image.upscale_factor.tooltip = 'Scale image size up to increase resolution'
+    input_image.spectral_upsampling_method.tooltip = 'Method to upsample the spectral resolution of the image, hanatos2025 works on the full visible locus, mallett2019 works only on sRGB (will clip input).'
+    input_image.filter_uv.tooltip = 'Filter UV light, (amplitude, wavelength cutoff in nm, sigma in nm). It mainly helps for avoiding UV light ruining the reds. Changing this enlarger filters neutral will be affected.'
+    input_image.filter_ir.tooltip = 'Filter IR light, (amplitude, wavelength cutoff in nm, sigma in nm). Changing this enlarger filters neutral will be affected.'
 
-# tab1 = Container(layout='vertical', widgets=[grain, preflashing])
-viewer.window.add_dock_widget(input_image, area="right", name='input', tabify=True)
-# viewer.window.add_dock_widget(curves, area="right", name='curves', tabify=True)
-viewer.window.add_dock_widget(halation, area="right", name='halation', tabify=True)
-viewer.window.add_dock_widget(couplers, area="right", name='couplers', tabify=True)
-viewer.window.add_dock_widget(grain, area="right", name='grain', tabify=True)
-viewer.window.add_dock_widget(preflashing, area="right", name='preflash', tabify=True)
-viewer.window.add_dock_widget(glare, area="right", name='glare', tabify=True)
-viewer.window.add_dock_widget(special, area="right", name='special', tabify=True)
-viewer.window.add_dock_widget(layer_list, area="right", name='layers', tabify=True)
-viewer.window.add_dock_widget(filepicker, area="right", name='filepicker', tabify=True)
-viewer.window.add_dock_widget(simulation, area="right", name='main', tabify=False)
-napari.run()
+    # tab1 = Container(layout='vertical', widgets=[grain, preflashing])
+    viewer.window.add_dock_widget(input_image, area="right", name='input', tabify=True)
+    # viewer.window.add_dock_widget(curves, area="right", name='curves', tabify=True)
+    viewer.window.add_dock_widget(halation, area="right", name='halation', tabify=True)
+    viewer.window.add_dock_widget(couplers, area="right", name='couplers', tabify=True)
+    viewer.window.add_dock_widget(grain, area="right", name='grain', tabify=True)
+    viewer.window.add_dock_widget(preflashing, area="right", name='preflash', tabify=True)
+    viewer.window.add_dock_widget(glare, area="right", name='glare', tabify=True)
+    viewer.window.add_dock_widget(special, area="right", name='special', tabify=True)
+    viewer.window.add_dock_widget(layer_list, area="right", name='layers', tabify=True)
+    viewer.window.add_dock_widget(filepicker, area="right", name='filepicker', tabify=True)
+    viewer.window.add_dock_widget(simulation, area="right", name='main', tabify=False)
+    napari.run()
 
-# TODO: use magicclass to create collapsable widgets as in https://forum.image.sc/t/widgets-alignment-in-the-plugin-when-nested-magic-class-and-magicgui-are-used/62929 
+    # TODO: use magicclass to create collapsable widgets as in https://forum.image.sc/t/widgets-alignment-in-the-plugin-when-nested-magic-class-and-magicgui-are-used/62929 
+
+
+if __name__ == "__main__":
+    main()
