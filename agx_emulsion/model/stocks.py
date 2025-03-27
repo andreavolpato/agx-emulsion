@@ -10,29 +10,26 @@ from agx_emulsion.utils.io import save_ymc_filter_values
 # TODO: move this file to scripts to produce YMC neutral values
 
 class FilmStocks(Enum):
+    # kodak pro
     kodak_ektar_100 = 'kodak_ektar_100_auc'
     kodak_portra_160 = 'kodak_portra_160_auc'
     kodak_portra_400 = 'kodak_portra_400_auc'
     kodak_portra_800 = 'kodak_portra_800_auc'
     kodak_portra_800_push1 = 'kodak_portra_800_push1_auc'
     kodak_portra_800_push2 = 'kodak_portra_800_push2_auc'
+    # kodak consumer
     kodak_gold_200 = 'kodak_gold_200_auc'
     kodak_ultramax_400 = 'kodak_ultramax_400_auc'
+    # kodak cine
     kodak_vision3_50d = 'kodak_vision3_50d_uc'
-    # kodak_vision3_50d_uh = 'kodak_vision3_50d_uh'
-    # kodak_vision3_50d_uhc = 'kodak_vision3_50d_uhc'
+    kodak_vision3_250d = 'kodak_vision3_250d_uc'
+    kodak_vision3_200t = 'kodak_vision3_200t_uc'
+    kodak_vision3_500t = 'kodak_vision3_500t_uc'
+    # fuji pro
     fujifilm_pro_400h = 'fujifilm_pro_400h_auc'
-    fujifilm_xtra_400 = 'fujifilm_xtra_400_auc'
-    # fujifilm_pro_400h_auhc = 'fujifilm_pro_400h_auhc'
-    # fujifilm_pro_400h_auh = 'fujifilm_pro_400h_auh'
-    # fujifilm_pro_400h_aucc = 'fujifilm_pro_400h_aucc'
+    # fuji consumer
     fujifilm_c200 = 'fujifilm_c200_auc'
-    # kodak_portra_400_au = 'kodak_portra_400_au'
-    # kodak_ultramax_400_au = 'kodak_ultramax_400_au'
-    # kodak_gold_200_au = 'kodak_gold_200_au'
-    # kodak_vision3_50d_u = 'kodak_vision3_50d_u'
-    # fujifilm_pro_400h_au = 'fujifilm_pro_400h_au'
-    # fujifilm_c200_au = 'fujifilm_c200_au'
+    fujifilm_xtra_400 = 'fujifilm_xtra_400_auc'
 
 class PrintPapers(Enum):
     # kodak_ultra_endura = 'kodak_ultra_endura_uc' # problematic
@@ -50,7 +47,7 @@ class Illuminants(Enum):
     # cine = 'K75P'
     # led_rgb = 'LED-RGB1'
 
-def fit_print_filters(profile):
+def fit_print_filters_iter(profile):
     p = copy.copy(profile)
     p.debug.deactivate_spatial_effects = True
     p.debug.deactivate_stochastic_effects = True
@@ -80,13 +77,24 @@ def fit_print_filters(profile):
     x = scipy.optimize.least_squares(evaluate_residues, x0, bounds=([0, 0, 0], [1, 1, 10]),
                                      ftol=1e-6, xtol=1e-6, gtol=1e-6,
                                      method='trf')
-    print(p.negative.info.stock)
     print('Total residues:',np.sum(np.abs(evaluate_residues(x.x))),'<-',evaluate_residues(x0))
-    print('Fitted Filters :'+f"[ {x.x[0]:.2f}, {x.x[1]:.2f}, {c_filter:.2f} ]")
     profile.enlarger.y_filter_neutral = x.x[0]
     profile.enlarger.m_filter_neutral = x.x[1]
     profile.enlarger.c_filter_neutral = c_filter
     return x.x[0], x.x[1], evaluate_residues(x.x)
+
+def fit_print_filters(profile, iterations=10):
+    print(profile.negative.info.stock)
+    for i in range(iterations):
+        filter_y, filter_m, residues = fit_print_filters_iter(profile)
+        if np.sum(np.abs(residues)) < 1e-4 or i==iterations-1:
+            c_filter = profile.enlarger.c_filter_neutral
+            print('Fitted Filters :'+f"[ {filter_y:.2f}, {filter_m:.2f}, {c_filter:.2f} ]")
+            break
+        else:
+            profile.enlarger.y_filter_neutral = 0.5*filter_y + np.random.uniform(0,1)*0.5
+            profile.enlarger.m_filter_neutral = 0.5*filter_m + np.random.uniform(0,1)*0.5
+    return filter_y, filter_m, residues
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
@@ -129,31 +137,30 @@ if __name__=='__main__':
         ymc_filters_out = copy.deepcopy(ymc_filters)
         r = randomess_starting_points
         
-        for i in range(iterations):
-            for paper in PrintPapers:
-                print(' '*20)
-                print('#'*20)
-                print(paper.value)
-                for light in Illuminants:
-                    print('-'*20)
-                    print(light.value)
-                    for stock in FilmStocks:
-                        if residues[paper.value][light.value][stock.value] > 5e-4:
-                            y0 = ymc_filters[paper.value][light.value][stock.value][0]
-                            m0 = ymc_filters[paper.value][light.value][stock.value][1]
-                            c0 = ymc_filters[paper.value][light.value][stock.value][2]
-                            y0 = np.clip(y0, 0, 1)*(1-r) + np.random.uniform(0,1)*r
-                            m0 = np.clip(m0, 0, 1)*(1-r) + np.random.uniform(0,1)*r
-                            
-                            p = photo_params(negative=stock.value, print_paper=paper.value, ymc_filters_from_database=False)
-                            p.enlarger.illuminant = light.value
-                            p.enlarger.y_filter_neutral = y0
-                            p.enlarger.m_filter_neutral = m0
-                            p.enlarger.c_filter_neutral = c0
-                    
-                            yf, mf, res = fit_print_filters(p)
-                            ymc_filters_out[paper.value][light.value][stock.value] = [yf, mf, c0]
-                            residues[paper.value][light.value][stock.value] = np.sum(np.abs(res))
+        for paper in PrintPapers:
+            print(' '*20)
+            print('#'*20)
+            print(paper.value)
+            for light in Illuminants:
+                print('-'*20)
+                print(light.value)
+                for stock in FilmStocks:
+                    if residues[paper.value][light.value][stock.value] > 5e-4:
+                        y0 = ymc_filters[paper.value][light.value][stock.value][0]
+                        m0 = ymc_filters[paper.value][light.value][stock.value][1]
+                        c0 = ymc_filters[paper.value][light.value][stock.value][2]
+                        y0 = np.clip(y0, 0, 1)*(1-r) + np.random.uniform(0,1)*r
+                        m0 = np.clip(m0, 0, 1)*(1-r) + np.random.uniform(0,1)*r
+                        
+                        p = photo_params(negative=stock.value, print_paper=paper.value, ymc_filters_from_database=False)
+                        p.enlarger.illuminant = light.value
+                        p.enlarger.y_filter_neutral = y0
+                        p.enlarger.m_filter_neutral = m0
+                        p.enlarger.c_filter_neutral = c0
+                
+                        yf, mf, res = fit_print_filters(p, iterations=iterations)
+                        ymc_filters_out[paper.value][light.value][stock.value] = [yf, mf, c0]
+                        residues[paper.value][light.value][stock.value] = np.sum(np.abs(res))
         return ymc_filters_out
     
     ymc_filters, residues = make_ymc_filters_dictionary(PrintPapers, Illuminants, FilmStocks)
