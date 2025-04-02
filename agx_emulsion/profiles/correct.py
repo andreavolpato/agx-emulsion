@@ -12,7 +12,10 @@ def measure_log_exposure_midscale_neutral(profile, reference_channel=None):
     if reference_channel=='green':
         d_mid = np.ones(3) * d_mid[1]
     for i in range(3):
-        log_exposure_midscale_neutral[i] = np.interp(d_mid[i], profile.data.density_curves[:,i], profile.data.log_exposure)
+        if profile.info.type=='positive':
+            log_exposure_midscale_neutral[i] = np.interp(-d_mid[i], -profile.data.density_curves[:,i], profile.data.log_exposure)
+        else:
+            log_exposure_midscale_neutral[i] = np.interp(d_mid[i], profile.data.density_curves[:,i], profile.data.log_exposure)
     print('Log exposure midscale neutral:', log_exposure_midscale_neutral)
     return log_exposure_midscale_neutral
 
@@ -21,7 +24,7 @@ def align_midscale_neutral_exposures(profile, reference_channel=None):
     dc = profile.data.density_curves
     le = profile.data.log_exposure
     for i in np.arange(3):
-        dc[:,i] = np.interp(le, le-log_exposure_midscale_neutral[i], dc[:,i])
+            dc[:,i] = np.interp(le, le-log_exposure_midscale_neutral[i], dc[:,i])
     profile.data.density_curves = dc
     profile.info.log_exposure_midscale_neutral = (np.ones(3)*log_exposure_midscale_neutral[1]).tolist()
     return profile

@@ -250,7 +250,7 @@ def create_profile(stock='kodak_portra_400',
     profile.glare.roughness = 0.25
     profile.glare.blur = 0.5
     
-    if type == 'negative':
+    if type=='negative' or type=='positive':
         profile.grain.active = True
         profile.grain.sublayers_active = True
         profile.grain.agx_particle_area_um2 = 0.2 # approx 200 iso
@@ -282,7 +282,7 @@ def create_profile(stock='kodak_portra_400',
                                                     [[470, 20, 0.09]                 ], 
                                                     [[520, 20, 0.09]                 ] ] # [wl, width, amount]
     
-    if type == 'paper':       
+    if type=='paper':    
         profile.glare.active = True
         profile.glare.percent = 0.1
         profile.glare.roughness = 0.4

@@ -7,7 +7,7 @@ from agx_emulsion.config import STANDARD_OBSERVER_CMFS
 
 from agx_emulsion.model.illuminants import standard_illuminant
 
-def balance_sensitivity(profile):
+def balance_sensitivity(profile, correct_log_exposure=True):
     ls = profile.data.log_sensitivity
     le = profile.data.log_exposure
     dc = profile.data.density_curves
@@ -20,13 +20,16 @@ def balance_sensitivity(profile):
     log_exp_correction = np.log10(corr)
     print('Log exposure correction of density curves:', log_exp_correction)
     
-    dc_out = np.zeros_like(dc)
-    for i in np.arange(3):
-        dc_out[:,i] = np.interp(le, le+log_exp_correction[i], dc[:,i])
     s *= corr
     ls = np.log10(s)
     profile.data.log_sensitivity = ls
-    profile.data.density_curves = dc_out
+    
+    if correct_log_exposure:
+        dc_out = np.zeros_like(dc)
+        for i in np.arange(3):
+            dc_out[:,i] = np.interp(le, le+log_exp_correction[i], dc[:,i])
+        profile.data.density_curves = dc_out
+    
     return profile
 
 

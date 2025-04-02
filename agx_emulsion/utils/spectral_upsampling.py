@@ -99,6 +99,12 @@ def compute_lut_spectra(lut_size=128, smooth_steps=1, lut_coeffs_filename='hanat
     lut_spectra = np.array(lut_spectra, dtype=np.half)
     return lut_spectra
 
+def load_spectra_lut(filename='irradiance_xy_tc.npy'):
+    data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath(filename)
+    with data_path.open('rb') as file:
+        spectra_lut = np.double(np.load(file))
+    return spectra_lut
+
 def illuminant_to_xy(illuminant_label):
     illu = standard_illuminant(illuminant_label)
     xyz = np.zeros((3))
@@ -194,40 +200,44 @@ def rgb_to_raw_mallett2019(RGB, sensitivity,
 ################################################################################
 # Using hanatos irradiance spectra generation
 
+HANATOS2025_SPECTRA_LUT = load_spectra_lut()
+
 def rgb_to_raw_hanatos2025(rgb, sensitivity,
                            color_space, apply_cctf_decoding, reference_illuminant):
-    data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath('irradiance_xy_tc.npy')
-    with data_path.open('rb') as file:
-        spectra_lut = np.double(np.load(file))
-
-    # spectra lut is in linear rec2020
-    tc_raw, b = rgb_to_tc_b(rgb, color_space=color_space, apply_cctf_decoding=apply_cctf_decoding, 
-                            reference_illuminant=reference_illuminant)
-    tc_lut  = contract('ijl,lm->ijm', spectra_lut, sensitivity)
-    raw = apply_lut_cubic_2d(tc_lut, tc_raw)
-    raw *= b[...,None] # scale the raw back with the scale factor
-    # raw = np.nan_to_num(raw) # make sure nans are removed
+    if rgb.shape[1] == 1: # if a single pixel is provided, compute the spectrum directly
+        spectrum = rgb_to_spectrum(rgb,
+                                   color_space=color_space,
+                                   apply_cctf_decoding=apply_cctf_decoding,
+                                   reference_illuminant=reference_illuminant)
+        raw = np.einsum('l,lm->m', spectrum, sensitivity)
+        raw = np.array([[raw]])
+    else:
+        tc_raw, b = rgb_to_tc_b(rgb, color_space=color_space, apply_cctf_decoding=apply_cctf_decoding, 
+                                reference_illuminant=reference_illuminant)
+        tc_lut  = contract('ijl,lm->ijm', HANATOS2025_SPECTRA_LUT, sensitivity)
+        raw = apply_lut_cubic_2d(tc_lut, tc_raw)
+        raw *= b[...,None] # scale the raw back with the scale factor
     
-    illuminant = compute_midgray_illuminant(spectra_lut, color_space=color_space, reference_illuminant=reference_illuminant)
-    raw_midgray  = np.einsum('k,km->m', illuminant*0.184, sensitivity) # use 0.184 as midgray reference
+    midgray_rgb = np.array([[[0.184]*3]])
+    illuminant_midgray = rgb_to_spectrum(midgray_rgb, color_space=color_space, apply_cctf_decoding=False, reference_illuminant=reference_illuminant)
+    raw_midgray  = np.einsum('k,km->m', illuminant_midgray, sensitivity) # use 0.184 as midgray reference
     return raw / raw_midgray[1] # normalize with green channel
 
-def compute_midgray_illuminant(spectra_lut, color_space, reference_illuminant, midgray_value=0.184):
-    midgray_rgb = np.array([[[midgray_value]*3]])
-    tc_w, b_w = rgb_to_tc_b(midgray_rgb,
+def rgb_to_spectrum(rgb, color_space, apply_cctf_decoding, reference_illuminant):
+    # direct interpolation of the spectra lut, to be used only for smooth spectra close to white
+    tc_w, b_w = rgb_to_tc_b(rgb,
                             color_space=color_space,
-                            apply_cctf_decoding=False,
+                            apply_cctf_decoding=apply_cctf_decoding,
                             reference_illuminant=reference_illuminant)
     # spectrum_w = apply_lut_cubic_2d(spectra_lut, tc_w)
-    v = np.linspace(0,1,spectra_lut.shape[0])
-    spectrum_w = scipy.interpolate.RegularGridInterpolator((v,v), spectra_lut)(tc_w)
+    v = np.linspace(0, 1, HANATOS2025_SPECTRA_LUT.shape[0])
+    spectrum_w = scipy.interpolate.RegularGridInterpolator((v,v), HANATOS2025_SPECTRA_LUT)(tc_w)
     spectrum_w *= b_w
     return spectrum_w.flatten()
-    
 
 if __name__=='__main__':
     lut_coeffs = load_coeffs_lut()
     coeffs = fetch_coeffs(np.array([[1,1]]) ,lut_coeffs)
     spectra = compute_spectra_from_coeffs(coeffs)
     lut_spectra = compute_lut_spectra(lut_size=128)
-    illu_w = compute_midgray_illuminant(lut_spectra)
+    
