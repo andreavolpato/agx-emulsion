@@ -4,15 +4,23 @@ import colour
 
 from colour.models import RGB_COLOURSPACE_sRGB
 from agx_emulsion.config import STANDARD_OBSERVER_CMFS
-
+from agx_emulsion.model.color_filters import compute_band_pass_filter
 from agx_emulsion.model.illuminants import standard_illuminant
 
-def balance_sensitivity(profile, correct_log_exposure=True):
+def balance_sensitivity(profile, correct_log_exposure=True, band_pass_filter=False):
     ls = profile.data.log_sensitivity
     le = profile.data.log_exposure
     dc = profile.data.density_curves
     ill = standard_illuminant(type=profile.info.reference_illuminant)
     s = 10**np.double(ls)
+    
+    if band_pass_filter:
+        filter_uv = (1, 410, 8)
+        filter_ir = (1, 675, 15)
+        band_pass_filter = compute_band_pass_filter(filter_uv,
+                                                    filter_ir)
+        ill *= band_pass_filter
+    
     neutral_exposures = np.nansum(ill[:,None]*s, axis=0)
     corr = neutral_exposures[1]/neutral_exposures
     print('--- Balance Sensitivity')

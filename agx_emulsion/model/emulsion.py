@@ -120,62 +120,11 @@ class AgXEmulsion():
         density_spectral = contract('ijk, lk->ijl', density_cmy, self.dye_density[:, 0:3])
         density_spectral += self.dye_density[:, 3] * self.dye_density_min_factor
         return density_spectral
-    
-    # def _gaussian_blur(self, data, sigma):
-    #     if sigma > 0:
-    #         return scipy.ndimage.gaussian_filter(data, (sigma, sigma, 0))
-    #     else:
-    #         return data
-    
-    ################################################################################
-    
-    # def scan(self,
-    #          density_spectral,
-    #          illuminant,
-    #          color_space='sRGB',
-    #          apply_cctf_encoding=True,
-    #          lens_blur=0.0,
-    #          unsharp_mask=[0.0,0.8]):
-    #     light = self._calculate_light_transmitted(density_spectral, illuminant)
-    #     rgb   = self._add_glare_and_convert_light_to_RGB(light, illuminant, color_space)
-    #     rgb   = self._apply_blur_and_unsharp(rgb, lens_blur, unsharp_mask)
-    #     rgb   = self._apply_cctf_encoding_and_clip(rgb, color_space, apply_cctf_encoding)
-    #     return rgb
-        
-    # def _calculate_light_transmitted(self, density_spectral, illuminant):
-    #     return density_to_light(density_spectral, illuminant)
-    
-    # def _add_glare_and_convert_light_to_RGB(self, light_transmitted, illuminant, color_space):
-    #     normalization = np.sum(illuminant * STANDARD_OBSERVER_CMFS[:, 1], axis=0)
-    #     xyz = contract('ijk,kl->ijl', light_transmitted, STANDARD_OBSERVER_CMFS[:]) / normalization
-    #     illuminant_xyz = contract('k,kl->l', illuminant, STANDARD_OBSERVER_CMFS[:]) / normalization
-    #     if self.type=='paper' and self.glare.active and self.glare.percent>0:
-    #         glare_amount = compute_random_glare_amount(self.glare.percent, self.glare.roughness, self.glare.blur, light_transmitted.shape[:2])
-    #         xyz += glare_amount[:,:,None] * illuminant_xyz[None,None,:]
-    #     illuminant_xy = colour.XYZ_to_xy(illuminant_xyz)
-    #     rgb = colour.XYZ_to_RGB(xyz, colourspace=color_space, apply_cctf_encoding=False, illuminant=illuminant_xy)
-    #     return rgb
-
-    # def _apply_blur_and_unsharp(self, data, sigma_blur, unsharp_mask):
-    #     data = self._gaussian_blur(data, sigma_blur)
-    #     if unsharp_mask[0] > 0 and unsharp_mask[1] > 0:
-    #         data = apply_unsharp_mask(data, sigma=unsharp_mask[0], amount=unsharp_mask[1])
-    #     return data
-
-    # def _apply_cctf_encoding_and_clip(self, rgb, color_space, apply_cctf_encoding):
-    #     if apply_cctf_encoding:
-    #         # rgb = colour.cctf_encoding(rgb, function=color_space)
-    #         rgb = colour.RGB_to_RGB(rgb, color_space, color_space,
-    #                 apply_cctf_decoding=False,
-    #                 apply_cctf_encoding=True)
-    #     rgb = np.clip(rgb, a_min=0, a_max=1)
-    #     return rgb
-
-################################################################################
 
 class Film(AgXEmulsion):
     def __init__(self, profile):
         super().__init__(profile)
+        self.info = profile.info
         self.grain = profile.grain
         self.halation = profile.halation
         self.dir_couplers = profile.dir_couplers
@@ -238,13 +187,18 @@ class Film(AgXEmulsion):
             dir_couplers_amount_rgb = self.dir_couplers.amount * np.array(self.dir_couplers.ratio_rgb)
             M = compute_dir_couplers_matrix(dir_couplers_amount_rgb, self.dir_couplers.diffusion_interlayer)
             # compute density curves before dir couplers
-            density_curves_0 = compute_density_curves_before_dir_couplers(self.density_curves, self.log_exposure, M, self.dir_couplers.high_exposure_shift)
+            density_curves_0 = compute_density_curves_before_dir_couplers(self.density_curves, 
+                                                                          self.log_exposure, 
+                                                                          M, self.dir_couplers.high_exposure_shift,
+                                                                          positive=self.type=='positive')
             # compute exposure correction
             density_max = np.nanmax(self.density_curves, axis=0)
             diffusion_size_um = self.dir_couplers.diffusion_size_um
             diffusion_size_pixel = diffusion_size_um/pixel_size_um
             log_raw_0 = compute_exposure_correction_dir_couplers(log_raw, density_cmy, density_max, M, 
-                                                                 diffusion_size_pixel, self.dir_couplers.high_exposure_shift)
+                                                                 diffusion_size_pixel, 
+                                                                 high_exposure_couplers_shift=self.dir_couplers.high_exposure_shift,
+                                                                 positive=self.type=='positive')
             # interpolated with corrected curves
             density_cmy = interpolate_exposure_to_density(log_raw_0, density_curves_0, self.log_exposure, self.gamma_factor)
         return density_cmy
@@ -263,7 +217,8 @@ class Film(AgXEmulsion):
                                                     grain_blur=self.grain.blur,
                                                     n_sub_layers=self.grain.n_sub_layers)
             else:
-                density_cmy_layers = interp_density_cmy_layers(density_cmy, self.density_curves, self.density_curves_layers)
+                density_cmy_layers = interp_density_cmy_layers(density_cmy, self.density_curves, self.density_curves_layers,
+                                                               positive_film=self.info.type=='positive')
                 density_max_layers = np.nanmax(self.density_curves_layers, axis=0)
                 density_cmy = apply_grain_to_density_layers(density_cmy_layers,
                                                             density_max_layers=density_max_layers,
@@ -279,22 +234,27 @@ class Film(AgXEmulsion):
                                                             use_fast_stats=use_fast_stats)
         return density_cmy
 
-    def get_density_mid(self):
-        # assumes that dye density cmy are already scaled to fit the mid diffuse density
-        d_mid = self.density_midscale_neutral
-        density_spectral = np.sum(self.dye_density[:, :3] * d_mid, axis=1) + self.dye_density[:, 3]
-        return density_spectral[None,None,:]
+    # def get_density_mid(self):
+    #     # assumes that dye density cmy are already scaled to fit the mid diffuse density
+    #     d_mid = self.density_midscale_neutral
+    #     density_spectral = np.sum(self.dye_density[:, :3] * d_mid, axis=1) + self.dye_density[:, 3]
+    #     return density_spectral[None,None,:]
 
 
-def interp_density_cmy_layers(density_cmy, density_curves, density_curves_layers):
+def interp_density_cmy_layers(density_cmy, density_curves, density_curves_layers, positive_film=False):
     density_cmy_layers = np.zeros((density_cmy.shape[0], density_cmy.shape[1], 3, 3)) # x,y,layer,rgb
     # for ch in np.arange(3):
     #     for lr in np.arange(3):
     #         density_cmy_layers[:,:,lr,ch] = np.interp(density_cmy[:,:,ch],
     #                                                   density_curves[:,ch], density_curves_layers[:,lr,ch])
-    for ch in np.arange(3):
-            density_cmy_layers[:,:,:,ch] = fast_interp(np.repeat(density_cmy[:,:,ch,np.newaxis], 3, -1),
-                                                     density_curves[:,ch], density_curves_layers[:,:,ch])
+    if positive_film:
+        for ch in np.arange(3):
+                density_cmy_layers[:,:,:,ch] = fast_interp(-np.repeat(density_cmy[:,:,ch,np.newaxis], 3, -1),
+                                                        -density_curves[:,ch], density_curves_layers[:,:,ch])
+    else:
+        for ch in np.arange(3):
+                density_cmy_layers[:,:,:,ch] = fast_interp(np.repeat(density_cmy[:,:,ch,np.newaxis], 3, -1),
+                                                        density_curves[:,ch], density_curves_layers[:,:,ch])
     return density_cmy_layers
     
 ################################################################################

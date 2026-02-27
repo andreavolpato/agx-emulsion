@@ -59,8 +59,8 @@ def photo_params(negative='kodak_portra_400_auc',
     params.enlarger.preflash_m_filter_shift = 0.0
     params.enlarger.just_preflash = False
     
-    params.scanner.lens_blur = 0.55
-    params.scanner.unsharp_mask = (0.7,1.0)
+    params.scanner.lens_blur = 0.0
+    params.scanner.unsharp_mask = (0.7,0.7)
 
     params.io.input_color_space = 'ProPhoto RGB'
     params.io.input_cctf_decoding = False

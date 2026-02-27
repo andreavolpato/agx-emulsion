@@ -110,7 +110,7 @@ def fit_log_scaled_absortion_coefficients(sensitivity, crosstalk_matrix, density
     target = np.array([density_level, density_level, density_level])
     log_absorption_coefficients = np.zeros(sensitivity_log_exposures.shape)
     log_absorption_coefficients_0 = np.log10(sensitivity)
-    log_absorption_coefficients_0[np.isnan(log_absorption_coefficients_0)] = np.nanmin(log_absorption_coefficients_0)-6
+    log_absorption_coefficients_0[np.isnan(log_absorption_coefficients_0)] = np.nanmin(log_absorption_coefficients_0)-2
     for i in np.arange(sensitivity_log_exposures.shape[0]): # for every i-th wavelength
         def residues(log_absorption_coefficients_rgb):
             res = target - densitometer_densities_at_sensitivity_log_exposures(log_absorption_coefficients_rgb, sensitivity_log_exposures[i,:])
@@ -147,7 +147,6 @@ def unmix_sensitivity(profile, control_plot=False):
     type = profile.info.type
     sensitivity_density_level = profile.info.log_sensitivity_density_over_min
     sensitivity = 10**log_sensitivity
-    illuminant = standard_illuminant(profile.info.reference_illuminant)
 
     # cross talk matrix
     dr = load_densitometer_data(type=profile.info.densitometer)
@@ -168,10 +167,12 @@ def unmix_sensitivity(profile, control_plot=False):
                                                             log_exposure,
                                                             sensitivity_density_level,
                                                             log_exposure_reference_sensitivity)
+    
+    # correct with the illuminant
+    # illuminant = standard_illuminant(profile.info.reference_illuminant)
+    # log_sensitivity = np.log10(10**log_absorption_coefficients / illuminant[:,None]) # correct by illuminant
 
     # save sensitivity
-    print(log_absorption_coefficients.shape)
-    # log_sensitivity = np.log10(10**log_absorption_coefficients / illuminant[:,None]) # correct by illuminant
     profile.data.log_sensitivity = log_sensitivity
     
     if control_plot:
@@ -264,7 +265,7 @@ def create_profile(stock='kodak_portra_400',
         profile.grain.n_sub_layers = 1
         
         profile.halation.active = True
-        profile.halation.strength = [0.08,0.005,0.001]
+        profile.halation.strength = [0.03,0.003,0.001]
         profile.halation.size_um = [200,200,200]
         profile.halation.scattering_strength = [0.01,0.02,0.04]
         profile.halation.scattering_size_um = [30,20,15]
@@ -296,15 +297,19 @@ def create_profile(stock='kodak_portra_400',
         
     return profile
 
+from agx_emulsion.utils.measure import measure_density_min
+
 def remove_density_min(profile):
     
+    le = profile.data.log_exposure
     dc = profile.data.density_curves
     dd = profile.data.dye_density
     wl = profile.data.wavelengths
     type = profile.info.type
 
     # take care of density min
-    dc_min = np.nanmin(dc, axis=0)
+    # dc_min = np.nanmin(dc, axis=0)
+    dc_min = measure_density_min(le, dc, type)
     dc = dc - dc_min
     print('Density curve min values:', dc_min)
     
@@ -510,7 +515,7 @@ def process_negative_profile(raw_profile,
                                         model=dye_density_reconstruct_model)
     profile = unmix_density(profile)
     profile = replace_fitted_density_curves(profile)
-    profile = unmix_sensitivity(profile)
+    # profile = unmix_sensitivity(profile)
     profile = balance_sensitivity(profile)
     profile = replace_fitted_density_curves(profile)
     plot_profile(profile, unmixed=True, original=raw_profile)
@@ -522,8 +527,8 @@ def process_paper_profile(raw_profile, align_midscale_exposures=False):
     profile = adjust_log_exposure(profile)
     profile = balance_metameric_neutral(profile)
     profile = unmix_density(profile)
-    profile = replace_fitted_density_curves(profile)
-    profile = unmix_sensitivity(profile)
+    # profile = replace_fitted_density_curves(profile)
+    # profile = unmix_sensitivity(profile)
     if align_midscale_exposures:
         profile = align_midscale_neutral_exposures(profile)
     profile = replace_fitted_density_curves(profile)

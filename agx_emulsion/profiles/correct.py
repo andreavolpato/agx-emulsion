@@ -36,6 +36,7 @@ def correct_negative_curves_with_gray_ramp(negative_profile,
                                            target_paper='kodak_portra_endura_uc',
                                            data_trustability=0.5, # control the bias of the fit, 1.0 smallest correction, 0.0 largest correction
                                            stretch_curves=False,
+                                           ev_ramp=[-2,-1,0,1,2,3,4,5,6]
                                            ):
     # get the parameters
     pl = photo_params(print_paper=target_paper, ymc_filters_from_database=False)
@@ -43,21 +44,42 @@ def correct_negative_curves_with_gray_ramp(negative_profile,
     pl.settings.rgb_to_raw_method = 'mallett2019'
     fit_print_filters(pl)
     
-    density_scale, shift_corr, stretch_corr = fit_corrections_from_grey_ramp(pl, data_trustability, stretch_curves)
+    density_scale, shift_corr, stretch_corr = fit_corrections_from_grey_ramp(pl, ev_ramp, data_trustability, stretch_curves)
     print('Density scale corr:', density_scale)
     print('Shift corr:', shift_corr)
     print('Stretch corr:', stretch_corr)
     profile_corrected = apply_scale_shift_stretch_density_curves(pl.negative, density_scale, shift_corr, stretch_corr)
     return profile_corrected
 
-def fit_corrections_from_grey_ramp(p0, data_trustability=1.0, stretch_curves=False):
-    midgray_rgb = np.array([0.184, 0.184, 0.184])
+def correct_positive_curves_with_gray_ramp(positive_film_profile,
+                                           data_trustability=0.5, # control the bias of the fit, 1.0 smallest correction, 0.0 largest correction
+                                           stretch_curves=False,
+                                           ev_ramp=[-1,0,1,2],
+                                           ):
+    # get the parameters
+    pl = photo_params(ymc_filters_from_database=False)
+    pl.negative = copy.deepcopy(positive_film_profile)
+    pl.io.compute_negative = True
+    pl.settings.rgb_to_raw_method = 'hanatos2025'
+    
+    density_scale, shift_corr, stretch_corr = fit_corrections_from_grey_ramp(pl, ev_ramp, data_trustability, stretch_curves, positive_film=True)
+    print('Density scale corr:', density_scale)
+    print('Shift corr:', shift_corr)
+    print('Stretch corr:', stretch_corr)
+    profile_corrected = apply_scale_shift_stretch_density_curves(pl.negative, density_scale, shift_corr, stretch_corr)
+    return profile_corrected
+
+def fit_corrections_from_grey_ramp(p0, ev_ramp, data_trustability=1.0, stretch_curves=False, positive_film=False):
+    # midgray_rgb = np.array([0.184, 0.184, 0.184])
     def residues(x):
-        if stretch_curves:  gray, reference = gray_ramp(p0, density_scale=x[0:3], shift_corr=[x[3],0,x[4]], stretch_corr=x[5:8])
-        else:               gray, reference = gray_ramp(p0, density_scale=x[0:3], shift_corr=[x[3],0,x[4]])
+        if stretch_curves:  gray, reference = gray_ramp(p0, ev_ramp, density_scale=x[0:3], shift_corr=[x[3],0,x[4]], stretch_corr=x[5:8])
+        else:               gray, reference = gray_ramp(p0, ev_ramp, density_scale=x[0:3], shift_corr=[x[3],0,x[4]])
         res = np.array(gray) - reference
+        if positive_film:
+            res_mean = np.mean(res, axis=2)[:,:,None]
+            res = res - res_mean # positive film only
+            res = res/res_mean*0.184 
         res = res.flatten()
-          
         
         bias_scale = 2.0*(np.array(x[0:3])-1)
         if stretch_curves:
@@ -76,7 +98,7 @@ def fit_corrections_from_grey_ramp(p0, data_trustability=1.0, stretch_curves=Fal
     else:              stretch_corr = [1,1,1]
     return density_scale, shift_corr, stretch_corr
 
-def gray_ramp(p0, density_scale=[1,1,1], shift_corr=[0,0,0], stretch_corr=[1,1,1]):
+def gray_ramp(p0, ev_ramp, density_scale=[1,1,1], shift_corr=[0,0,0], stretch_corr=[1,1,1]):
     pl = copy.copy(p0)
     pl.io.input_cctf_decoding = False
     pl.io.input_color_space = 'sRGB'
@@ -84,12 +106,11 @@ def gray_ramp(p0, density_scale=[1,1,1], shift_corr=[0,0,0], stretch_corr=[1,1,1
     pl.debug.deactivate_stochastic_effects = True
     pl.print_paper.glare.active = False
     pl.io.output_cctf_encoding = False
-    pl.settings.rgb_to_raw_method = 'mallett2019'
+    # pl.settings.rgb_to_raw_method = 'mallett2019'
     pl.negative = apply_scale_shift_stretch_density_curves(pl.negative, density_scale, shift_corr, stretch_corr)
     midgray_rgb = np.array([[[0.184,0.184,0.184]]])
     # gradient = (2**np.linspace(-2,2,5))[None,:,None]
     # reference = midgray_rgb*gradient
-    ev_ramp = [-2,-1,0,1,2,3,4,5,6]
     gray = np.zeros((np.size(ev_ramp),3))
     for i in np.arange(np.size(ev_ramp)):
         pl.camera.exposure_compensation_ev = ev_ramp[i]
