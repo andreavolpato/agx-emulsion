@@ -3,7 +3,7 @@ from scipy.ndimage import gaussian_filter
 # from agx_emulsion.utils.fast_gaussian_filter import fast_gaussian_filter
 from opt_einsum import contract
 
-def compute_density_curves_before_dir_couplers(density_curves, log_exposure, dir_couplers_matrix, high_exposure_couplers_shift=0.0):
+def compute_density_curves_before_dir_couplers(density_curves, log_exposure, dir_couplers_matrix, high_exposure_couplers_shift=0.0, positive=False):
     """
     DIR couplers affect the same layer by increasing contrast.
     I suppose that in the design of a film this is taken into account, and the final film has well behaved density curves.
@@ -22,7 +22,10 @@ def compute_density_curves_before_dir_couplers(density_curves, log_exposure, dir
     dc_norm = density_curves/d_max
     dc_norm_shift = dc_norm + high_exposure_couplers_shift*dc_norm**2
     couplers_amount_curves = contract('jk, km->jm', dc_norm_shift, dir_couplers_matrix)
-    x0 = log_exposure[:,None] - couplers_amount_curves
+    if positive:
+        x0 = log_exposure[:,None] + couplers_amount_curves
+    else:
+        x0 = log_exposure[:,None] - couplers_amount_curves
     density_curves_corrected = np.zeros_like(density_curves)
     for i in np.arange(3):
         density_curves_corrected[:,i] = np.interp(log_exposure, x0[:,i], density_curves[:,i])
@@ -46,7 +49,10 @@ def compute_dir_couplers_matrix(amount_rgb=[0.7,0.7,0.5], layer_diffusion=1):
     M = M_diffused *np.array(amount_rgb)[:, None]
     return M
 
-def compute_exposure_correction_dir_couplers(log_raw, density_cmy, density_max, dir_couplers_matrix, diffusion_size_pixel, high_exposure_couplers_shift=0.0):
+def compute_exposure_correction_dir_couplers(log_raw, density_cmy, density_max,
+                                             dir_couplers_matrix, diffusion_size_pixel,
+                                             high_exposure_couplers_shift=0.0,
+                                             positive=False):
     """
     Apply coupler inhibitors to the raw data based on density curves and inhibitor values.
     Coupler inhibitors are released when density is formed in the emulsion layers.
@@ -71,7 +77,10 @@ def compute_exposure_correction_dir_couplers(log_raw, density_cmy, density_max, 
     if diffusion_size_pixel>0:
         log_raw_correction = gaussian_filter(log_raw_correction, (diffusion_size_pixel, diffusion_size_pixel, 0))
         # log_raw_correction = fast_gaussian_filter(log_raw_correction, diffusion_size_pixel)
-    log_raw_corrected = log_raw - log_raw_correction
+    if positive:
+        log_raw_corrected = log_raw + log_raw_correction
+    else:
+        log_raw_corrected = log_raw - log_raw_correction
     return log_raw_corrected
 
 # if __name__=='__main__':
