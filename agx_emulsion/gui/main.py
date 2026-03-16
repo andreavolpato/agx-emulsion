@@ -14,6 +14,7 @@ from agx_emulsion.model.process import  photo_params, photo_process
 from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
 # from agx_emulsion.model.parametric import parametric_density_curves_model
 # from agx_emulsion.profiles.io import load_profile
+from agx_emulsion.profiles.io import profile_to_dict
 from agx_emulsion.profiles.factory import swap_channels
 from agx_emulsion.utils.numba_warmup import warmup
 
@@ -164,14 +165,13 @@ def special(film_channel_swap=(0,1,2),
 import json
 
 def export_parameters(filepath, params):
-    dot_params = DotMap(params)
     with open(filepath, 'w') as f:
-        json.dump(dot_params.toDict(), f, indent=4)
+        json.dump(profile_to_dict(params), f, indent=4)
 
 def load_parameters(filepath):
     with open(filepath, 'r') as f:
-        dot_params = DotMap(json.load(f))
-    return dot_params.toDict()
+        params = json.load(f)
+    return params
 
 # for details on why the `-> ImageData` return annotation works:
 # https://napari.org/guides/magicgui.html#return-annotations
