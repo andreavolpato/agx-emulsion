@@ -177,3 +177,6 @@ cython_debug/
 
 # vscode
 /.vscode
+
+# GitHub
+/.github
