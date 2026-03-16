@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import copy
 
-from agx_emulsion.model.process import photo_params, photo_process
+from spectral_film_lab.runtime.process import photo_params, photo_process
 
 class TestStrip:
     def __init__(self,

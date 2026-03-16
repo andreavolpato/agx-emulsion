@@ -10,12 +10,10 @@ from pathlib import Path
 
 from agx_emulsion.config import ENLARGER_STEPS
 from agx_emulsion.utils.io import load_image_oiio
-from agx_emulsion.model.process import  photo_params, photo_process
-from agx_emulsion.model.stocks import FilmStocks, PrintPapers, Illuminants
-# from agx_emulsion.model.parametric import parametric_density_curves_model
-# from agx_emulsion.profiles.io import load_profile
-from agx_emulsion.profiles.io import profile_to_dict
-from agx_emulsion.profiles.factory import swap_channels
+from spectral_film_lab.runtime.process import  photo_params, photo_process
+from spectral_film_lab.engine.stocks import FilmStocks, PrintPapers, Illuminants
+from spectral_film_lab.profile_store.io import profile_to_dict
+from profiles_factory.factory import swap_channels
 from agx_emulsion.utils.numba_warmup import warmup
 
 # precompile numba functions

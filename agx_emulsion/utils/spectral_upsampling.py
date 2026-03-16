@@ -7,7 +7,7 @@ from opt_einsum import contract
 import scipy.interpolate
 from agx_emulsion.utils.fast_interp_lut import apply_lut_cubic_2d
 from agx_emulsion.config import SPECTRAL_SHAPE, STANDARD_OBSERVER_CMFS
-from agx_emulsion.model.illuminants import standard_illuminant
+from spectral_film_lab.engine.illuminants import standard_illuminant
 
 ################################################################################
 # LUT generatation of irradiance spectra for any xy chromaticity
