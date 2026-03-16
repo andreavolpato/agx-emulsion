@@ -1,8 +1,39 @@
 import json
 import copy
 import numpy as np
-from dotmap import DotMap
+from types import SimpleNamespace
 import importlib.resources as pkg_resources
+
+
+class ProfileNamespace(SimpleNamespace):
+    def __getattr__(self, name):
+        if name.startswith('__'):
+            raise AttributeError(name)
+        value = ProfileNamespace()
+        setattr(self, name, value)
+        return value
+
+
+def profile_from_dict(data):
+    if isinstance(data, dict):
+        return ProfileNamespace(**{k: profile_from_dict(v) for k, v in data.items()})
+    if isinstance(data, list):
+        return [profile_from_dict(v) for v in data]
+    if isinstance(data, tuple):
+        return tuple(profile_from_dict(v) for v in data)
+    return data
+
+
+def profile_to_dict(data):
+    if isinstance(data, dict):
+        return {k: profile_to_dict(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [profile_to_dict(v) for v in data]
+    if isinstance(data, tuple):
+        return [profile_to_dict(v) for v in data]
+    if hasattr(data, '__dict__'):
+        return {k: profile_to_dict(v) for k, v in vars(data).items()}
+    return data
 
 
 def _validate_profile(profile, stock):
@@ -41,15 +72,14 @@ def save_profile(profile, suffix=''):
     resource = package / filename
     print('Saving to:', filename)
     with resource.open("w") as file:
-        json.dump(profile.toDict(), file, indent=4)
+        json.dump(profile_to_dict(profile), file, indent=4)
 
 def load_profile(stock):
     package = pkg_resources.files('agx_emulsion.data.profiles')
     filename = stock + '.json'
     resource = package / filename
-    profile = DotMap()
     with resource.open("r") as file:
-        profile = DotMap(json.load(file))
+        profile = profile_from_dict(json.load(file))
     profile.data.log_sensitivity = np.array(profile.data.log_sensitivity)
     profile.data.dye_density = np.array(profile.data.dye_density)
     profile.data.density_curves = np.array(profile.data.density_curves)

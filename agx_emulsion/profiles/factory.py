@@ -1,7 +1,6 @@
 import numpy as np
 import scipy
 import copy
-from dotmap import DotMap
 import matplotlib.pyplot as plt
 
 from agx_emulsion.profiles.reconstruct import reconstruct_dye_density
@@ -10,7 +9,7 @@ from agx_emulsion.profiles.correct import align_midscale_neutral_exposures
 
 from agx_emulsion.model.density_curves import fit_density_curve, compute_density_curves, compute_density_curves_layers
 from agx_emulsion.utils.io import load_agx_emulsion_data, load_densitometer_data
-from agx_emulsion.profiles.io import load_profile
+from agx_emulsion.profiles.io import load_profile, profile_from_dict
 from agx_emulsion.model.illuminants import standard_illuminant
 
 ################################################################################
@@ -214,8 +213,17 @@ def create_profile(stock='kodak_portra_400',
                                               )
     print(stock,' - ',type)
     
-    profile = {}
-    profile = DotMap()
+    profile = profile_from_dict(
+        {
+            'info': {},
+            'data': {'tune': {}},
+            'glare': {},
+            'grain': {},
+            'halation': {},
+            'dir_couplers': {},
+            'masking_couplers': {},
+        }
+    )
     profile.info.stock = stock
     if name is None:
         profile.info.name = stock
