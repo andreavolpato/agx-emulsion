@@ -5,8 +5,8 @@ import scipy
 import importlib.resources
 from opt_einsum import contract
 import scipy.interpolate
-from agx_emulsion.utils.fast_interp_lut import apply_lut_cubic_2d
-from agx_emulsion.config import SPECTRAL_SHAPE, STANDARD_OBSERVER_CMFS
+from spectral_film_lab.utils.fast_interp_lut import apply_lut_cubic_2d
+from spectral_film_lab.config import SPECTRAL_SHAPE, STANDARD_OBSERVER_CMFS
 from spectral_film_lab.engine.illuminants import standard_illuminant
 
 ################################################################################
@@ -21,7 +21,7 @@ def load_coeffs_lut(filename='hanatos_irradiance_xy_coeffs_250304.lut'):
     pixel_fmt = '=4f'
     pixel_len = struct.calcsize(pixel_fmt)
 
-    package = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling')
+    package = importlib.resources.files('spectral_film_lab.data.luts.spectral_upsampling')
     resource = package / filename
     with resource.open("rb") as file:
         header = file.read(header_len)
@@ -100,7 +100,7 @@ def compute_lut_spectra(lut_size=128, smooth_steps=1, lut_coeffs_filename='hanat
     return lut_spectra
 
 def load_spectra_lut(filename='irradiance_xy_tc.npy'):
-    data_path = importlib.resources.files('agx_emulsion.data.luts.spectral_upsampling').joinpath(filename)
+    data_path = importlib.resources.files('spectral_film_lab.data.luts.spectral_upsampling').joinpath(filename)
     with data_path.open('rb') as file:
         spectra_lut = np.double(np.load(file))
     return spectra_lut

@@ -139,7 +139,7 @@ class TestStrip:
 
 
 if __name__ == '__main__':
-    from agx_emulsion.utils.io import load_image_oiio
+    from spectral_film_lab.utils.io import load_image_oiio
     
     image = load_image_oiio('img/targets/cc11.tiff')
     p = photo_params(negative='kodak_portra_400_auc')
@@ -149,3 +149,4 @@ if __name__ == '__main__':
     strip.negative_exposure_ramp(values=[-3, -2, -1, 0, 1, 2, 3, 4, 5, 6])
     fig = strip.process()
     plt.show()
+
