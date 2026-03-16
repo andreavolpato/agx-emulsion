@@ -1,13 +1,6 @@
-import numpy as np
-import scipy
-import copy
 from enum import Enum
 
-from agx_emulsion.model.process import photo_params, photo_process, AgXPhoto
-from agx_emulsion.model.illuminants import standard_illuminant
-from agx_emulsion.utils.io import save_ymc_filter_values
-
-# TODO: move this file to scripts to produce YMC neutral values
+# TODO: move script-like helpers out of this module.
 
 class FilmStocks(Enum):
     # kodak pro
@@ -47,57 +40,15 @@ class Illuminants(Enum):
     # cine = 'K75P'
     # led_rgb = 'LED-RGB1'
 
-def fit_print_filters_iter(profile):
-    p = copy.copy(profile)
-    p.debug.deactivate_spatial_effects = True
-    p.debug.deactivate_stochastic_effects = True
-    p.print_paper.glare.compensation_removal_factor = 0.0
-    p.io.input_cctf_decoding = False
-    p.io.input_color_space = 'sRGB'
-    p.io.resize_factor = 1.0
-    p.camera.auto_exposure = False
-    p.enlarger.print_exposure_compensation = False
-    midgray_rgb = np.array([[[0.184, 0.184, 0.184]]])
-    c_filter = p.enlarger.c_filter_neutral
-    
-    def midgray_print(ymc_values, print_exposure):
-        p.enlarger.y_filter_neutral = ymc_values[0]
-        p.enlarger.m_filter_neutral = ymc_values[1]
-        p.enlarger.print_exposure = print_exposure
-        rgb = photo_process(midgray_rgb, p)
-        return rgb
-    def evaluate_residues(x):
-        res = midgray_print([x[0], x[1], c_filter], x[2])
-        res = res - midgray_rgb
-        res = res.flatten()
-        return res
-    y_filter = p.enlarger.y_filter_neutral
-    m_filter = p.enlarger.m_filter_neutral
-    x0 = [y_filter, m_filter, 1.0]
-    x = scipy.optimize.least_squares(evaluate_residues, x0, bounds=([0, 0, 0], [1, 1, 10]),
-                                     ftol=1e-6, xtol=1e-6, gtol=1e-6,
-                                     method='trf')
-    print('Total residues:',np.sum(np.abs(evaluate_residues(x.x))),'<-',evaluate_residues(x0))
-    profile.enlarger.y_filter_neutral = x.x[0]
-    profile.enlarger.m_filter_neutral = x.x[1]
-    profile.enlarger.c_filter_neutral = c_filter
-    return x.x[0], x.x[1], evaluate_residues(x.x)
-
-def fit_print_filters(profile, iterations=10):
-    print(profile.negative.info.stock)
-    for i in range(iterations):
-        filter_y, filter_m, residues = fit_print_filters_iter(profile)
-        if np.sum(np.abs(residues)) < 1e-4 or i==iterations-1:
-            c_filter = profile.enlarger.c_filter_neutral
-            print('Fitted Filters :'+f"[ {filter_y:.2f}, {filter_m:.2f}, {c_filter:.2f} ]")
-            break
-        else:
-            profile.enlarger.y_filter_neutral = 0.5*filter_y + np.random.uniform(0,1)*0.5
-            profile.enlarger.m_filter_neutral = 0.5*filter_m + np.random.uniform(0,1)*0.5
-    return filter_y, filter_m, residues
-
 if __name__=='__main__':
+    import copy
+    import numpy as np
     import matplotlib.pyplot as plt
+    from agx_emulsion.model.illuminants import standard_illuminant
+    from agx_emulsion.model.process import photo_params
+    from agx_emulsion.profiles.fitting import fit_print_filters
+    from agx_emulsion.utils.io import save_ymc_filter_values
+
     plot_data = False
     density_midgray_test = False
     print_filter_test = False

@@ -2,7 +2,7 @@ import numpy as np
 import scipy.interpolate
 import copy
 from agx_emulsion.model.process import photo_process, photo_params
-from agx_emulsion.model.stocks import fit_print_filters
+from agx_emulsion.profiles.fitting import fit_print_filters
 
 def measure_log_exposure_midscale_neutral(profile, reference_channel=None):
     log_exposure_midscale_neutral = np.zeros((3,))
