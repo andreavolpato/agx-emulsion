@@ -1,7 +1,6 @@
 import numpy as np
 import copy
 import colour
-from dotmap import DotMap
 from opt_einsum import contract
 import skimage.transform
 
@@ -17,6 +16,7 @@ from agx_emulsion.utils.crop_resize import crop_image
 from agx_emulsion.model.illuminants import standard_illuminant
 from agx_emulsion.utils.io import read_neutral_ymc_filter_values
 from agx_emulsion.profiles.io import load_profile
+from agx_emulsion.model.runtime_params import RuntimePhotoParams, coerce_runtime_params
 from agx_emulsion.utils.timings import timeit, plot_timings
 
 ymc_filters = read_neutral_ymc_filter_values()
@@ -24,75 +24,21 @@ ymc_filters = read_neutral_ymc_filter_values()
 def photo_params(negative='kodak_portra_400_auc',
                  print_paper='kodak_portra_endura_uc',
                  ymc_filters_from_database=True):
-    params = DotMap()
-    params.negative = load_profile(negative)
-    params.print_paper = load_profile(print_paper)
-    params.camera = DotMap()
-    params.enlarger = DotMap()
-    params.scanner = DotMap()
-    params.io = DotMap()
-    
-    params.camera.exposure_compensation_ev = 0.0
-    params.camera.auto_exposure = True
-    params.camera.auto_exposure_method = 'center_weighted'
-    params.camera.lens_blur_um = 0.0 # about 5 um sigma for typical lenses, down to 2-4 um for high quality lenses, used for sharp simulations without lens blur.
-    params.camera.film_format_mm = 35.0
-    params.camera.filter_uv = (1, 410, 8)
-    params.camera.filter_ir = (1, 675, 15)
-    
-    params.enlarger.illuminant = 'TH-KG3-L'
-    params.enlarger.print_exposure = 1.0
-    params.enlarger.print_exposure_compensation = True
-    params.enlarger.y_filter_shift = 0.0
-    params.enlarger.m_filter_shift = 0.0
+    params = RuntimePhotoParams(
+        negative=load_profile(negative),
+        print_paper=load_profile(print_paper),
+    )
+
     if ymc_filters_from_database:
         params.enlarger.y_filter_neutral = ymc_filters[print_paper][params.enlarger.illuminant][negative][0]
         params.enlarger.m_filter_neutral = ymc_filters[print_paper][params.enlarger.illuminant][negative][1]
         params.enlarger.c_filter_neutral = ymc_filters[print_paper][params.enlarger.illuminant][negative][2]
-    else:
-        params.enlarger.y_filter_neutral = 0.9
-        params.enlarger.m_filter_neutral = 0.5
-        params.enlarger.c_filter_neutral = 0.35
-    params.enlarger.lens_blur = 0.0
-    params.enlarger.preflash_exposure = 0.0
-    params.enlarger.preflash_y_filter_shift = 0.0
-    params.enlarger.preflash_m_filter_shift = 0.0
-    params.enlarger.just_preflash = False
-    
-    params.scanner.lens_blur = 0.0
-    params.scanner.unsharp_mask = (0.7,0.7)
 
-    params.io.input_color_space = 'ProPhoto RGB'
-    params.io.input_cctf_decoding = False
-    params.io.output_color_space = 'sRGB'
-    params.io.output_cctf_encoding = True
-    params.io.crop = False
-    params.io.crop_center = (0.5,0.5)
-    params.io.crop_size = (0.1, 1.0)
-    params.io.preview_resize_factor = 1.0
-    params.io.upscale_factor = 1.0
-    params.io.full_image = False
-    params.io.compute_negative = False
-    params.io.compute_film_raw = False
-    
-    params.debug.deactivate_spatial_effects = False
-    params.debug.deactivate_stochastic_effects = False
-    params.debug.input_negative_density_cmy = False
-    params.debug.return_negative_density_cmy = False
-    params.debug.return_print_density_cmy = False
-    params.debug.print_timings = False
-    
-    params.settings.rgb_to_raw_method = 'hanatos2025'
-    params.settings.use_camera_lut = False
-    params.settings.use_enlarger_lut = False
-    params.settings.use_scanner_lut = False
-    params.settings.lut_resolution = 17
-    params.settings.use_fast_stats = False
-    
     return params
 
 class AgXPhoto():
     def __init__(self, params):
+        params = coerce_runtime_params(params)
         self._params = copy.deepcopy(params)
         # main components
         self.camera = params.camera
