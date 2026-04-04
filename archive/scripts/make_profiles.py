@@ -42,7 +42,7 @@ if process_print_paper:
 print('----------------------------------------')
 print('Negative profiles')
 
-#               label,                    name,                       suffix   dye_donor,   ls_donor            ddmm_donor           d_over_min, ref_ill target_paper,                align_mid_exp  trustability proc?
+#               label,                    name,                       suffix   dye_donor,   ls_donor            ddmm_donor           d_over_min, ref_ill target_print,                align_mid_exp  trustability proc?
 stock_info = [
               ('kodak_vision3_50d',      'Kodak Vision3 50D',         '',      None       , None,               None,                0.2,        'D55',  'kodak_2383_uc',             None,          0.3,         True),
               ('kodak_vision3_250d',     'Kodak Vision3 250D',        '',      None       , None,               None,                0.2,        'D55',  'kodak_2383_uc',             None,          0.3,         True),
@@ -62,7 +62,7 @@ stock_info = [
               ]
 
 if process_negative:
-    for label, name, suff, dye, ls_donor, ddmm_donor, d_over_min, ref_ill, target_paper, align_mid_exp, trustability, proc in stock_info:
+    for label, name, suff, dye, ls_donor, ddmm_donor, d_over_min, ref_ill, target_print, align_mid_exp, trustability, proc in stock_info:
         if not proc:
             continue
         profile = create_profile(stock=label,
@@ -83,7 +83,7 @@ if process_negative:
         if align_mid_exp is not None:
             profile = align_midscale_neutral_exposures(profile, reference_channel=align_mid_exp)
         profile = correct_negative_curves_with_gray_ramp(profile, 
-                                                        target_paper=target_paper, 
+                                target_print=target_print, 
                                                         data_trustability=trustability)
         profile = replace_fitted_density_curves(profile)
         profile = adjust_log_exposure(profile)
