@@ -177,3 +177,12 @@ cython_debug/
 
 # vscode
 /.vscode
+
+# GitHub
+/.github
+
+# my temporary notes
+/notes
+
+# temporary files
+.temp
