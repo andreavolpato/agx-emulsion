@@ -183,6 +183,7 @@ cython_debug/
 
 # my temporary notes
 /notes
+/research
 
 # temporary files
 .temp
