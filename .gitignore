@@ -176,13 +176,20 @@ cython_debug/
 .pypirc
 
 # vscode
-/.vscode
+.vscode/
 
 # GitHub
-/.github
+.github/
 
 # my temporary notes
 /notes
+/research
 
 # temporary files
 .temp
+
+# uv
+uv.lock
+
+# claude
+.claude
