@@ -1,0 +1,65 @@
+cff-version: 1.2.0
+message: |
+   spektrafilm is open for research, integration, and production use.
+
+  If you find it useful:
+  * Acknowledge spektrafilm in plugin descriptions, marketing, or credits
+    (e.g. "spectral film modeling powered by `spektrafilm`" or "spectral framework inspired by `spektrafilm`").
+  * Consider starring the repo or sharing your results.
+  * Cite the repository/Zenodo DOI in academic work.
+
+  The project is GPLv3 licensed, so any derivative work must also be open source under the same license. Derivatve work includes any software, plugin, or tool that incorporates spektrafilm code or is directly inspired by its methods.
+  
+  If GPLv3 is not compatible with your project, please reach out to discuss alternative options. I am very open to collaboration and integration, but I want to ensure that spektrafilm remains open source and grows with the community. 
+
+  This helps sustain open color science. Thanks!
+
+authors:
+  - family-names: "Volpato"
+    given-names: "Andrea"
+    email: "volpedellenevi@gmail.com"
+    orcid: "0000-0003-3368-0017"
+    affiliation: "KTH Royal Institute of Technology, Sweden"
+
+title: "spektrafilm: spectral simulation of analog photography"
+version: "0.3.2"
+doi: "xxxxx"
+repository: "https://github.com/andreavolpato/spektrafilm"
+license: "GPL-3.0-or-later"
+
+preferred-citation:
+  type: "article"
+  title: "spektrafilm: a measurement-grounded, physically-based spectral framework for open film emulation"
+  authors:
+    - family-names: "Volpato"
+      given-names: "Andrea"
+  publisher: ""
+  doi: ""
+  year: "2026"
+
+references:
+  - type: "software"
+    title: "spektrafilm"
+    authors:
+      - family-names: "Volpato"
+        given-names: "Andrea"
+    repository: "https://github.com/andreavolpato/spektrafilm"
+    year: "2025"
+
+keywords:
+  - "film emulation"
+  - "spectral imaging"
+  - "color science"
+  - "chemical processing"
+  - "RA-4 print simulation"
+  - "cine print film"
+  - "Kodak"
+  - "Fujifilm"
+  - "open source"
+  - "halation"
+  - "dir couplers"
+
+abstract: |
+  spektrafilm simulates analog film from spectral capture through negative, print, and scan using manufacturer datasheets and physically based spectral modeling. It bridges open color science and production tools.
+
+url: "https://github.com/andreavolpato/spektrafilm"
