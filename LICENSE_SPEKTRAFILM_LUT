@@ -1,0 +1,65 @@
+spektrafilm LUT License (Commercial Use, No Resale)
+
+Copyright (C) 2026 Andrea Volpato
+
+This license applies to the spektrafilm LUT files (e.g. .cube files and
+LUT bundles) where it is referenced.
+
+1. Grant of rights
+
+You are allowed to:
+- Use the LUTs to create images, videos, and other content for personal,
+  educational, and commercial projects.
+- Install and use the LUTs on multiple devices that you personally use,
+  or within a single organization or production.
+- Share the original LUT files for free with other individuals (for
+  example, collaborators, friends, or colleagues), provided you include
+  a copy of this license or a link to it.
+
+2. Restrictions
+
+You are not allowed to:
+- Sell, resell, or otherwise charge money specifically for the LUT
+  files (original or modified), whether alone or as part of a LUT pack,
+  preset bundle, plugin, or similar product.
+- Include the LUT files (original or modified) in any paid product or
+  service whose main value is distributing LUTs, presets, or similar
+  color profiles.
+- Claim authorship of the LUTs or remove the spektrafilm / Andrea
+  Volpato attribution from accompanying metadata or documentation.
+
+3. Derivative LUTs
+
+If you modify or build upon these LUTs (for example, by tweaking,
+re-gridding, or combining them with other transforms), you may:
+- Use your modified LUTs in your own personal, educational, and
+  commercial projects under the same conditions as section 1.
+- Share your modified LUTs for free, provided:
+  - You do not sell them, and
+  - You include clear credit to the original spektrafilm LUTs and a
+    copy of or link to this license.
+
+You may not sell or license your modified LUTs in a way that allows
+others to use them without respecting these “no resale” conditions.
+
+4. Attribution (requested)
+
+When practical (for example, in project documentation, about pages, or
+video descriptions), please include an attribution such as:
+
+“spektrafilm LUTs - https://github.com/andreavolpato/spektrafilm”
+
+Attribution is not required for the images or videos you create, but is
+appreciated where feasible.
+
+5. No warranty
+
+These LUTs are provided “as is”, without any warranty of any kind,
+express or implied, including but not limited to fitness for a
+particular purpose. You use them at your own risk.
+
+6. Other terms
+
+This license covers only the LUT assets. The Spektrafilm software
+(code) is licensed separately under the GNU General Public License v3.0
+(GPLv3); see the project repository for details.
