@@ -178,9 +178,6 @@ cython_debug/
 # vscode
 .vscode/
 
-# GitHub
-.github/
-
 # my temporary notes
 /notes
 /research
