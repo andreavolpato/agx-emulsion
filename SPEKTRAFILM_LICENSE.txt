@@ -1,0 +1,67 @@
+spektrafilm License v1.0 (Commercial Use, Free Share, No Resale)
+
+Copyright (C) 2026 Andrea Volpato
+
+This license applies to the spektrafilm JSON profiles included in the main
+spektrafilm repository in the folder src/spektrafilm/data/profiles and applies
+to all the direct derivatives of them, such as but not limited to copy of them
+in other projects or LUT files created by the spektrafilm runtime (e.g. .cube
+files and LUT bundles) or other runtimes in separate programs.
+
+In this license, when stating "profiles/LUTs" we intend "profiles, LUTs, and 
+artifacts created as direct derivatives of them".
+
+1. Grant of rights
+
+You are allowed to: 
+- Use the profiles/LUTs to create images, videos, and other content for
+  personal, educational, and commercial projects. 
+- Install and use the profiles/LUTs on multiple devices that you personally use,
+  or within a single organization or production. 
+- Share the original profiles/LUTs files for free with other individuals (for
+  example, collaborators, friends, or colleagues), provided you include a copy
+  of this license or a link to it.
+
+2. Restrictions
+
+You are not allowed to: 
+- Sell, resell, or otherwise charge money specifically for the profiles/LUTs
+  files (original or modified) or derived artifacts, whether alone or as part of
+  a LUT pack, preset bundle, plugin, or similar product. 
+- Include the profiles/LUTs files (original or modified) in any paid product or
+  service whose main value is distributing LUTs, presets, or similar color
+  grading tools. 
+- Claim authorship of the profiles/LUTs files or remove the spektrafilm
+  attribution from accompanying metadata or documentation.
+
+3. Derivatives
+
+If you modify or build upon these profiles/LUTs (for example, by tweaking,
+re-gridding, or combining them with other transforms), you may: 
+- Use your modified profiles/LUTs in your own personal, educational, and
+  commercial projects under the same conditions as section 1. 
+- Share your modified profiles/LUTs for free, provided: 
+- You do not sell them, and 
+- You include clear credit to the original spektrafilm profiles/LUTs and a copy
+  of or link to this license. 
+- Derivative profiles/LUTs must be released with the same spektrafilm license.
+
+You may not sell or license your modified profiles/LUTs in a way that allows
+others to use them without respecting these “no resale” conditions.
+
+4. Attribution
+
+When practical (for example, in project documentation, about pages, or video
+descriptions), please include an attribution such as:
+
+“spektrafilm LUTs - https://github.com/andreavolpato/spektrafilm” or "film
+emulation powered by spektrafilm - https://github.com/andreavolpato/spektrafilm"
+
+Attribution is not required for the images or videos you create, but is
+appreciated where feasible.
+
+5. No warranty
+
+These profiles/LUTs are provided “as is”, without any warranty of any kind,
+express or implied, including but not limited to fitness for a particular
+purpose. You use them at your own risk.
