@@ -18,9 +18,11 @@ You are allowed to:
   personal, educational, and commercial projects. 
 - Install and use the profiles/LUTs on multiple devices that you personally use,
   or within a single organization or production. 
-- Share the original profiles/LUTs files for free with other individuals (for
+- Share the profiles/LUTs files for free with other individuals (for
   example, collaborators, friends, or colleagues), provided you include a copy
   of this license or a link to it.
+- Include the profiles/LUTs files in another open-source program, provided you
+  include a copy of this license or a link to it.
 
 2. Restrictions
 
