@@ -1,7 +1,7 @@
 ================================================================================
         License for spektrafilm profiles, LUTs, and direct derivatives
                           by Andrea Volpato
-            License: CC BY-SA 4.0 | Preamble v1.0 (2026-05-26)
+            License: CC BY-SA 4.0 | Preamble v1.1 (2026-05-28)
 ================================================================================
 
 
@@ -10,6 +10,19 @@ https://github.com/andreavolpato/spektrafilm, in the subfolder
 src/spektrafilm/data/profiles, and to all direct derivatives of the profiles,
 such as copies in other projects, LUTs, or any other format that encodes the
 same content.
+
+LUTs and similar artifacts are interpreted as direct encodings of the
+information in the original profiles. I chose not to release them under GPLv3
+because GPL's software-shaped "derivative work" model fits LUTs poorly and would
+have made adoption more difficult. CC BY-SA 4.0 preserves the same share-alike
+spirit in a form that matches how creative-grading assets are actually handled.
+
+Please do not modify this file. Changes to profiles and LUTs should be tracked
+in a separate CHANGELOG.txt file shipped with them. A copy of this license is
+available at:
+https://github.com/andreavolpato/spektrafilm/blob/main/SPEKTRAFILM_LICENSE.txt
+
+---
 
 A note before the legal text.
 
@@ -87,6 +100,10 @@ WHAT I ASK, BEYOND THE LEGAL FLOOR
 
 These are not legal requirements. They are the spirit of the project, stated
 plainly, so nobody has to guess.
+
+  - Keep this file unchanged when sharing profiles/LUTs, and if changes were
+    made describe them in a file CHANGELOG.txt shipped together with this
+    license.
 
   - Credit spektrafilm in the human layer too - project docs, about pages,
     credits, breakdowns. Not required on a finished film or photograph, but
