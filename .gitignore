@@ -190,3 +190,11 @@ uv.lock
 
 # claude
 .claude
+# macOS
+.DS_Store
+
+# metal-backend fork: generated test artifacts (large binaries)
+/tmp/
+/tests/baseline/out/
+/tests/baseline/*.tif
+/tests/baseline/*.exr
