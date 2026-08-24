@@ -172,14 +172,69 @@ blurs (`grain_blur`, micro-structure), which need ~4 px halos if you ever tile
 them. Do not avoid chunking the draws out of seam fear; do not chunk the blurs
 without halos.
 
+### 10. `skimage.transform.rescale` is a hidden 7 s at 45 MP
+
+`auto_exposure` builds a 256px preview with `rescale(..., order=0)`; for a
+45 MP frame that full-resolution pass measured **7.1 s** — it was the single
+biggest line in the decoupled profile (more than the actual multiply, 0.02 s,
+or the meter, 0.003 s). The preview only needs a sparse sample of the frame,
+so `small_preview` now uses a nearest stride-slice (`image[::step, ::step]`),
+which is O(1) and collapses auto_exposure to ~0.1 s. GPU wouldn't have fixed
+this — it was a CPU downscale, not a pointwise multiply. Profile before
+concluding a stage is GPU-bound: isolate the sub-steps.
+
 ---
 
 ## Conventions
 
 - Match surrounding style: the codebase uses NumPy-style docstrings, explicit
   named parameters, and numba `@njit(parallel=True, cache=True)` for hot loops.
-- New backends go behind a `settings.*_backend` string, defaulting to the CPU
-  path. Never change a default that alters output without saying so.
+- New backends go behind a `settings.*_backend` string. The spectral backend
+  default is now `'mlx'` (MLX-first, RFC-001); if MLX is unavailable the
+  render raises loudly rather than silently using the CPU path. Never change
+  a default that alters output without saying so.
+- The GUI (`spektrafilm_gui.params_mapper`) forces `spectral_backend='mlx'`
+  so persisted states cannot revert to a CPU path. MLX launches require real
+  Metal access, so GPU work (and the GUI itself) must run outside the sandbox.
+- RFC-003 pipeline decoupling has landed: `runtime/pipeline.py` builds ~24
+  effect-level `Node`s (e.g. `filming.expose.upsample` ... `scanning.cctf`)
+  instead of the six monoliths, with the monolith methods kept as thin
+  wrappers over the same effect methods. It is a pure refactor (output is
+  bit-identical; `tests/test_rfc003_split.py` guards the structure). The split
+  itself does **not** cut peak memory at float64 (measured 12.38 GB / 275 B/px
+  at 45 MP vs 12.58 GB / 280 B/px pre-split): the biggest temporaries are
+  float64 *inside* the kernels (spectral upsampling colour conversion,
+  halation blurs, grain sublayers, CAM16 gamut compression). Real memory
+  reduction needs kernel-level float32 / per-node precision, which is deferred
+  (measured ΔE max 2.42 / MS-SSIM 0.9955 on the GUI config — fails the strict
+  bar). Effect labels above are also the timing keys `get_timings()` returns.
+- RFC-004 GPU port has landed its P0–P2 kernels: `backends/mlx_ops.py` has the
+  device wrapper/residency primitive plus float32 pointwise kernels
+  (`gpu_scale`/`gpu_log10`/`gpu_boost`/`gpu_cctf_srgb`) and a separable Gaussian
+  Metal kernel (`gpu_separable_gaussian`). They are wired into the pipeline
+  behind `settings.gpu_backend='mlx'` (default `''` = CPU reference, unchanged).
+  Validation (deterministic, ProPhoto→Display P3): GPU vs CPU float64 gives ΔE
+  max 6.1e-5, PSNR 150 dB, MS-SSIM 1.0 — visually identical. The `Node` GPU body
+  is `run_mlx` (single-read/write); per-node GPU runs upload+download, so the
+  P0 residency *grouping* (a device-resident run) is still to be added, and only
+  exposure/boost/log/lens_blur/scanner_blur/cctf are ported (the dominant
+  `upsample`, `halation`, `grain`, `gamut_compress` are P3/P4/P5). Keep grain +
+  glare OFF for any CPU-vs-GPU ΔE comparison (RFC-001 6.0/6.1): the stochastic
+  grain realisation differs once upstream floats to float32.
+- RFC-004 P1 pointwise color stages added: `gpu_xyz_to_rgb` (3x3 matmul; the
+  matrix is `colour.XYZ_to_RGB(np.eye(3), cs, illuminant=...)`, and the node
+  result is `xyz @ matrix`) and `gpu_curve_interp` (a small Metal LUT kernel
+  matching `fast_interp`: endpoint clamp, binary search, right-biased exact
+  match). Curves and XYZ→RGB are now GPU-wired. At 45 MP (deterministic,
+  ProPhoto→Display P3) the GPU path is ΔE max 0.000086 / MS-SSIM 1.0, time
+  ~22.6 s vs ~25.4 s CPU, peak 12.2 GB. The precision map (float64 CPU color
+  reference vs float32 GPU) is the deliberate RFC-004 policy: `upsample` and
+  `gamut_compress` (CAM16) stay float64 for color accuracy; grain/glare stay
+  exact (off in A/B).
+  **Trap:** the curve `x_axis` must be `(K, 3)` — the scalar density-curve
+  gamma must be expanded to 3 channels (`np.repeat(gamma, 3)`), otherwise the
+  axis is `(K, 1)` and the kernel reads 3 columns of garbage (measured 2.05
+  error). Mirror `interpolate_exposure_to_density`'s `gamma_factor` expansion.
 - Anything claiming a speed or memory win must come with a measurement in the
   same message. `tracemalloc` for allocation, `resource.getrusage` for RSS.
 - Quality claims need a ΔE number from `compare.py`, not an eyeball.
