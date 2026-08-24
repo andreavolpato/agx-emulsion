@@ -44,6 +44,8 @@ Do not change these without a reason; every recorded number assumes them.
 | baseline image | `tests/baseline/_DSC2439_16mp_linear_prophoto.tif` (16.00 MP, 3264×4901, float32 linear ProPhoto) |
 | smoke image | `tests/baseline/_smoke_1mp.tif` (1 MP, for fast iteration) |
 | precision | float32 on macOS (see Traps) |
+| grain sampler | `exact` (RFC-002); `--sampler scipy` for the old stream |
+| working precision | `float64` (see trap 8) |
 
 Regenerate the baseline from the source NEF:
 
@@ -79,11 +81,14 @@ Compare two renders:
 renders with identical config and the same backend differ by up to **0.042** —
 larger than most differences you will be trying to measure.
 
-Grain is the other stochastic stage.
+**Glare is the only unseeded stage.** Grain looks stochastic but is not: with
+`fixed_seed=None` the model takes `seed = [0, 1, 2]` (note the inverted-looking
+branch) and `grain_sampler='exact'` derives every chunk's stream from a fixed
+`SeedSequence`, so grain reproduces run to run and across worker counts.
 
-**Any per-pixel comparison must disable both.** `run_reference.py --no-glare`
-plus omitting `--grain` does this. With both off the pipeline is bit-exact
-(`np.array_equal` True) run to run.
+**Any per-pixel comparison must still disable both.** `run_reference.py
+--no-glare` plus omitting `--grain` does this. With both off the pipeline is
+bit-exact (`np.array_equal` True) run to run.
 
 This cost an hour of chasing a phantom port bug. Before concluding a change
 broke something, run the same config twice and check it reproduces.
@@ -143,6 +148,30 @@ full colourspace conversion with an identity matrix just to apply a transfer
 function. `colour.cctf_encoding` is 2.5× faster — but gives a 3.0e-4
 difference, so verify which curve variant is wanted before swapping.
 
+**This defeats float32 entirely.** `settings.working_precision='float32'` is
+numerically free (ΔE max 1.4e-4, PSNR 172 dB) and saves *no memory* — 5.61 GB
+vs 5.57 GB at 16 MP — because the first colourspace conversion in
+`filming.expose` upcasts straight back. Casting at the door does nothing.
+
+### 8. Approximating a distribution can preserve RMS and still change the look
+
+`fast_stats` reproduces grain RMS granularity to within 0.14% and flattens
+**skewness to zero at every density**. Skewness is `1/sqrt(mu)` and `mu` rises
+with density, so it encodes film's shadow-vs-highlight grain character
+(+0.165 in shadows, +0.022 in highlights). Matching the second moment is not
+evidence that a noise model is equivalent — check the third.
+
+Use `grain_sampler='exact'` (default): Poisson-thinned, exact, 27× faster than
+scipy. `use_fast_stats` is preview-only. See RFC-002 §3.4.
+
+### 9. Grain draws are i.i.d. — chunking them creates no seam
+
+The per-pixel draws have no spatial correlation, so partitioning them produces
+a different realisation and no boundary artefact. Seams come only from the
+blurs (`grain_blur`, micro-structure), which need ~4 px halos if you ever tile
+them. Do not avoid chunking the draws out of seam fear; do not chunk the blurs
+without halos.
+
 ---
 
 ## Conventions
@@ -157,7 +186,7 @@ difference, so verify which curve variant is wanted before swapping.
 
 ## Do not
 
-- Do not commit or push unless asked. Nothing is committed on this fork yet.
+- Do not commit or push unless asked.
 - Do not add GPL-incompatible dependencies. The code is GPL-3.0-or-later; the
   profiles under `data/profiles/` are CC BY-SA 4.0 with separate attribution
   obligations.
