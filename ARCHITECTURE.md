@@ -75,17 +75,19 @@ discrepancy by tap localises it in one pass.
 
 `io.scan_film = True` swaps the print+scan branch for a direct film scan.
 
-### Current node granularity is too coarse
+### Node granularity (resolved by RFC-003)
 
-Six nodes, each bundling several physically distinct effects. `filming.expose`
-alone does spectral upsampling, exposure compensation, highlight boost,
-diffusion filter, lens blur, in-emulsion scatter, back-reflection halation and
-the log conversion.
+The graph was six nodes, each bundling several physically distinct effects.
+RFC-003 split it into ~24 effect-level nodes, which is what made per-node
+backend selection, per-node precision, and dead-node elimination possible.
+`_declare_topology` builds the full graph; `_build_topology` returns it after
+`prune_identity_nodes` has dropped the no-ops and aliased their taps.
 
-This blocks three things: classifying stages as pointwise / spatial /
-stochastic (which determines GPU kernel shape), computing per-node spatial
-support (which a tile scheduler needs for halos), and exposing independent
-bypass/reorder controls. Splitting it is RFC-001 M2.
+Each `Node` carries `kind` (pointwise / spatial / stochastic), `support` (halo
+px, `inf` for global operators), `backend`, `precision`, and `run_mlx`. That
+contract surface is also the seam a future native backend would attach to: a
+`run_native` alongside `run_mlx`, ported node by node against the Python
+float64 reference (RFC-007 5).
 
 ---
 
@@ -125,14 +127,30 @@ faster, exact to 2.4e-15**.
 
 Secondary costs that remain:
 
-- `run_topology` accumulates every tap in one dict and frees nothing until the
-  run returns — 7 × `(H,W,3) float64` = 168 B/px held simultaneously.
+- `run_topology` used to accumulate every tap in one dict and free nothing —
+  7 × `(H,W,3) float64` = 168 B/px at once. `free_taps` now drops each tap once
+  its last reader has fired, and (RFC-005) does so *before* the per-node
+  precision cast, since the cast allocates a second buffer for the same tap.
 - `_preprocess` (`pipeline.py:192`) upcasts float32 input to float64.
 - `printing.py:80` allocated a `zeros_like` that was immediately overwritten
   (**removed**).
 - The `log10` → `10**` round trip between the spectral call and its caller —
   two full-image transcendental passes that cancel, present only because the
   optional LUT interpolates in log space. Still present.
+- NumPy expression chains allocate one full-resolution temporary per operator.
+  Measured on the CAM16 gamut compression: **19.67× the input** in temporaries,
+  ~20 GB of churn at 45 MP for one stage. Fusing it into a single numba pass
+  brought that to 2.00× (RFC-007 A). This is the dominant remaining allocation
+  pattern wherever a stage is still written as NumPy expressions.
+- MLX's device buffer pool held **1.76 GB with active memory at 0.00 GB**.
+  Full-resolution runs now cap it to zero (`unpooled_device_memory`); preview
+  runs keep it, since there the next render is imminent. This is what collapsed
+  the run-to-run spread in peak RSS from 1.80 GB to 0.20 GB.
+- Python's cyclic GC is **not** a lever here: rendering with `gc.disable()`
+  changes peak RSS by 0.01 GB. The collector reclaims 415 objects across a full
+  render, none of them arrays, and zero arrays over 50 MB are reachable through
+  cycles. NumPy buffers are freed by refcount. Tap dtype, reference lifetime,
+  and promotion copies are what govern the footprint.
 
 ---
 
@@ -154,7 +172,7 @@ Backend is selected by `params.settings.spectral_backend` (default `"numba"`).
 
 ---
 
-## 6. Where the time goes (16 MP, after M1.5)
+## 6. Where the time goes
 
 Exact path — LUTs off, no grain, no glare — **8.14 s, 6.15 GB**:
 
@@ -171,7 +189,28 @@ Full-quality path — LUTs on, grain, glare — **24.10 s, 6.66 GB**. The delta
 versus 8.14 s is dominated by **grain (~16 s)**, now the single largest item in
 the pipeline and entirely un-optimised.
 
-### Gamut compression, the former bottleneck
+### The 45 MP profile after RFC-007 A
+
+The current frontend metric (deterministic, ProPhoto → Display P3, grain and
+glare off, GPU on) is **12.9 s / 13.85 GB**, down from 40.9 s at the start of
+the optimisation work:
+
+| node | time | % |
+|---|---|---|
+| `filming.expose.halation` | 3.30 s | 26.0% |
+| `filming.develop.dir_couplers` | 2.40 s | 18.9% |
+| `scanning.scan_spectral` | 1.58 s | 12.4% |
+| `scanning.gamut_compress` | 1.38 s | 10.8% |
+| `printing.expose.print_exposure` | 1.24 s | 9.8% |
+| `printing.expose.enlarger_spectral` | 688 ms | 5.4% |
+| `filming.expose.upsample` | 587 ms | 4.6% |
+
+**The profile is now spatial-dominated.** The two largest stages do not fuse
+the way the pointwise stages did: `halation` is `support=inf` (a global
+operator, which also blocks tiling) and `dir_couplers` is a diffusion. Any
+plan written against the older pointwise-heavy profile is stale.
+
+### Gamut compression, twice a bottleneck
 
 `compress_rgb` defaults to `cam16ucs` — a full CIECAM16 forward *and* inverse
 per pixel, the heaviest of the four available algorithms. It was 8.52 s, ~50%
@@ -184,6 +223,20 @@ the knee is never formally identity.
 
 It is, however, purely pointwise — hence `parallel_pointwise`, which took it to
 1.37 s bit-exactly.
+
+RFC-007 A then fused it: `utils/fused_gamut_cam16.py` runs the whole
+RGB → XYZ → CAM16 → knee → CAM16⁻¹ → XYZ → RGB chain in a single numba pass,
+with colour-science confined to setup (matrices via the identity trick, the
+viewing-condition constants, the `C_max` table). Isolated on a real 16 MP tap
+that is 7.70 s → 0.32 s and **19.67× → 2.00× the input in temporaries**; in the
+pipeline, where the reference was already thread-parallel, it is 4.32 s →
+1.38 s at 45 MP. The fused path bypasses `parallel_pointwise` deliberately —
+it is internally parallel, and nesting numba's non-threadsafe `workqueue`
+layer inside a thread pool aborts the process.
+
+The same treatment applies to the front half of spectral upsampling
+(`utils/fused_tc_b.py`): 3.97 s → 0.59 s at 45 MP, matching the reference to
+8e-16.
 
 Worth knowing what it does: a one-sided Reinhard roll-off on CAM16 lightness
 `Jp` (identity below 70, asymptotic at 100) plus a chroma knee against

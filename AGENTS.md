@@ -235,6 +235,48 @@ concluding a stage is GPU-bound: isolate the sub-steps.
   gamma must be expanded to 3 channels (`np.repeat(gamma, 3)`), otherwise the
   axis is `(K, 1)` and the kernel reads 3 columns of garbage (measured 2.05
   error). Mirror `interpolate_exposure_to_density`'s `gamma_factor` expansion.
+- RFC-005 (dispatch + kernel quality) landed. Four things to know:
+  **(1) A GPU tag was silently a precision decision.** A node with
+  `backend=('mlx',)` returned float32, which propagated into every downstream
+  CPU stage — so removing a tag changed *numerics*, not just placement.
+  `Node.precision` is now honoured by the dispatcher and the float32 taps are
+  declared explicitly. Never add or remove a `backend` tag without checking
+  what it does to the tap dtype.
+  **(2) `prune_identity_nodes` aliases taps.** Dead-node elimination must
+  rewrite downstream `reads` through the dropped node's read tap, or the
+  successor can never fire. Four nodes are pruned at default params (both
+  blurs, diffusion filter, unsharp).
+  **(3) `to_device` passes `mx.array` through.** Calling it on a device array
+  used to round-trip via host (37.5 ms at 45 MP); a single blur did four.
+  **(4) Bare-Metal/metal-cpp was measured and rejected**: a Python →
+  `mx.fast.metal_kernel` launch is 157 µs, ~0.07% of the render.
+  `mx.fast.metal_kernel` already compiles hand-written MSL — those kernels
+  *are* bare Metal.
+- RFC-007 A (CPU fusion) landed: `utils/fused_gamut_cam16.py` and
+  `utils/fused_tc_b.py`. 45 MP interleaved A/B: **18.93 s → 12.93 s (-31.7%)**,
+  dE2000 max 0.000041, 0 of 16.0 M pixels above dE 0.1. `upsample` 3.97 → 0.59 s,
+  `gamut_compress` 4.32 → 1.38 s. The pattern: **colour-science stays at setup
+  time** (matrices via the identity trick, viewing-condition constants, the
+  C_max table), and only per-pixel math is fused. Use `_FORCE_REFERENCE_CAM16` /
+  `_FORCE_REFERENCE_TC_B` to A/B the two paths in one process.
+  **Traps, all of which produced plausible-looking wrong output:**
+  the CIECAM02 inverse (a,b) solve carries 460/1403, 220/1403, 27/1403 and
+  6300/1403 factors (omitting them: dE 33); colour uses a *sign-preserving*
+  power for J, so negative achromatic response gives negative J, not 0;
+  the GUI default sets `lightness_compression`, so a kernel that skips it
+  falls back to the reference and becomes **dead code on every real render**
+  while unit tests pass — the A/B is what caught it; the reference accepts any
+  `(..., 3)` shape, not just `(H, W, 3)`.
+  **Never call a `parallel=True` numba kernel from inside `parallel_pointwise`**
+  — numba's `workqueue` layer is not threadsafe and aborts the process.
+  `_scan_gamut_compress` bypasses the thread pool for the fused path.
+- The 45 MP profile after RFC-007 A is **spatial-dominated**: halation 3.30 s
+  (26%), dir_couplers 2.40 s (19%), scan_spectral 1.58 s (12%). Neither of the
+  top two fuses the way the pointwise stages did (halation is `support=inf`).
+  Estimates written against the old pointwise-heavy profile are stale.
+- **Measure interleaved, never sequentially.** This machine drifts: the same
+  unchanged commit measured 23.3 s and 18.9 s hours apart. Stash/pop or use the
+  `_FORCE_REFERENCE_*` switches and alternate arms within one session.
 - Anything claiming a speed or memory win must come with a measurement in the
   same message. `tracemalloc` for allocation, `resource.getrusage` for RSS.
 - Quality claims need a ΔE number from `compare.py`, not an eyeball.
