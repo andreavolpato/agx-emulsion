@@ -30,7 +30,8 @@ Both were written this session against real measurements, not projected.
   grain draws, a trap this session hit once already and is now documented
   in both API-SPEC §2 and this file so it isn't rediscovered): **mean abs
   diff 0.0017, max 0.174**, visually indistinguishable.
-- **Timing, real numbers, not estimates:** bake 0.26s (single stock,
+- **Timing, real numbers, not estimates** (apply superseded — see 3.1):
+  bake 0.26s (single stock,
   reference implementation) down to ~0.01s per stock once numba/JIT/spectral
   caches are warm (measured baking all 8 sequentially); apply 4.5s on a
   45 MP negative using unoptimized `scipy.ndimage.map_coordinates`. A full
@@ -60,12 +61,27 @@ judgment call, recorded so it doesn't get "fixed" as an oversight.
 
 ## 3. What actually needs building next
 
-1. **GPU-accelerated LUT application.** 4.5s on 45 MP via CPU
-   `scipy.ndimage.map_coordinates` is the one real remaining cost — this
-   should be a straightforward MLX texture-sample kernel (trilinear lookup
-   is exactly what GPU texture units are built for) and should land well
-   under 100ms. Not attempted this session; pure engineering, no open
-   design question.
+1. ~~**GPU-accelerated LUT application.**~~ **Done (2026-08-25).**
+   `mlx_ops.gpu_apply_lut3d` is a Metal trilinear kernel;
+   `scripts/apply_print_lut.py` grew `--backend auto|gpu|cpu` (auto = GPU when
+   Metal is available, scipy otherwise) and `--check`, which runs both arms and
+   reports agreement. Measured on `_DSC2439.NEF` at 45 MP:
+   **4525.8 ms -> 23.8 ms, a 190x speedup**, against the scipy reference at
+   **mean abs 1.3e-08 / max abs 2.4e-07** — float32 storage epsilon, i.e. the
+   same eight corners with the same weights. Comfortably beat the "well under
+   100 ms" target. First dispatch is ~313 ms including Metal shader
+   compilation; that is one-time per process, not per preview.
+   Covered by `tests/test_gpu_lut3d.py` (scipy equivalence on random and on a
+   shipped asset, edge clamping, exact grid-node hits).
+
+   Two notes for whoever touches it next: the kernel assumes the per-channel
+   axes are **uniformly spaced**, which is how `bake_all_print_luts.py` writes
+   them (verified to 2.4e-7 on the shipped assets) — a non-uniform axis would
+   need a search, not a scale. And the CPU baseline in this row was
+   re-measured after the RFC-006 float32 work; the negative render feeding it
+   is now float32, so do not compare a new number against the pre-RFC-006
+   15.03 s end-to-end figure below. The same run now totals **9.33 s**
+   (9.01 s negative + 0.02 s apply).
 2. **Wire `preview_stock_lut` into the actual render service** once that
    service exists (this PRD/API-SPEC describe a service that doesn't have a
    running implementation yet, per PRD §0). The method needs: load the
