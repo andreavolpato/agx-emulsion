@@ -121,31 +121,64 @@ only via the diffusion filter, off by default; `scanning.scanner_blur` /
 spatial+stochastic and is ON by default** — a 3D LUT structurally cannot
 represent it.
 
-Prototyped in `scripts/prototype_print_lut.py`: baked a 33³ LUT of the real
-Kodak 2393 print stock (`kodak_vision3_250d`/`kodak_2393`, glare off) from a
-single `pipeline.process(grid, inject=Tap.CMY_FILM, collect=Tap.RGB_OUT)`
-call over a 35,937-point density grid, then applied it via trilinear
-interpolation (`scipy.ndimage.map_coordinates`) to a real 45 MP negative.
+**Shipped, not just prototyped (2026-08-25).** `scripts/bake_all_print_luts.py`
+bakes a 33³ LUT for **all 8 print stocks** in the profile library (checked
+directly: `fujifilm_crystal_archive_typeii`, `kodak_2383`, `kodak_2393`,
+`kodak_ektacolor_edge`, `kodak_endura_premier`, `kodak_portra_endura`,
+`kodak_supra_endura`, `kodak_ultra_endura` — every profile with
+`info.stage == "printing"`), one `pipeline.process(grid, inject=Tap.CMY_FILM,
+collect=Tap.RGB_OUT)` call per stock over a 35,937-point density grid sized
+to *that film's own* characteristic-curve range (not one test photo's
+observed range, so the shipped LUT is valid for any negative from that
+film, not just the frame it happened to be tested on). Output:
+`src/spektrafilm/data/luts/print_preview/<print_stock>.{npz,json}`, ~370 KB
+each, all 8 baked in **0.71 s total**.
 
-| | value |
-|---|---|
-| bake time | **0.26 s** |
-| apply time (unoptimized scipy, 45 MP) | 4.5 s — the one number worth a GPU implementation |
-| accuracy vs. the real pipeline (glare off, apples-to-apples) | mean abs diff **0.00085**, visually indistinguishable (`tmp/Test_image/out/print_lut_compare.png`) |
-| accuracy vs. real pipeline WITH glare (production default) | mean abs diff 0.00177 — small on this frame, but a real, uncorrected gap; glare must be layered as a separate pass, not folded into the LUT |
+**Pairing note, checked against the data, not guessed:** each film profile
+declares its own `info.target_print` — `kodak_portra_400 → kodak_portra_endura`,
+`kodak_vision3_250d → kodak_2383`, `fujifilm_pro_400h →
+fujifilm_crystal_archive_typeii` are all explicit in the profile JSON. Five
+print stocks have no film that declares them as `target_print`
+(`kodak_2393`, `kodak_ektacolor_edge`, `kodak_endura_premier`,
+`kodak_supra_endura`, `kodak_ultra_endura`) — each shipped LUT for those is
+paired with a reasonable default (`kodak_portra_400` for the orphaned Kodak
+still papers, `kodak_vision3_250d` for `kodak_2393` — same product family as
+`2383`), marked `"declared_pairing": false` in that LUT's own `.json`
+sidecar. **The LUT is coupled to both the paper's curve and the negative's
+dye spectra** (`_film_cmy_to_print_log_raw` uses the film's own
+`channel_density`/`base_density`) — it is not purely a property of the
+print stock, so applying a shipped LUT against a film it wasn't paired with
+is an approximation with unmeasured error. Flagged in `HANDOFF-PRINT-LUT.md`
+as the open question for the next session, not resolved here.
 
-**Product implication:** this is the mechanism for the "preview the film
-look on a DI export" problem raised earlier in this project's design
-conversation, and it's cheap enough to be a real feature, not a research
-curiosity — bake one `.cube`-equivalent LUT per stock (33³ in ~0.26s), ship
-it alongside a wide-latitude DI export so external tools (Resolve,
-Photoshop) can preview the real stock's look without spektrafilm in the
-loop, and re-bake per stock/curve-morph choice rather than per
-`print_exposure`/filter-shift tweak — those remain `reprint`'s job, since a
-LUT is fixed for one parameter set and doesn't grade, it only previews.
-`SpectralLUTService` (`use_enlarger_lut`/`use_scanner_lut`) already does a
-narrower version of this for the spectral-integral sub-steps; this is the
-same technique widened to the whole print+scan chain, output tap included.
+**Real deliverable produced end to end**, not just a comparison sheet:
+`scripts/apply_print_lut.py` loads a shipped LUT and a real RAW, renders
+the negative, applies the LUT, and writes a genuine TIFF —
+`tmp/Test_image/out/_DSC2484_kodak_2393_via_lut.tif`, 15.03 s total (10.51 s
+negative render + 4.51 s LUT apply) on the 45 MP dehancer-comparison frame,
+against ~19.5 s for the full print+scan render on the same frame. Verified
+correct against the same-pipeline-instance ground truth (not an
+independent, differently-grained render — that comparison gave a
+misleadingly large 0.05 mean diff purely from two unseeded stochastic grain
+draws, the same "must disable grain to isolate other differences" trap this
+session hit before): **mean abs diff 0.0017, max 0.174**, matching the
+original single-stock prototype exactly.
+
+**New API method, added to `PRD-callable-render-api.md` §7.3:**
+`preview_stock_lut` — `{session_id, print_stock, film_stock?}` →
+`{preview_path, lut_source, apply_ms}`. Applies a shipped (or, if none
+exists for that pair, freshly-baked — baking is cheap enough, ~0.01-0.25s,
+to be a legitimate fallback) LUT to the session's cached negative. This is
+explicitly **not** `reprint`'s replacement — no `params_delta`, can't
+represent exposure/filter-pack changes, skips glare entirely. It exists so
+a frontend can let a user flip between stocks/looks near-instantly before
+committing to a real render; see the PRD for the full contract and the
+glare tradeoff reasoning.
+
+`SpectralLUTService` (`use_enlarger_lut`/`use_scanner_lut`) already did a
+narrower version of this for the spectral-integral sub-steps only; this
+widens the same technique to the whole print+scan chain, output tap
+included.
 
 ---
 
