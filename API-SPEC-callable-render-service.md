@@ -108,6 +108,45 @@ build (or let a frontend build) a "grade the exported print TIFF externally"
 workflow expecting it to match `reprint`'s output; the two are not
 interchangeable, by physics, not by implementation gap.
 
+**But the print+scan chain *is* representable as a 3D LUT, and that's a real,
+measured, different thing from "gradable."** A LUT doesn't let you grade —
+it lets you *preview* a specific stock's look cheaply, matching how real DI
+grading actually works: a colorist works on wide-latitude scan/negative data
+while *viewing* it through a live-composited print-emulation LUT, baked into
+the deliverable only at final export. Checked whether `Tap.CMY_FILM ->
+Tap.RGB_OUT` is representable that way here: every node in the chain is
+pointwise under default params (`printing.expose.print_exposure` is spatial
+only via the diffusion filter, off by default; `scanning.scanner_blur` /
+`scanning.unsharp` are off by default) **except `scanning.glare`, which is
+spatial+stochastic and is ON by default** — a 3D LUT structurally cannot
+represent it.
+
+Prototyped in `scripts/prototype_print_lut.py`: baked a 33³ LUT of the real
+Kodak 2393 print stock (`kodak_vision3_250d`/`kodak_2393`, glare off) from a
+single `pipeline.process(grid, inject=Tap.CMY_FILM, collect=Tap.RGB_OUT)`
+call over a 35,937-point density grid, then applied it via trilinear
+interpolation (`scipy.ndimage.map_coordinates`) to a real 45 MP negative.
+
+| | value |
+|---|---|
+| bake time | **0.26 s** |
+| apply time (unoptimized scipy, 45 MP) | 4.5 s — the one number worth a GPU implementation |
+| accuracy vs. the real pipeline (glare off, apples-to-apples) | mean abs diff **0.00085**, visually indistinguishable (`tmp/Test_image/out/print_lut_compare.png`) |
+| accuracy vs. real pipeline WITH glare (production default) | mean abs diff 0.00177 — small on this frame, but a real, uncorrected gap; glare must be layered as a separate pass, not folded into the LUT |
+
+**Product implication:** this is the mechanism for the "preview the film
+look on a DI export" problem raised earlier in this project's design
+conversation, and it's cheap enough to be a real feature, not a research
+curiosity — bake one `.cube`-equivalent LUT per stock (33³ in ~0.26s), ship
+it alongside a wide-latitude DI export so external tools (Resolve,
+Photoshop) can preview the real stock's look without spektrafilm in the
+loop, and re-bake per stock/curve-morph choice rather than per
+`print_exposure`/filter-shift tweak — those remain `reprint`'s job, since a
+LUT is fixed for one parameter set and doesn't grade, it only previews.
+`SpectralLUTService` (`use_enlarger_lut`/`use_scanner_lut`) already does a
+narrower version of this for the spectral-integral sub-steps; this is the
+same technique widened to the whole print+scan chain, output tap included.
+
 ---
 
 ## 3. Current GUI does not use either cheap path
