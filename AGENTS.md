@@ -190,6 +190,55 @@ which is O(1) and collapses auto_exposure to ~0.1 s. GPU wouldn't have fixed
 this — it was a CPU downscale, not a pointwise multiply. Profile before
 concluding a stage is GPU-bound: isolate the sub-steps.
 
+### 11. Colour bugs are silent, and a uniformly-biased suite reports full confidence
+
+Three colour bugs were live simultaneously on 2026-08-26 with **750 tests
+passing**: `input_cctf_decoding=True` raised on the fused path, the service
+hardcoded it to False, and `auto_exposure` multiplied its gain into
+gamma-encoded data (effective gain `g ** 1.8`). None crashed; two produced
+*plausible photographs*.
+
+They survived because **every test and baseline in this repo feeds linear
+input**. Encoded integer files — what Capture One, Lightroom and Photoshop
+actually export — were never exercised. The suite was not weak, it was
+uniformly biased, which is worse: it reported confidence at the moment it knew
+nothing.
+
+Before trusting a colour result, ask what the *inputs* to the tests have in
+common. See `rfc/RFC-010-color-science-testing.md`; the short version is test
+**invariances** (same meaning, different representation → identical render),
+not reference pictures.
+
+### 12. The input contract is where the product actually breaks
+
+`spektrafilm` is a camera: it needs scene-linear radiance. Everything hard
+about external files is at that boundary, not in the physics.
+
+- **`decode_input` runs at the door** (`preprocess.decode_input`). Everything
+  downstream of `preprocess` is linear. Do not move the transfer function back
+  into `upsample` — that is what caused the `g ** 1.8` exposure bug.
+- **An exposure edit in an external RAW developer is not a gain** if a tone
+  curve sits after it. Measured on Capture One: `+1 EV` exported as a ×1.57
+  median ratio with a 1.8–2.1× spread across tones. With C1's curve set to
+  **Linear Response** it becomes ×2.09 with 1.17× spread, and auto-exposure
+  absorbs it (dE 13.7 → 0.94).
+- **External decodes are not invertible.** A camera profile (C1's ProStandard,
+  Adobe's, dcraw's matrix) cannot be recovered from the exported TIFF. Two
+  developers give two different scene estimates and therefore two different
+  film looks. Fix the decode as part of the product contract; do not attempt
+  an adaptation layer.
+
+### 13. Spectral upsampling has a structural blind spot in purple
+
+`RGB -> spectrum -> XYZ -> RGB` round-trips at **1.7-3.8 dE at every hue**,
+worst in the purple/violet band (mean 3.07, rotating ~6° **toward blue**).
+Reconstructing a spectrum from three numbers is underdetermined and the
+smooth-spectrum prior under-represents the bimodal spectra that non-spectral
+colours require. This is structural, not a defect, and it is why a profiled
+camera LUT can beat spectral reconstruction on those hues — it never builds a
+spectrum. Pinned by `tests/test_spectral_roundtrip_hue.py`; do not raise those
+bounds without looking at colours.
+
 ---
 
 ## Conventions

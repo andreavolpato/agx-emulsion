@@ -198,3 +198,10 @@ uv.lock
 /tests/baseline/out/
 /tests/baseline/*.tif
 /tests/baseline/*.exr
+
+# Session test data and render outputs. Multi-GB (RAW + 16-bit TIFF fixtures
+# and full-resolution JPEG renders); regenerate with scripts/export_di.py and
+# the harnesses named in rfc/RFC-010-color-science-testing.md.
+tests/capture_one_test/
+tests/di_test/
+tests/baseline/out/
