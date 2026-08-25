@@ -85,6 +85,29 @@ necessarily the RFC-007/008-tuned settings the 45 MP number was measured
 under. Don't use this run's absolute seconds for the §6 tier decision;
 re-measure at 45 MP with the settings the service will actually ship with.
 
+**Why `reprint` has to be the grading path, not just the fast one.** Tested
+directly: is a print-referred tap (`Tap.SCAN_RGB`) linearly gradable if
+exported and pushed with a flat gain, the way an external tool (Photoshop,
+Lightroom) would push an exposure slider? No. Rendered the same frame two
+ways, both +1 stop brighter in the same direction: (a) the physically
+correct way — `pipeline.enlarger.print_exposure = 0.5` (paper convention:
+*less* enlarger exposure prints *brighter* — the opposite of the "more
+exposure = brighter" intuition that holds for camera exposure, worth
+flagging for anyone building the print-side UI copy), re-rendered from the
+cached negative via `reprint`; (b) the naive way — the baseline `SCAN_RGB`
+array multiplied by a flat ×2 gain, then continued through the rest of the
+pipeline. Mean abs diff 0.126, max 0.343 — not a rounding difference. Visibly:
+the correct version compresses the sky/highlights as exposure goes up (the
+paper's shoulder responding nonlinearly, exposure-dependently); the naive
+gain just scales every pixel uniformly and keeps the original contrast
+ratio, so it never reproduces that highlight rolloff. **A flat/linear grade
+on exported print-referred pixels will not match what the physical model
+would have produced at that exposure** — which means `reprint` isn't only
+the fast path for print-side edits, it's the *only correct* one. Do not
+build (or let a frontend build) a "grade the exported print TIFF externally"
+workflow expecting it to match `reprint`'s output; the two are not
+interchangeable, by physics, not by implementation gap.
+
 ---
 
 ## 3. Current GUI does not use either cheap path
@@ -148,7 +171,53 @@ default in `params_schema.py`, not be re-decided by the frontend.
 
 ---
 
-## 5. Multi-tier resolution architecture — measured, not projected
+## 5. Stock choice is not a neutral default — measured, not assumed
+
+Every render this session, across the whole dataset benchmark, used
+`kodak_portra_400` / `kodak_portra_endura` — a **still-photo consumer**
+negative/paper pair — as the unexamined default. Worth flagging explicitly
+for whoever builds the stock picker: **this repo already ships the actual
+Kodak theatrical release-print stock**, unused until this point.
+
+- `data/profiles/kodak_2383.json` / `kodak_2393.json` — "Kodak Vision 2383" /
+  "Kodak Vision Premier 2393", `info.use = "cine"`, `viewing_illuminant =
+  "K75P"` (the real theatrical-projector illuminant standard, not a photo
+  viewing condition). These are the print stocks the majority of theatrical
+  film prints were actually struck on.
+- `data/profiles/kodak_vision3_{50d,250d,200t,500t}.json` — the matching
+  Vision3 **cine camera negative** stocks (daylight/tungsten pairs), the
+  correct negative to pair with 2383/2393 rather than a still-photo negative.
+- Provenance is documented in-repo, not assumed: every profile's `metadata.datasource`
+  states plainly — *"Film/photo-paper: Kodak and Fujifilm data-sheets,
+  scientific publications, and technical material... all data publicly
+  available."* This is digitized published sensitometric data, not a
+  reverse-engineered LUT grab, and it's CC BY-SA 4.0
+  (`SPEKTRAFILM_LICENSE.txt`), not something requiring separate licensing to
+  ship.
+
+**Measured, not just theorized — the two pairings produce a visibly
+different result on the same negative-side image.** Rendered the same frame
+through both:
+
+| | still-photo default | real cine pair |
+|---|---|---|
+| film / print | `kodak_portra_400` / `kodak_portra_endura` | `kodak_vision3_250d` / `kodak_2393` |
+| character | cooler, this session's baseline throughout | visibly warmer — richer stone/skin tones, golden cast on skyline highlights, different overall contrast |
+
+Side-by-side: `tmp/Test_image/out/still_vs_cine_stock.png`. The difference is
+not subtle — this is two different, both-authentic renderings of the same
+capture, and **which one a frontend defaults to is a real product decision**,
+not an implementation detail to leave at whatever `init_params`'s hardcoded
+default happens to be. At minimum: the stock picker (film × paper, §4's
+mandatory pair) needs cine stocks as first-class options alongside
+consumer-photo ones, not buried as an advanced/hidden choice, since for a
+user chasing "the film look" in the cinema sense, the cine pair may be
+closer to what they actually mean by that phrase than the still-photo
+default this whole session quietly assumed.
+
+---
+
+## 6. Multi-tier resolution architecture — measured, not projected
 
 The frontend needs three resolution tiers, not two: a live-edit tier for
 slider drag, a preview tier large enough to actually judge grain/halation
@@ -205,7 +274,7 @@ table:**
 3. **Full (working resolution, up to 45 MP):** `export` only, always shown
    as a progress state per PRD §6, never blocking.
 
-## 6. Memory budget and disk-spill cache design
+## 7. Memory budget and disk-spill cache design
 
 **Problem this section is for:** PRD §7.2 scopes the service to "one
 service, one session, one workspace" — a single open image at a time. Even
@@ -266,7 +335,7 @@ cache.**
   RFC, the same way RFC-009 is a new RFC for the fast-look path rather than
   a quiet addition here.
 
-## 7. Experimental non-physical fast-GPU look path
+## 8. Experimental non-physical fast-GPU look path
 
 See `rfc/RFC-009-experimental-fast-gpu-look.md` for the full writeup. Short
 version: a from-scratch, all-MLX path (`scripts/experimental_fast_gpu_look.py`)
@@ -280,7 +349,7 @@ another engineering pass. If it ships, it must be an explicit, clearly-labeled
 opt-in `render_mode`, never a silent fallback or a "fast preview" default —
 see RFC-009 §0, §3.
 
-## 8. Re-running the probe
+## 9. Re-running the probe
 
 ```
 python tests/baseline/probe_callable_api.py                  # both checks
