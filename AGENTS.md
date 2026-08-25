@@ -43,9 +43,9 @@ Do not change these without a reason; every recorded number assumes them.
 | print profile | `kodak_portra_endura` |
 | baseline image | `tests/baseline/_DSC2439_16mp_linear_prophoto.tif` (16.00 MP, 3264×4901, float32 linear ProPhoto) |
 | smoke image | `tests/baseline/_smoke_1mp.tif` (1 MP, for fast iteration) |
-| precision | float32 on macOS (see Traps) |
+| device precision | float32 on macOS (see Traps) |
 | grain sampler | `exact` (RFC-002); `--sampler scipy` for the old stream |
-| working precision | `float64` (see trap 8) |
+| working precision | `float32` (the default since RFC-006; `float64` is the validation baseline) |
 
 Regenerate the baseline from the source NEF:
 
@@ -148,10 +148,17 @@ full colourspace conversion with an identity matrix just to apply a transfer
 function. `colour.cctf_encoding` is 2.5× faster — but gives a 3.0e-4
 difference, so verify which curve variant is wanted before swapping.
 
-**This defeats float32 entirely.** `settings.working_precision='float32'` is
-numerically free (ΔE max 1.4e-4, PSNR 172 dB) and saves *no memory* — 5.61 GB
-vs 5.57 GB at 16 MP — because the first colourspace conversion in
-`filming.expose` upcasts straight back. Casting at the door does nothing.
+**This used to defeat float32 entirely** — casting at the door did nothing,
+because the first colourspace conversion upcast straight back (measured 5.61
+vs 5.57 GB at 16 MP). **Fixed in RFC-006**: the kernels are dtype-preserving
+now and `working_precision` is enforced on node *inputs* as well as outputs.
+The two colour-science call sites in `scanning.py` are the pattern to copy —
+`_scan_xyz_to_rgb` became a matmul against the identity-trick matrix (exact
+to 1.3e-15), and `_scan_cctf` keeps `colour.RGB_to_RGB` verbatim but runs it
+through `parallel_pointwise(..., out_dtype=...)` so the float64 it insists on
+returning exists one chunk at a time. Do not swap `RGB_to_RGB` for the bare
+`cctf_encoding`: for a same-space call the former also applies a
+near-identity CAT02 round-trip matrix, and dropping it moves output by 3.8e-4.
 
 ### 8. Approximating a distribution can preserve RMS and still change the look
 
@@ -270,6 +277,26 @@ concluding a stage is GPU-bound: isolate the sub-steps.
   **Never call a `parallel=True` numba kernel from inside `parallel_pointwise`**
   — numba's `workqueue` layer is not threadsafe and aborts the process.
   `_scan_gamut_compress` bypasses the thread pool for the fused path.
+- **RFC-006 landed: `working_precision='float32'` is the default.** The
+  invariant is in `utils/precision.py`: full-resolution buffers follow their
+  input's dtype, per-pixel arithmetic still runs in float64 registers (a
+  float32 load times a float64 constant promotes inside the numba kernel, so
+  CAM16 / Hanatos / the spectral integral do the same arithmetic they always
+  did — only the *stored* result narrows). Measured at 45 MP, grain on
+  (`exact`), glare off: **18.34 s / 12.55 GB at float64 vs 14.25 s / 7.15 GB
+  at float32**, dE2000 max 0.00024, MS-SSIM 1.000000, grain PSD correlation
+  0.999993. Held across five film/print stock pairs.
+  **Trap:** `working_precision='float64'` used to be spelled `precision=None`
+  in `run_topology` — "leave every dtype alone". That was only equivalent to
+  float64 because every kernel promoted internally. Once the kernels stopped
+  promoting, the taps RFC-005 declared `precision='float32'` leaked downstream
+  into `grain`, where a rounded input flips Poisson draws and gives a
+  *different realisation* — dE max 37.9 against the baseline, which looks like
+  a catastrophic colour bug and is actually one node's worth of noise.
+  `run_topology` now widens node inputs to the working precision as well as
+  narrowing outputs. Side effect: the float64 path is now genuinely float64
+  (it previously carried accidental float32 rounding in exposure/boost/
+  halation), which moved the float64 baseline by dE max 0.000188 / PSNR 151 dB.
 - The 45 MP profile after RFC-007 A is **spatial-dominated**: halation 3.30 s
   (26%), dir_couplers 2.40 s (19%), scan_spectral 1.58 s (12%). Neither of the
   top two fuses the way the pointwise stages did (halation is `support=inf`).

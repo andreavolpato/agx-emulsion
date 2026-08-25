@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Measured, recommendation given. Not yet applied to `params_schema.py`'s default — see §5. |
+| **Status** | **Applied.** §5's recommendation shipped: `working_precision='float32'` is the default, the §4 gaps are closed in §7, and the kernels were made dtype-preserving so the flag actually does something. |
 | **Referenced by** | RFC-004 §2.2 (deferred), RFC-005 §4 P3 + §6 (gated on this), RFC-007 §6 Q3 (deferred) |
 | **This RFC was missing** | Every one of the above cites it; the file never existed until now. |
 | **Date** | 2026-08-25 |
@@ -138,3 +138,149 @@ the RFC that first measured the question.
 3. Once §5 ships, RFC-004 P3 (fused CAM16 kernel) and P5 (fused Hanatos
    kernel) become worth attempting on their own merits — re-scope those
    phases' risk assessment now that "is float32 safe at all" has an answer.
+
+
+---
+
+## 7. Follow-up session (2026-08-25): making the flag real, and shipping it
+
+§2's measurements answered "is float32 colorimetrically safe". They did not
+answer "does float32 buy anything", and the answer at the time was **almost
+nothing**: measured at 45 MP, `working_precision='float32'` gave 12.68 GB
+against float64's 13.22 GB (-4%) and 18.6 s against 19.1 s. AGENTS.md trap 7
+already named the cause — the cast happened at the door and every kernel
+promoted straight back inside.
+
+### 7.1 What was actually promoting
+
+Per-node dtype + `tracemalloc` peak trace on the 1 MP smoke frame, float32
+requested, eleven of twenty-one nodes returned float64:
+
+| promoting node | peak B/px | cause |
+|---|---|---|
+| `scanning.cctf` | 147 | `colour.RGB_to_RGB` returns float64, unchunked |
+| `filming.develop.dir_couplers` | 180 | float64 coupler matrix in the `contract`; float64 amplitudes in `fast_exponential_filter` |
+| `filming.expose.halation` | 156 | float64 scatter/halation constant vectors; same exponential filter |
+| `filming.develop.grain` | 85 | float64 accumulator (`np.zeros` with no dtype) |
+| `printing.expose.enlarger_spectral`, `scanning.scan_spectral` | 72 each | the MLX kernel computes in float32 and the dispatcher then widened the result to float64 — a full-resolution copy carrying no information |
+| `scanning.xyz_to_rgb`, `scanning.gamut_compress`, `filming.expose.upsample` | ~48 each | colour-science, and `dtype=np.float64` on the fused kernels' entry casts |
+| `preprocess.auto_exposure` | 24 | NEP 50: a `np.float64` scalar is strongly typed, so `float32_image * ev` promotes |
+
+Plus one pure waste independent of precision: `interpolate_exposure_to_density`
+allocated a full-resolution float64 `np.zeros` and immediately overwrote it
+with the `fast_interp` result — 24 B/px, 1.1 GB at 45 MP, written and thrown
+away on every render at either precision.
+
+### 7.2 The invariant
+
+`utils/precision.py`, applied inside the kernels rather than at the door:
+
+> **Full-resolution buffers follow the dtype of their input. Per-pixel
+> arithmetic still happens in float64.**
+
+The second half is what makes this cheap in accuracy. In a numba kernel a
+float32 load multiplied by a float64 constant promotes to float64 *in
+registers*, so the CAM16 forward/inverse, the Hanatos projection and the
+81-term spectral accumulation all still evaluate exactly as before — only the
+stored result narrows. This is the answer to §4's "not the fused float32
+kernels" caveat and to RFC-004 P3/P5's open question: the kernels never needed
+to become float32, only their buffers did.
+
+Two colour-science sites could not simply preserve dtype, and got different
+treatments:
+
+- `_scan_xyz_to_rgb` → a matmul against `colour.XYZ_to_RGB(np.eye(3), ...)`,
+  the identity trick RFC-004 already ships on the GPU node. Verified exact to
+  **1.3e-15** against the per-pixel call.
+- `_scan_cctf` → `colour.RGB_to_RGB` kept **verbatim**, but run through
+  `parallel_pointwise(..., out_dtype=...)` (new parameter), so the float64 it
+  insists on returning is one chunk of the frame at a time and the surviving
+  buffer is narrow. It is kept verbatim on purpose: for a same-space call
+  `RGB_to_RGB` also applies a near-identity CAT02 round-trip matrix before the
+  curve, and substituting the colourspace's bare `cctf_encoding` moves output
+  by up to **3.8e-4** — the "verify which curve variant is wanted" warning in
+  AGENTS.md trap 7, now quantified.
+
+### 7.3 The trap this exposed
+
+Making the kernels dtype-preserving **broke the float64 path**: dE2000 max
+**37.9** against the pre-change float64 baseline.
+
+`run_topology` spelled float64 as `precision=None` — "leave every dtype
+alone". That was only ever equivalent to float64 because every kernel promoted
+internally. Several taps are declared `precision='float32'` even in the float64
+pipeline (RFC-005 §7.2, pinning the dtypes the RFC-004 GPU tags used to produce
+as a side effect); those were being widened back *by accident*, inside whichever
+kernel happened to multiply them against a float64 constant. Once that accident
+stopped, float32 reached `grain`, where a rounded input flips Poisson draws and
+produces a **different grain realisation** — which reads as a catastrophic
+colour regression and is really one node's worth of noise. Grain-off, the same
+comparison was dE max 9.9e-7.
+
+Fix: the dispatcher now widens each node's inputs to the working precision as
+well as narrowing its outputs, and `pipeline.process` passes `"float64"`
+explicitly instead of `None`. **Side effect worth recording: the float64 path
+is now genuinely float64.** It previously carried accidental float32 rounding
+in `exposure` / `boost` / `halation`, so the baseline moved by dE2000 max
+**0.000188**, PSNR 151 dB, MS-SSIM 1.000000 — and the grain field is unchanged
+in distribution (rms_rel 1e-6, PSD correlation 1.000000).
+
+### 7.4 Results
+
+45 MP `_DSC2439`, `kodak_portra_400` / `kodak_portra_endura`, grain on with
+`grain_sampler='exact'` (deterministic, per §1's protocol), glare off,
+`spectral_backend='mlx'`, sRGB out. Single reference run per arm:
+
+| | float64 | float32 | vs float64 |
+|---|---|---|---|
+| wall time | 18.34 s | **14.25 s** | **-22%** |
+| peak RSS | 12.55 GB | **7.15 GB** | **-43%** |
+| bytes/pixel | 279 | **159** | -43% |
+
+Against the *pre-change* code, where float32 was 18.6 s / 12.68 GB, this is
+**-24% time and -44% peak RSS** — and float64 itself gained too (13.22 → 12.55
+GB, and the 1.1 GB dead allocation is gone at both precisions).
+
+Accuracy, float64 vs float32 on the same build:
+
+| comparison | dE mean | dE p99 | dE max | PSNR | MS-SSIM | vs RFC-001 6.1 |
+|---|---|---|---|---|---|---|
+| no LUTs, grain off | 0.000017 | 0.000069 | 0.000242 | 142.7 dB | 1.000000 | **pass, ~8000x margin on max** |
+| with the 17³ LUTs | 0.000009 | 0.000038 | 0.000101 | 146.4 dB | 1.000000 | **pass, ~20000x margin** |
+| grain on, stochastic mode | rms_rel 0.000041, skew_rel 0.003517, kurtosis_rel 0.000115, psd_correlation 0.999993 | | | | | **pass, well inside RFC-002 6.2** |
+
+### 7.5 §6 open questions, resolved
+
+1. **"The GUI config" RFC-004 §2.2 measured against** — still unrecovered, and
+   now largely moot: §3's inferred explanation is corroborated by §7.3, which
+   found the *same class* of bug (an undeclared dtype leaking across nodes and
+   changing a stochastic draw) from the opposite direction. Left open.
+2. **Multi-stock spot-check — done, closed.** Five film/print pairs at 16 MP,
+   grain and glare off, float64 vs float32:
+
+   | film / print | dE mean | dE p99 | dE max | PSNR | MS-SSIM |
+   |---|---|---|---|---|---|
+   | `kodak_portra_400` / `kodak_portra_endura` | 0.000018 | 0.000070 | 0.000214 | 142.6 | 1.000000 |
+   | `kodak_ektar_100` / `kodak_portra_endura` | 0.000018 | 0.000071 | 0.000242 | 142.5 | 1.000000 |
+   | `fujifilm_pro_400h` / `fujifilm_crystal_archive_typeii` | 0.000015 | 0.000073 | 0.000240 | 142.6 | 1.000000 |
+   | `kodak_gold_200` / `kodak_supra_endura` | 0.000015 | 0.000069 | 0.000218 | 142.7 | 1.000000 |
+   | `kodak_vision3_500t` / `kodak_2383` | 0.000012 | 0.000067 | 0.000208 | 143.6 | 1.000000 |
+
+   All five pass every bar by ~4 orders of magnitude. §5's blocker is cleared;
+   the default is flipped.
+3. **RFC-004 P3/P5 (fused CAM16 / Hanatos float32 kernels)** — re-scoped and
+   arguably no longer needed as stated. §7.2 got the memory those phases were
+   after (the buffers) without touching the arithmetic, which is where their
+   risk lived. What remains for them is *speed* on device, not precision.
+
+### 7.6 Still open
+
+- **Nothing here was measured with glare on.** Glare is the one unseeded stage
+  (AGENTS.md trap 1) and every number above disables it, as the protocol
+  requires. Its buffers were not audited for promotion.
+- **`preprocess.crop_rescale` and the GUI preview path** were not profiled;
+  `preview_mode` has its own precision forcing (§4) and is unchanged.
+- **`_reference_path` in `spectral_dispatch` still returns float64
+  unconditionally.** Deliberate — it is the A/B reference the fused kernels are
+  measured against — but it means `spectral_backend='reference'` does not get
+  the memory win.
