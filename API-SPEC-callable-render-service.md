@@ -440,3 +440,116 @@ re-run by hand whenever the reprint mechanism or the mandatory/optional
 param table above is in question, e.g. after a future engine change touches
 `run_topology`, `prune_identity_nodes`, or any of the enlarger-service
 attribute reads this doc's §1-2 depend on staying live-mutation-safe.
+
+
+---
+
+## 10. The service, as built (2026-08-25)
+
+`src/spektrafilm/service/` implements §1's routing table and PRD §7.3's
+thirteen methods. It renders nothing itself — every method is a routing
+decision over engine calls that already existed.
+
+```
+spektrafilm/service/
+  errors.py      PRD §7.7 taxonomy: user / resource / bug (+ Cancelled)
+  schema.py      PRD §8 versioned transport schema, delta validation, layer map
+  session.py     tiers, cached negatives, the on_fire cancel/progress hook
+  service.py     the 13 methods
+  transport.py   stdio JSON-RPC 2.0, single-threaded by design
+  __main__.py    python -m spektrafilm.service [--workspace DIR]
+```
+
+Run it: `python -m spektrafilm.service --workspace /tmp/ws`, then write
+JSON-RPC lines to stdin. Tests: `tests/test_service.py` (27).
+
+### 10.1 The landmine §1 did not spell out
+
+> `SimulationPipeline.__init__` does `self._params = copy.deepcopy(params)`
+> (`pipeline.py:37`).
+
+§1 says to mutate "`pipeline.enlarger.*` … **in place on the same `pipeline`
+object**", which is correct — but the emphasis lands on *same object* when the
+load-bearing word is *`pipeline`*. Mutating the `RuntimePhotoParams` the
+pipeline was **built from** does nothing: the pipeline is reading its own deep
+copy and never looks at the original again. The first cut of the service did
+exactly that, and the failure mode is nasty — every method returns success,
+every render runs, the timings look right, and **the sliders silently do
+nothing**. It was caught by asserting that reprint output equals a full render
+(§2's own check, ported into `tests/test_service.py`), which is the argument
+for keeping that check as a test rather than a probe.
+
+Two regression tests now assert *pixels move* when a delta is applied, one per
+path, because "the call succeeded" is not evidence here.
+
+### 10.2 Which params are live-mutable, and what the rest cost
+
+`schema.LIVE_MUTABLE` is deliberately four fields — `print_exposure`,
+`m_filter_shift`, `y_filter_shift`, `preflash_exposure` — the ones §1/§3
+verified. Everything else drops the pipeline and rebuilds it on next use,
+because construction derives state that in-place mutation would leave stale:
+the print-balance midgray reference, the `io.scan_film` topology branch, and
+the `prune_identity_nodes` set (a node pruned at `sigma == 0` does not come
+back when you raise sigma on a live object).
+
+That conservative default is nearly free: **pipeline construction measured
+18.8 ms** against a 190 ms live-tier reprint. The cached *negative* — the
+expensive artifact — survives a rebuild; only a shoot-layer change drops it.
+Do not "optimise" this by widening `LIVE_MUTABLE` without re-running the
+reprint-equivalence test for each field added.
+
+### 10.3 Measured, end to end, on `_DSC2439.NEF` (45.75 MP)
+
+| call | time | path |
+|---|---|---|
+| `capabilities` / `params_schema` | 4–45 ms | — |
+| `open` (RAW decode + live negative) | 6.98 s | film side at live tier |
+| `solve` (exposure + filter pack) | 100 ms | `measure_autoexposure_ev` + neutral DB |
+| `reprint` (live tier, warm) | **193–199 ms** | `inject=CMY_FILM` |
+| `preview_stock_lut` (live tier) | **4–10 ms apply** | Metal trilinear kernel |
+| `preview_render` (preview tier, cold negative) | 2.39 s | film side + print side |
+| `export` (45 MP, cold negative) | 13.9 s | full render |
+| `set_params` | <1 ms | routing only |
+
+`reprint` at 193 ms is the number that matters — §6 called it "the number
+that actually matters for the primary interaction", and it is now what the
+service actually does on a print-side slider drag.
+
+### 10.4 Deliberate limitations, stated not hidden
+
+- **`cancel` cannot arrive mid-render on the stdio transport.** Requests are
+  handled one at a time on the main thread, on purpose (numba's `workqueue`
+  layer is not threadsafe — §10.5). The hook works and is tested; delivering
+  it during a render needs a second connection or a socket transport whose
+  reader thread touches only the progress record.
+- **`preview_stock_lut` only serves shipped LUTs.** PRD §7.3 allows a
+  bake-on-demand fallback (`lut_source: "baked"`); the service returns a
+  `no_lut_for_stock` user error instead. Baking is cheap (0.01–0.25 s) so this
+  is a small gap, but it is a gap.
+- **No disk spill.** §7's spill policy for the working-resolution negative is
+  not implemented; the service holds what it holds.
+- **One session at a time.** `open` releases the previous session, matching
+  PRD §7.2's scope.
+
+### 10.5 numba in a long-lived process — measured
+
+The question is whether numba suits a persistent backend at all. Measured in
+one process (1 MP live tier, 12 consecutive reprints):
+
+| | |
+|---|---|
+| `import spektrafilm.service` | 1.76 s (matches HANDOFF-IPC §3's 1.78 s) |
+| first render, warm numba disk cache | 0.48 s |
+| steady-state reprint | 137–155 ms, **no upward drift over 12 renders** |
+| peak RSS | 0.53 → 0.57 GB, **flat — no leak or creep** |
+| threading layer | **`workqueue`** — `tbb` and `omp` are both absent from the venv |
+
+So: yes, numba is fit for a persistent process. The JIT cost is one-time and
+already disk-cached, and nothing accumulates. The catch is the threading
+layer: `workqueue` is numba's fallback, and it is the one that aborts the
+*process* on concurrent or nested entry into a `parallel=True` kernel. That is
+not a latent risk to be fixed later — it is the reason the transport is
+single-threaded, and installing `tbb` is the only thing that would change that
+calculus (untested here; it would need its own measurement pass, and TBB is
+also the layer that makes nested parallelism safe, which would unblock
+`parallel_pointwise` wrapping fused kernels — see RFC-007 §8.5).

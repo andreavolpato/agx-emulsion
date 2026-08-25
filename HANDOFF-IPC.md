@@ -1,6 +1,12 @@
 # Handoff: the render-service IPC contract (for a fresh session)
 
-**Status:** not started. This file is the brief, not the design.
+**Status:** **done (2026-08-25).** The design landed in
+`PRD-callable-render-api.md` + `API-SPEC-callable-render-service.md`, and the
+implementation is `src/spektrafilm/service/` (tests: `tests/test_service.py`).
+See **API-SPEC §10** for what was built, what it measured, and the four
+limitations left open. This file is kept as the original brief — the
+constraints in §3 all held up under measurement and are still worth reading
+before touching the service.
 
 **Context you need first:** `AGENTS.md`, `ARCHITECTURE.md`, and
 `rfc/RFC-005` §7 + `rfc/RFC-007` §8. Do not trust performance numbers written
@@ -41,8 +47,12 @@ The backend is fast enough to build a product on (12.9 s at 45 MP, down from
 - **Cold start is 1.78 s** (`import spektrafilm.runtime`), plus ~0.4 s of numba
   JIT on first render, cached to disk thereafter. The service must be
   long-lived; a process-per-render design pays 1.78 s every time.
+  *(Re-measured 2026-08-25 against the built service: import 1.76 s, first
+  render 0.48 s, then 137-155 ms steady state with flat RSS over 12 renders.
+  Confirmed — see API-SPEC §10.5.)*
 - **Peak RSS is ~13.9 GB at 45 MP** (~300 B/px). One render at a time. The
-  contract needs a queue, not concurrent renders.
+  contract needs a queue, not concurrent renders. *(RFC-006 float32 brought
+  this to 7.15 GB / 159 B/px; the one-render-at-a-time conclusion stands.)*
 - **Never call a `parallel=True` numba kernel from a thread pool** — numba's
   `workqueue` layer is not threadsafe and aborts the *process*. A threaded
   request handler around the pipeline will crash it. See RFC-007 §8.5.
