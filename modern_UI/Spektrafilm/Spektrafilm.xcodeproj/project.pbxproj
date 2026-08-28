@@ -1,0 +1,403 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		8DE1AB2FE7D26F447E994C32 /* ImageDecoder.swift */ = {isa = PBXBuildFile; fileRef = A24D7BCEBD3C1075D6D449CA; };
+		A26857E4553226F650CA984D /* MetalCanvasView.swift */ = {isa = PBXBuildFile; fileRef = 0A15F18590B944146FB22AE2; };
+		12C9B025E673F4B8112BAF19 /* Renderer.swift */ = {isa = PBXBuildFile; fileRef = 1843418CCE0D0BF332869560; };
+		07168355D72B400970E3654B /* Shaders.metal */ = {isa = PBXBuildFile; fileRef = 219D66021B1F579ED452F7AC; };
+		A1AB6ACFF866A1FFCF8DFC23 /* CurveView.swift */ = {isa = PBXBuildFile; fileRef = 56D596AFA4ADB7D0B2132B20; };
+		56D132F35AF0DAA8541773A3 /* Dock.swift */ = {isa = PBXBuildFile; fileRef = DE62F8666E23438229407633; };
+		DF2A55816AB2C19F3AE09E06 /* KeyValue.swift */ = {isa = PBXBuildFile; fileRef = 1A479E3AE8B7959544B2584C; };
+		438A4557DEEEF55AC99A5FD3 /* ScrubSlider.swift */ = {isa = PBXBuildFile; fileRef = 3BAC8972E4AB11F8E13A75BB; };
+		77B4BE7352C79B4996F1A7C5 /* Params.swift */ = {isa = PBXBuildFile; fileRef = 320C79B82A6EAED292014CE2; };
+		D1A3A31D209384EAB35784A8 /* Session.swift */ = {isa = PBXBuildFile; fileRef = 13D1A9E31BF62C68B660ED4F; };
+		09A9EBE1ED8A2AC0238533C6 /* AdjustmentsModule.swift */ = {isa = PBXBuildFile; fileRef = 3C4A0B9E596686E0A4210966; };
+		0649CD8001636B8147808C2D /* CharacterModule.swift */ = {isa = PBXBuildFile; fileRef = DE514BF232E21E5808335523; };
+		ED0116E13B12356A1655AFAC /* DecodeModule.swift */ = {isa = PBXBuildFile; fileRef = D0BAAE7E9050DC710A34A0D3; };
+		2678A461FB8BB61F24F40CBD /* EditorModule.swift */ = {isa = PBXBuildFile; fileRef = 7CF3F183625237822E729D32; };
+		C52B2879CBA92DA61C77BC62 /* FrameModule.swift */ = {isa = PBXBuildFile; fileRef = 57E318773571203F485EA06C; };
+		5F031AE0353B66FD03999227 /* MasksModule.swift */ = {isa = PBXBuildFile; fileRef = 12C0218606755A6AB1E61E61; };
+		6C6E159427E77856D961C75C /* PrintModule.swift */ = {isa = PBXBuildFile; fileRef = 48CFB7E19A48E1A601BF97AA; };
+		9758704CE781F1072A938E42 /* ScopeModule.swift */ = {isa = PBXBuildFile; fileRef = C0DBB97FECF778A2CD88C54B; };
+		A58A3AC21063CBB4757772C7 /* StockModule.swift */ = {isa = PBXBuildFile; fileRef = 933E887BF9CF153F8D9D6FA4; };
+		078870B715E19F2B83A24A3B /* Filmstrip.swift */ = {isa = PBXBuildFile; fileRef = D454772FC7E2820A9B2E9395; };
+		2826CB1E5906535B0C4AB0D1 /* StockCatalog.swift */ = {isa = PBXBuildFile; fileRef = BF61B547E6B7B8A19F4FAA68; };
+		4F1DF9AF7F8FB8B7B5A7D449 /* Methods.swift */ = {isa = PBXBuildFile; fileRef = BB4BD5B9B553AFE28B46AAA7; };
+		F2F2CFFDE027DA4E14F8F58C /* ServiceClient.swift */ = {isa = PBXBuildFile; fileRef = 7EECE47B6432987971367621; };
+		101834F74C5D33C40F30491F /* SpektrafilmApp.swift */ = {isa = PBXBuildFile; fileRef = 3202157BA850425898293D9A; };
+		2271EC3FD7660C3776B54831 /* Theme.swift */ = {isa = PBXBuildFile; fileRef = B25F5280DE7491BCFB1DE1DC; };
+		998F7A1C661ED35093787374 /* CanvasArea.swift */ = {isa = PBXBuildFile; fileRef = AC0A0AD9B41BEBF27EB66755; };
+		27A3ED0A54C9EBCD5926DB4E /* EditorWindow.swift */ = {isa = PBXBuildFile; fileRef = 51108E05E1DF22BC8986CAA6; };
+		4B31657DF77C6E3B5FC6663F /* Assets.xcassets */ = {isa = PBXBuildFile; fileRef = 4CF74E2C31F2B5A4802D2F23; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		4CF74E2C31F2B5A4802D2F23 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A24D7BCEBD3C1075D6D449CA /* ImageDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDecoder.swift; sourceTree = "<group>"; };
+		0A15F18590B944146FB22AE2 /* MetalCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalCanvasView.swift; sourceTree = "<group>"; };
+		1843418CCE0D0BF332869560 /* Renderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Renderer.swift; sourceTree = "<group>"; };
+		219D66021B1F579ED452F7AC /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		56D596AFA4ADB7D0B2132B20 /* CurveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurveView.swift; sourceTree = "<group>"; };
+		DE62F8666E23438229407633 /* Dock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dock.swift; sourceTree = "<group>"; };
+		1A479E3AE8B7959544B2584C /* KeyValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyValue.swift; sourceTree = "<group>"; };
+		3BAC8972E4AB11F8E13A75BB /* ScrubSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrubSlider.swift; sourceTree = "<group>"; };
+		47F2526243FB7C2B72C04EF3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		320C79B82A6EAED292014CE2 /* Params.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Params.swift; sourceTree = "<group>"; };
+		13D1A9E31BF62C68B660ED4F /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		3C4A0B9E596686E0A4210966 /* AdjustmentsModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdjustmentsModule.swift; sourceTree = "<group>"; };
+		DE514BF232E21E5808335523 /* CharacterModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterModule.swift; sourceTree = "<group>"; };
+		D0BAAE7E9050DC710A34A0D3 /* DecodeModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodeModule.swift; sourceTree = "<group>"; };
+		7CF3F183625237822E729D32 /* EditorModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorModule.swift; sourceTree = "<group>"; };
+		57E318773571203F485EA06C /* FrameModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameModule.swift; sourceTree = "<group>"; };
+		12C0218606755A6AB1E61E61 /* MasksModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MasksModule.swift; sourceTree = "<group>"; };
+		48CFB7E19A48E1A601BF97AA /* PrintModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintModule.swift; sourceTree = "<group>"; };
+		C0DBB97FECF778A2CD88C54B /* ScopeModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeModule.swift; sourceTree = "<group>"; };
+		933E887BF9CF153F8D9D6FA4 /* StockModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockModule.swift; sourceTree = "<group>"; };
+		D454772FC7E2820A9B2E9395 /* Filmstrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Filmstrip.swift; sourceTree = "<group>"; };
+		BF61B547E6B7B8A19F4FAA68 /* StockCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockCatalog.swift; sourceTree = "<group>"; };
+		BB4BD5B9B553AFE28B46AAA7 /* Methods.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Methods.swift; sourceTree = "<group>"; };
+		7EECE47B6432987971367621 /* ServiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceClient.swift; sourceTree = "<group>"; };
+		2B05E2CD9EC2565A75804408 /* Spektrafilm.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Spektrafilm.entitlements; sourceTree = "<group>"; };
+		3202157BA850425898293D9A /* SpektrafilmApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpektrafilmApp.swift; sourceTree = "<group>"; };
+		B25F5280DE7491BCFB1DE1DC /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		AC0A0AD9B41BEBF27EB66755 /* CanvasArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasArea.swift; sourceTree = "<group>"; };
+		51108E05E1DF22BC8986CAA6 /* EditorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorWindow.swift; sourceTree = "<group>"; };
+		204A26B6ADE398A32E30945C /* Spektrafilm.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Spektrafilm.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		0C746B0EBF884D63563E0619 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		557434D6B1090EDF99833A2F = {
+			isa = PBXGroup;
+			children = (
+				E69152B748898DE0D8CA601C /* Spektrafilm */,
+				EDD3C324699EF0B82C0483B1 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		EDD3C324699EF0B82C0483B1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				204A26B6ADE398A32E30945C,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E69152B748898DE0D8CA601C /* Spektrafilm */ = {
+			isa = PBXGroup;
+			children = (
+				64A5911F6F9071472936CA01 /* Canvas */,
+				38090717298DE9ACC9183953 /* Controls */,
+				ED8FBB781CCE74FC1E429594 /* Model */,
+				CEE1FE9AFE3BFBDD0F9DDDF2 /* Modules */,
+				7C02CC9A3FBC019826CB27E7 /* Panels */,
+				8F7D408772553D7EE418558A /* Service */,
+				E4C8EF631941925234954788 /* Windows */,
+				4CF74E2C31F2B5A4802D2F23 /* Assets.xcassets */,
+				47F2526243FB7C2B72C04EF3 /* Info.plist */,
+				2B05E2CD9EC2565A75804408 /* Spektrafilm.entitlements */,
+				3202157BA850425898293D9A /* SpektrafilmApp.swift */,
+				B25F5280DE7491BCFB1DE1DC /* Theme.swift */,
+			);
+			path = Spektrafilm;
+			sourceTree = "<group>";
+		};
+		64A5911F6F9071472936CA01 /* Canvas */ = {
+			isa = PBXGroup;
+			children = (
+				A24D7BCEBD3C1075D6D449CA /* ImageDecoder.swift */,
+				0A15F18590B944146FB22AE2 /* MetalCanvasView.swift */,
+				1843418CCE0D0BF332869560 /* Renderer.swift */,
+				219D66021B1F579ED452F7AC /* Shaders.metal */,
+			);
+			path = Canvas;
+			sourceTree = "<group>";
+		};
+		38090717298DE9ACC9183953 /* Controls */ = {
+			isa = PBXGroup;
+			children = (
+				56D596AFA4ADB7D0B2132B20 /* CurveView.swift */,
+				DE62F8666E23438229407633 /* Dock.swift */,
+				1A479E3AE8B7959544B2584C /* KeyValue.swift */,
+				3BAC8972E4AB11F8E13A75BB /* ScrubSlider.swift */,
+			);
+			path = Controls;
+			sourceTree = "<group>";
+		};
+		ED8FBB781CCE74FC1E429594 /* Model */ = {
+			isa = PBXGroup;
+			children = (
+				320C79B82A6EAED292014CE2 /* Params.swift */,
+				13D1A9E31BF62C68B660ED4F /* Session.swift */,
+			);
+			path = Model;
+			sourceTree = "<group>";
+		};
+		CEE1FE9AFE3BFBDD0F9DDDF2 /* Modules */ = {
+			isa = PBXGroup;
+			children = (
+				3C4A0B9E596686E0A4210966 /* AdjustmentsModule.swift */,
+				DE514BF232E21E5808335523 /* CharacterModule.swift */,
+				D0BAAE7E9050DC710A34A0D3 /* DecodeModule.swift */,
+				7CF3F183625237822E729D32 /* EditorModule.swift */,
+				57E318773571203F485EA06C /* FrameModule.swift */,
+				12C0218606755A6AB1E61E61 /* MasksModule.swift */,
+				48CFB7E19A48E1A601BF97AA /* PrintModule.swift */,
+				C0DBB97FECF778A2CD88C54B /* ScopeModule.swift */,
+				933E887BF9CF153F8D9D6FA4 /* StockModule.swift */,
+			);
+			path = Modules;
+			sourceTree = "<group>";
+		};
+		7C02CC9A3FBC019826CB27E7 /* Panels */ = {
+			isa = PBXGroup;
+			children = (
+				D454772FC7E2820A9B2E9395 /* Filmstrip.swift */,
+				BF61B547E6B7B8A19F4FAA68 /* StockCatalog.swift */,
+			);
+			path = Panels;
+			sourceTree = "<group>";
+		};
+		8F7D408772553D7EE418558A /* Service */ = {
+			isa = PBXGroup;
+			children = (
+				BB4BD5B9B553AFE28B46AAA7 /* Methods.swift */,
+				7EECE47B6432987971367621 /* ServiceClient.swift */,
+			);
+			path = Service;
+			sourceTree = "<group>";
+		};
+		E4C8EF631941925234954788 /* Windows */ = {
+			isa = PBXGroup;
+			children = (
+				AC0A0AD9B41BEBF27EB66755 /* CanvasArea.swift */,
+				51108E05E1DF22BC8986CAA6 /* EditorWindow.swift */,
+			);
+			path = Windows;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		65D1096550BF2E3EF73F8C13 /* Spektrafilm */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FDCB03DA0539AF16DB2A1BD9;
+			buildPhases = (
+				C5C122EDBCA76B3D8082220C,
+				0C746B0EBF884D63563E0619,
+				9D99E42CCDD064F793BBD956,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = Spektrafilm;
+			productName = Spektrafilm;
+			productReference = 204A26B6ADE398A32E30945C;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		31CD6E5D180C41B5697428E0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					65D1096550BF2E3EF73F8C13 = { CreatedOnToolsVersion = 26.0; };
+				};
+			};
+			buildConfigurationList = 8B5C6AC4FAEB347BD7496BD2;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = ( en, Base, );
+			mainGroup = 557434D6B1090EDF99833A2F;
+			productRefGroup = EDD3C324699EF0B82C0483B1;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				65D1096550BF2E3EF73F8C13,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		9D99E42CCDD064F793BBD956 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4B31657DF77C6E3B5FC6663F,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C5C122EDBCA76B3D8082220C = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8DE1AB2FE7D26F447E994C32,
+				A26857E4553226F650CA984D,
+				12C9B025E673F4B8112BAF19,
+				07168355D72B400970E3654B,
+				A1AB6ACFF866A1FFCF8DFC23,
+				56D132F35AF0DAA8541773A3,
+				DF2A55816AB2C19F3AE09E06,
+				438A4557DEEEF55AC99A5FD3,
+				77B4BE7352C79B4996F1A7C5,
+				D1A3A31D209384EAB35784A8,
+				09A9EBE1ED8A2AC0238533C6,
+				0649CD8001636B8147808C2D,
+				ED0116E13B12356A1655AFAC,
+				2678A461FB8BB61F24F40CBD,
+				C52B2879CBA92DA61C77BC62,
+				5F031AE0353B66FD03999227,
+				6C6E159427E77856D961C75C,
+				9758704CE781F1072A938E42,
+				A58A3AC21063CBB4757772C7,
+				078870B715E19F2B83A24A3B,
+				2826CB1E5906535B0C4AB0D1,
+				4F1DF9AF7F8FB8B7B5A7D449,
+				F2F2CFFDE027DA4E14F8F58C,
+				101834F74C5D33C40F30491F,
+				2271EC3FD7660C3776B54831,
+				998F7A1C661ED35093787374,
+				27A3ED0A54C9EBCD5926DB4E,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AA9B0C00A3F6728992D37351 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				ONLY_ACTIVE_ARCH = YES;
+				ARCHS = arm64;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		5A8A5F5C5FE30D6F004D06B3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				ONLY_ACTIVE_ARCH = YES;
+				ARCHS = arm64;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		16A52FC5E774BAFB1BB28F8C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Spektrafilm/Spektrafilm.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Spektrafilm/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ( "$(inherited)", "@executable_path/../Frameworks", );
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hanze.spektrafilm;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		ED1A6EA280157CA36DE36663 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Spektrafilm/Spektrafilm.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Spektrafilm/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ( "$(inherited)", "@executable_path/../Frameworks", );
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hanze.spektrafilm;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8B5C6AC4FAEB347BD7496BD2 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA9B0C00A3F6728992D37351 /* Debug */,
+				5A8A5F5C5FE30D6F004D06B3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FDCB03DA0539AF16DB2A1BD9 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				16A52FC5E774BAFB1BB28F8C /* Debug */,
+				ED1A6EA280157CA36DE36663 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 31CD6E5D180C41B5697428E0;
+}

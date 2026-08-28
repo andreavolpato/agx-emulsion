@@ -205,3 +205,40 @@ uv.lock
 tests/capture_one_test/
 tests/di_test/
 tests/baseline/out/
+
+################################################################################
+# Xcode / Swift — modern_UI/Spektrafilm
+#
+# The .xcodeproj is tracked (it is the project definition), but everything
+# inside it that is per-user or per-machine is not: window positions, the
+# selected scheme, breakpoints, and the last-opened-file state all churn on
+# every launch and belong to nobody but the machine that wrote them.
+
+# Per-user project state. `xcschememanagement.plist` and `.xcuserstate` are
+# rewritten by Xcode on almost every open, so tracking them means a dirty tree
+# after simply looking at the project.
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+
+# Build products and derived data. `build/` is already ignored above for
+# Python packaging and catches an in-tree Xcode build dir too; these cover the
+# rest.
+DerivedData/
+*.xcarchive
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode 26 moved the Metal compiler to a downloadable component; its cache
+# lands here when a .metal target is built.
+*.metallib
+
+# Swift Package Manager, if a dependency is ever added.
+.build/
+.swiftpm/
+Package.resolved
+
+# Resolved by the toolchain, never authored.
+*.moved-aside
+*.hmap
