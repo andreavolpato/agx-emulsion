@@ -1,0 +1,306 @@
+# RFC-012: One process, one bundle — retiring the Python service
+
+| | |
+|---|---|
+| **Status** | Proposed |
+| **Date** | 2026-09-10 |
+| **Depends on** | RFC-011 (the GPU-native core, which is what makes this possible), RFC-010 (colour-science testing — the reference path this must not destroy) |
+| **Supersedes** | `CONTRACT-frontend-backend.md` §1's "the boundary is the wire" — deliberately, and only at the end of §5's sequence |
+| **Scope** | `Service/ServiceClient.swift`, `service/**`, `utils/io.py`, packaging, and eventually `backends/metal/**`'s host language |
+| **Hardware of record** | Apple M3 Max, 30-core GPU, 36 GB unified; macOS 25.6; MLX 0.32.2 |
+| **Frame of record** | `_DSC2439.NEF` → linear ProPhoto float32, 5504 × 8256 = **45.75 MP** |
+
+---
+
+## 0. The question, and the answer
+
+> Is it time to abandon the Python backend and switch to C++/Rust?
+
+**For speed: no.** Python is not what costs time. **For shipping: yes, and it
+is not optional** — the app as it stands cannot leave the machine it was built
+on. Those are two different arguments and conflating them produces the wrong
+plan, which is why this RFC separates them.
+
+The thing to retire is not *Python the language*. It is **the process
+boundary** and **the 2.2 GB environment behind it**. The render itself is
+already native: MLX kernels on the GPU, with Python acting as a JSON parser
+and a profile loader wrapped around them.
+
+---
+
+## 1. The measurements this argument rests on
+
+All measured 2026-09-10 on the frame of record, on the shipped configuration,
+warm, through `RenderService` in-process (so no transport framing is counted
+against Python that the app would not also pay).
+
+### 1.1 Where a reprint's 30.6 ms goes
+
+| | ms / reprint | share |
+|---|---|---|
+| `backends/metal` — **the actual GPU render** | 10.5 | 34 % |
+| `_write_rgba16` — **writing the pixels to a file for the client** | 10.0 | **33 %** |
+| numpy glue | 1.8 | 6 % |
+| colour-science | 0.8 | 2.7 % |
+| numba | 0.0 | 0 % |
+| Python interpreter, JSON, dispatch, the rest | ~7.5 | 24 % |
+
+**A third of every render is spent writing a file that exists only because the
+engine is a separate process.** The GPU does the work in 10.5 ms and then the
+architecture spends another 10 ms handing it over. That single row is the
+strongest argument in this document, and it is an argument about *IPC*, not
+about Python.
+
+### 1.2 Where opening a frame's 3.85 s goes
+
+From `Session.LoadClock` (`SPEKTRAFILM_CANVAS_LOG=1`), after the fixes in
+`699a7c8` and `61f3bd4`:
+
+```
+decode 95 · preview-texture 239 · linear-tiff 42 · service.open 3315
+· solve 111 · reprint 37 · TOTAL 3841 · core=metal
+```
+
+- `service.open` 3.3 s, of which **~2.4 s is one `skimage.resize`** on the CPU
+  (`HANDOFF-GPU-WIRING.md` §2.1). That is a *library* cost, not a language
+  cost: scipy's `correlate1d` is already C. Rewriting it in Rust buys roughly
+  nothing; moving it to the GPU removes it.
+- **~1.9 s of interpreter start and imports**, paid once per session. Now
+  hidden by warming the service at launch (`61f3bd4`). A native binary makes
+  it ~0. This is the *entire* speed case for a language change, and it is
+  one-time.
+- The 364 MB linear TIFF, written by the client and read back by the service,
+  because large data crosses the boundary as a path (contract §1).
+
+### 1.3 What has to be bundled today
+
+```
+.venv                                   2.2 GB
+  PySide6            1.2 GB   the dead PyQt frontend — not needed at all
+  mlx                206 MB   needed: this is the render
+  llvmlite + numba   149 MB   the reference path only (RFC-011 §3.3)
+  colour-science      98 MB   0.8 ms per render (§2.2)
+  scipy               90 MB   not in the reprint path at all
+  pandas              50 MB   a colour-science dependency
+  matplotlib          29 MB   scripts and QA only
+  skimage             29 MB   one function, being ported to the GPU
+  numpy               26 MB   glue
+  exiv2               20 MB   `utils/io.py` — goes with the file boundary (§2.4)
+  PyOpenColorIO       20 MB   not imported anywhere in src/spektrafilm
+```
+
+And `Service/ServiceClient.swift` locates all of it like this:
+
+```swift
+// The app lives at <repo>/modern_UI/Spektrafilm/...; walk up until
+// `src/spektrafilm` is found.
+var url = Bundle.main.bundleURL
+for _ in 0..<8 { url.deleteLastPathComponent(); … }
+…
+let python = repo.appending(path: ".venv/bin/python")
+```
+
+**The app requires a checkout of this repository and a built virtualenv
+sitting next to it.** There is no code-signing story, no notarization story,
+no sandbox story, and no story at all for handing it to another person. This
+is not a performance problem. It is an existence problem, and it is the reason
+this RFC exists.
+
+---
+
+## 2. What actually depends on Python
+
+The useful surprise from §1.3 is how little.
+
+### 2.1 The render does not
+
+`backends/metal/*.py` imports, in total: `mlx.core`, `numpy`, `threading`,
+`time`, `contextlib`, `dataclasses`, and three internal modules. That is the
+whole dependency surface of the thing that produces the picture. MLX is a C++
+library with Python bindings, so the kernels are already native; the Python
+around them builds argument lists.
+
+### 2.2 colour-science is a *bake-time* dependency pretending to be a runtime one
+
+98 MB (plus pandas' 50 MB) for **0.8 ms per render**. What it actually does at
+render time is a small number of fixed matrix products and transfer curves —
+RFC-007 A already established that colour-science belongs at setup time, and
+RFC-011 folded the CAT02 round trip into a baked matrix rather than calling
+`RGB_to_RGB` per pixel (trap 7).
+
+The remaining calls are per-*session*, not per-pixel, and every one of them is
+a pure function of the profile and the colourspace names. **They can be
+precomputed into shipped constants.** That is a data change, not a port, and
+it is checkable exactly: the baked constant either equals what colour-science
+returns or it does not.
+
+### 2.3 numba is the reference, and the reference must not be shipped or deleted
+
+149 MB of llvmlite and numba contribute **0.0 ms** to a render on the Metal
+core. RFC-011 §3.3 is emphatic that the numba path stays forever as the thing
+the GPU path is checked against — *"the day a colour question arises, the
+ability to re-run the same frame through the reference implementation is worth
+more than the code it costs to keep."*
+
+Both things are true at once and the resolution is obvious once stated:
+**the reference is a development dependency, not a runtime one.** It stays in
+the repo, in the parity harness, in CI. It does not go in the app.
+
+### 2.4 OpenImageIO exists to serve the process boundary
+
+`utils/io.py` reads the TIFF that the client wrote because the client and the
+engine are different processes. Remove the boundary and this dependency, the
+364 MB write, the 364 MB read, and `_write_rgba16`'s 10 ms per render all go
+at once.
+
+---
+
+## 3. Options
+
+| | what it is | interpreter start | IPC cost/render | bundle | reference kept | effort |
+|---|---|---|---|---|---|---|
+| **A** *(today)* | Python service, subprocess, file handoff | 1.9 s | 10 ms | **impossible** | yes | — |
+| **B** | trimmed, frozen Python runtime **inside** the bundle | ~1.9 s | 10 ms | ~600 MB | yes | small |
+| **C** | native binary (Swift/C++ over MLX-C) as a subprocess, same wire | ~0 | 10 ms | ~250 MB | yes, in dev | medium |
+| **D** | native **library**, linked into the app, no process at all | 0 | **0** | ~250 MB | yes, in dev | large |
+
+The bundle column for C and D is dominated by MLX itself, measured rather than
+guessed: `libmlx.dylib` 20.9 MB + `mlx.metallib` **166.7 MB** = ~188 MB, plus
+the baked profile data and the app. The metallib is large because it carries
+kernels for all of MLX's operations; whether it can be trimmed to the ones this
+pipeline dispatches is an open question and **not** assumed by this RFC.
+
+### 3.1 B is a trap, and it is the tempting one
+
+Dropping PySide6, matplotlib, jedi, babel and PyOpenColorIO takes 2.2 GB to
+roughly 600 MB, and tools like PyInstaller will produce something that
+launches. It looks like a week of work and an answer.
+
+It is not an answer. It ships a Python interpreter and 600 MB of scientific
+libraries inside a photo editor to run kernels that are already native, keeps
+the 10 ms-per-render file handoff, keeps the 1.9 s start, and adds a permanent
+packaging tax to every dependency change — with code signing and notarization
+of a bundled interpreter as an ongoing cost rather than a one-off. **Take B
+only as a stopgap if something has to be demonstrable to a person on another
+machine before D lands**, and say so in the commit that does it.
+
+### 3.2 D is the destination, C is how you get there safely
+
+C and D differ only in whether the native core is behind a pipe or behind a
+function call. That means C is not a detour: **it is D with the boundary still
+in place**, which is exactly what makes it checkable — the same wire, the same
+`rgba16` bytes, the same contract tests, and the existing Python service still
+runnable next to it for comparison. Once C is at parity, D is deleting the
+transport.
+
+The prize in D is §1.1's second row: the file write is a third of a render, and
+in D it does not exist. A live reprint would go from ~30 ms to ~13 ms, and
+`open`'s 364 MB round trip to zero, because the client's decoded buffer is
+already in the same address space (and on Apple silicon, already in the same
+memory the GPU reads).
+
+---
+
+## 4. What is genuinely at risk
+
+Stated plainly, because the failure modes here are the expensive kind.
+
+1. **Colour correctness, silently.** RFC-010 exists because three colour bugs
+   were live simultaneously with 750 tests passing and two produced plausible
+   photographs. Every constant that moves from "computed by colour-science at
+   startup" to "baked into the binary" is a chance to bake the wrong one.
+   *Mitigation:* the baking script emits the constants **and** a test that
+   re-derives them from colour-science and asserts equality. The bake is
+   checked in; the check runs in CI, where the 98 MB dependency still lives.
+2. **Losing the reference by accident.** If the Python path stops being run,
+   it stops working, and the day it is needed it will not build.
+   *Mitigation:* the parity harness (`scripts/gpu_native/parity.py`) runs in
+   CI on every change, not on demand. A reference nobody exercises is not a
+   reference.
+3. **Driving MLX from a native host.** This is the single assumption the whole
+   of C and D rests on, so it was checked rather than assumed. The installed
+   MLX 0.32.2 ships everything a C++ host needs, next to the Python bindings:
+
+   ```
+   mlx/include/mlx/mlx.h        the C++ header
+   mlx/lib/libmlx.dylib         the library the Python bindings themselves call
+   mlx/lib/mlx.metallib         the compiled Metal kernels
+   mlx/lib/cmake/               CMake package config
+   ```
+
+   So the kernels are not behind Python; Python is one caller of them. What is
+   *not* yet verified is that `mx.fast.metal_kernel` — how RFC-005 writes bare
+   Metal, and how most of `backends/metal` is built — is reachable and
+   byte-identical from that API. *Mitigation:* §5 step 1 is a spike that does
+   nothing except run one existing kernel from a non-Python host and compare
+   the bytes. If it fails, this RFC is wrong and B becomes the answer by
+   default.
+4. **Rewriting instead of relinking.** `HANDOFF-GPU-NATIVE.md` §4's line still
+   holds: same math, same measured data, same node boundaries, only the
+   executor changes. The nodes are already MLX; C and D must move the *host*,
+   not re-derive the pipeline. Any node whose math changes is a separate RFC.
+
+---
+
+## 5. Sequence
+
+Each step is independently valuable and independently abandonable.
+
+1. **Spike MLX from a non-Python host** (§4.3). One kernel, one array, byte
+   comparison. This is a gate, not a task: everything below assumes it passes.
+2. **Finish the GPU resize** (`HANDOFF-GPU-WIRING.md` §2.1). Takes `open` from
+   3.3 s to a few hundred ms. Needed in every option, including staying on A.
+3. **Bake the colour-science constants** (§2.2), with the re-derivation test.
+   Removes 148 MB and the last per-render third-party call. Valuable even if
+   this RFC goes no further.
+4. **Split the service in two**: the wire and session handling on one side,
+   the render on the other, behind a narrow interface. This is the seam C and
+   D both attach to and it costs nothing to have.
+5. **C — the native host behind the same wire.** Contract unchanged, so the
+   frontend does not move and every existing test applies. Both services
+   runnable side by side; ship whichever passes parity.
+6. **D — link it in and delete the transport.** Needs a contract amendment
+   (§1's "the boundary is the wire" is retired here, not before) and it should
+   be its own RFC, because removing single-flight and the file handoff changes
+   the frontend's scheduler as much as it changes the backend.
+
+---
+
+## 6. The splash screen
+
+Asked for separately, and worth answering separately, because it is a
+different kind of thing.
+
+A startup screen — Photoshop's, Capture One's — that appears immediately and
+holds while the engine warms is **worth having on its own merits**, and it
+should be built regardless of which option above is chosen:
+
+- It gives the app a face during the ~1.9 s of service warm-up that currently
+  happens behind a window showing an empty canvas.
+- It is the honest place to report *which engine started* — `core=metal`, the
+  thing §1 of `HANDOFF-GPU-WIRING.md` shows nobody could see — and to fail
+  loudly if the engine did not start at all, which today produces a working
+  window that silently cannot render.
+- It is where a first-run "no engine found" message belongs, and that message
+  is going to be needed under option B or C too.
+
+But it must be understood for what it is. **A splash screen hides the 1.9 s
+once; it does nothing about the 10 ms per render, the 364 MB round trip, or
+the fact that the app cannot be given to anyone.** Building it and calling the
+problem solved would be the worst outcome of this document. Build it because a
+professional application should have one — and land §5 anyway.
+
+---
+
+## 7. Recommendation
+
+Do **1, 2 and 3** now: they are needed under every option, they are the whole
+of the remaining speed problem, and step 3 alone removes 148 MB and the last
+per-render dependency.
+
+Then **C**, then **D** as its own RFC.
+
+Do **not** do B unless something must be demonstrated on another machine
+first — and if it is done, do it as an explicitly labelled stopgap with a date
+on it, because a working bundle is exactly the kind of thing that removes the
+pressure to build the right one.
