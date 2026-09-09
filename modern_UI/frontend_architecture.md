@@ -17,7 +17,6 @@ fixed width and the centre column absorbs the remainder.
 
 ```
  ┌───────────────────────────── 1920 × 1080 pt ──────────────────────────────┐
- │  traffic lights on the ground · reserved strip 32                         │
  │  9                                                                     9  │
  │ ┌────────────┐ 8 ┌──────────────────────────────────┐ 8 ┌──────────────┐  │ 7
  │ │            │   │            top bar 41            │   │              │  │
@@ -32,11 +31,10 @@ fixed width and the centre column absorbs the remainder.
 ```
 
 Every number is the SVG's, divided by two — the drawing is a 3840 × 2160
-canvas, which is this window at 2×. The one thing the drawing does not have is
-window chrome: `.windowStyle(.hiddenTitleBar)` still floats the traffic lights
-over the content, so the layout reserves `Theme.Metric.titleBarHeight` (32 pt)
-at the top for them. The cards keep the drawing's widths, gutters and radius,
-and are 25 pt shorter; the top bar and filmstrip keep their drawn heights.
+canvas, which is this window at 2×. The built interface departs from it twice,
+both deliberately: the gutter is 6 rather than 8, and the left panel's header
+starts 70 pt in so the window's traffic lights can share that row the way they
+share Xcode's sidebar header.
 
 | card | SVG rect (x, y, w, h) | points |
 |---|---|---|
@@ -55,16 +53,20 @@ on every card.
   room; a narrower one takes it from the canvas. Panel width therefore trades
   against how much of the frame you see at once, never against what you can
   inspect — zoom does that.
-- **The window reserves a 32 pt strip at the top for the traffic lights.**
-  `.windowStyle(.hiddenTitleBar)` does not remove the three window buttons; it
-  floats them over the content (measured x 10–57, y 5–26 pt). The drawing has
-  no window chrome, so the first build put them on the left card's header, in
-  the same row as import and export. Shifting that row right cleared the
-  *glyphs* but left the buttons painted on the card, which still read as a
-  collision. `Theme.Metric.titleBarHeight` puts them on the ground instead.
-  The strip is also the window's drag handle (`WindowDragHandle`), because
-  hiding the titlebar removes the usual one; the window server draws the
-  buttons above the content, so they keep their clicks.
+- **The left card's header shares its row with the traffic lights**, the way
+  Xcode's sidebar header does. `.windowStyle(.hiddenTitleBar)` floats the three
+  window buttons over the content (measured x 10–57, y 5–26 pt), so the header
+  starts 70 pt into the card (`Theme.Metric.panelHeaderLeading`) and import and
+  export sit clear of them. This is the one place the built interface departs
+  from the drawing, which puts the import glyph at x 12; every other card keeps
+  its 12 pt. The window server draws the buttons, so no offscreen capture
+  (`Tools/snapshot.sh`) can see the collision this avoids —
+  `Tools/capture-live.sh` is the check. The header row, the top bar's empty
+  middle and the Browse header are the window's drag surfaces
+  (`WindowDragHandle`), since hiding the titlebar removes the usual one.
+- **The gutter is 6, not the drawing's 8.** Four gutters of ground between the
+  cards is a lot of screen for nothing; `Tools/compare-layout.py` applies the
+  2 pt difference, so it still measures the drawing rather than the deviation.
 - **Collapsing removes a card from the stack**, so the canvas grows into its
   place rather than being overlapped. The pill tab on each canvas edge brings
   it back. `⌘\` folds both side panels; `⇧⌘F` the filmstrip.

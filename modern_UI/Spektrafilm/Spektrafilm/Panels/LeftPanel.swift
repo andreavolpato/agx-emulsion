@@ -26,8 +26,12 @@ struct LeftPanel: View {
 
     private var header: some View {
         HStack(spacing: 0) {
+            // The leading inset clears the window's traffic lights, which
+            // `.hiddenTitleBar` floats over this corner
+            // (Theme.Metric.panelHeaderLeading). Every other card keeps the
+            // drawing's 12 pt.
             PanelIconButton(systemImage: "square.and.arrow.down", help: "Open a folder or image (⌘O)") { session.openPanel() }
-                .padding(.leading, 12)
+                .padding(.leading, Theme.Metric.panelHeaderLeading)
             PanelIconButton(systemImage: "square.and.arrow.up", help: "Export (⌘E)") { session.showExport = true }
                 .padding(.leading, 12)
                 .disabled(session.selection == nil)
@@ -46,6 +50,9 @@ struct LeftPanel: View {
             .padding(.trailing, 6)
         }
         .frame(height: 44)
+        // The header row is the window's drag surface here, as a sidebar
+        // header is in Xcode. The buttons sit above it and keep their clicks.
+        .background(WindowDragHandle())
     }
 }
 

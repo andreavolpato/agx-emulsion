@@ -19,7 +19,7 @@ tier through the real render path.
 
 | § | item | status |
 |---|---|---|
-| 1 | traffic lights over the left panel | **done, differently from the recommendation above** — shifting the header row cleared the *glyphs* but left the buttons painted on the card, which still read as a collision in a live capture. The layout now reserves a 32 pt strip at the top (`Theme.Metric.titleBarHeight`) so the buttons sit on the ground; the header returns to the drawing's 12 pt inset, the cards keep the drawing's widths and gutters and lose 25 pt of height. The strip doubles as the window's drag handle, since `.hiddenTitleBar` removes the usual one. `Tools/compare-layout.py` applies the same offset |
+| 1 | traffic lights over the left panel | **done, Xcode-style** — the header row shares its line with the buttons, as Xcode's sidebar header does: import/export start 70 pt into the card (`Theme.Metric.panelHeaderLeading`) and the drawing's 12 pt is kept everywhere else. A 32 pt reserved strip was tried first and rejected: it cleared the buttons but cost 25 pt of card height for nothing. The header row, the top bar's empty middle and the Browse header are the window's drag surfaces |
 | 2 | opening a folder commits to a render | **done, minimally** — a folder or a multi-file selection lands in a new Browse state and renders nothing; one file still goes straight to Print. The grid is a `LazyVGrid` inside one card, not the full-bleed surface §5.1 describes. Prefetch is now decode-preview only |
 | 3.1.1 | the cache is unbounded | **done** — `Import/LinearCache.swift`, 4 GB LRU by modification date, pruned before every write |
 | 3.1.2 | a file per slider value | **done** — the TIFF is written after the cancellation guard, so a superseded white-balance value never writes one |
@@ -110,6 +110,16 @@ asymmetry does not bite. Note also that writing the solved EV into
 on and already applies the solve, and the slider is an offset on top. The
 handoff's suggested fix would be a bug; the value is for display only.
 
+### Two test schemes
+
+`SpektrafilmFrontend` runs the same bundle with `ServiceIntegrationTests`
+skipped — 37 tests in about two seconds, and no pixels generated. That is the
+one class that spawns `python -m spektrafilm.service` and renders a real
+negative. Use it for UI, layout and behaviour work. Run `SpektrafilmTests`
+(38 tests) when the change touches `Service/Methods.swift`, the wire names in
+`Model/Params.swift`, or `src/spektrafilm/service/`: the skipped class is what
+guards that contract, and a frontend edit can break it silently.
+
 ---
 
 ## 1. The traffic lights sit on the left panel — decide this first
@@ -139,10 +149,11 @@ Whatever is chosen, check it at all three window shapes with
 and do not appear in `Tools/snapshot.sh` output at all, which is why the
 collision survived every capture until the app was run for real.
 
-**Taken instead (2026-09-09): a 32 pt strip reserved at the top**, so the
-buttons sit on the ground. The recommended header-row shift cleared the glyphs
-but a live capture still showed the buttons painted on the card, which reads
-as the same collision. See §0.
+**Taken (2026-09-09): the header-row shift, Xcode-style.** A 32 pt reserved
+strip was tried and rejected — it cleared the buttons but cost 25 pt of card
+height, which is screen space spent on nothing. Xcode puts its window buttons
+on the same line as the sidebar's toolbar; this does the same, and the strip
+disappears. The gutter also went from 8 to 6 for the same reason. See §0.
 
 ---
 

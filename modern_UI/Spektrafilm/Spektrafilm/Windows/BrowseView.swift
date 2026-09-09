@@ -59,7 +59,9 @@ struct BrowseView: View {
                 .font(Theme.Font.sectionTitle).foregroundStyle(Theme.text).lineLimit(1)
             Text("· \(session.frames.count) frames")
                 .font(Theme.Font.caption).foregroundStyle(Theme.dim)
-            Spacer()
+            // The empty middle of the header drags the window, as a toolbar
+            // does; the titlebar is hidden.
+            WindowDragHandle().frame(minWidth: 8, maxWidth: .infinity)
             Menu {
                 ForEach(BrowseSort.allCases) { s in
                     Button(s.rawValue) { sortRaw = s.rawValue }

@@ -51,28 +51,30 @@ enum Theme {
         /// Outer margin between window edge and cards (17.9 → 9, 14.1 → 7).
         static let outerX: CGFloat = 9
         static let outerY: CGFloat = 7
-        /// Gutter between a side panel and the centre column (690.5 − 674.8 → 8).
-        static let gutter: CGFloat = 8
+        /// Gutter between a side panel and the centre column. The drawing's is
+        /// 8 (690.5 − 674.8); 6 spends less screen on ground between the four
+        /// cards. Deliberate departure from the drawing.
+        static let gutter: CGFloat = 6
         static let leftPanelWidth: CGFloat = 328
         static let rightPanelWidth: CGFloat = 286
         static let topBarHeight: CGFloat = 41
         static let filmstripHeight: CGFloat = 125
         /// Well inset from the card edge (36.2 − 17.9 → 9).
         static let wellInset: CGFloat = 9
-        /// Height reserved above the cards for the window's traffic lights.
+        /// Leading inset for the left panel's header row.
         ///
         /// `.windowStyle(.hiddenTitleBar)` does not remove the three window
-        /// buttons; it floats them over the content. The drawing has no window
-        /// chrome, so the first build put them on the left card's header, in
-        /// the same row as import and export. Shifting the header row right
-        /// cleared the *glyphs* but left the buttons painted on the card,
-        /// which still reads as a collision. Reserving a strip at the top puts
-        /// them on the ground instead. Measured button extent on this machine:
-        /// x 10–57, y 5–26 pt; the strip is 32, so the card starts 6 pt clear.
-        /// The cost is 25 pt of card height (the drawing's own 7 pt top margin
-        /// becomes 32) and nothing else — the cards stay aligned with each
-        /// other and with the drawing's widths, gutters and radius.
-        static let titleBarHeight: CGFloat = 32
+        /// buttons; it floats them over the content, the way Xcode's sit over
+        /// its navigator sidebar. Measured on this machine: x 10–57 pt,
+        /// y 5–26 pt. The card starts at x 9, so the first glyph must begin at
+        /// x ≥ 78 — 69 pt inside the card. 70 keeps a 1 pt margin and leaves a
+        /// gap about the size of Xcode's between the buttons and the first
+        /// toolbar item. This is the one place the built interface departs
+        /// from the drawing, which puts the import glyph at x 12; every other
+        /// card keeps its 12 pt. The window server draws the buttons, so no
+        /// offscreen capture (`Tools/snapshot.sh`) can see the collision this
+        /// avoids — `Tools/capture-live.sh` is the check.
+        static let panelHeaderLeading: CGFloat = 70
         /// Text inset from the well edge (label x 62 → 31, well x 18 → 13).
         static let wellPadding: CGFloat = 13
         /// Section header height and the gap wells keep from headers.

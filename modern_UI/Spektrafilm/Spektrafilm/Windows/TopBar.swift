@@ -22,7 +22,9 @@ struct TopBar: View {
                     .padding(.leading, 8)
                     .help("The render service is not running. Start it again.")
             }
-            Spacer(minLength: 8)
+            // The empty middle of the bar is the window's drag surface: the
+            // titlebar is hidden, and this is where a toolbar would be.
+            WindowDragHandle().frame(minWidth: 8, maxWidth: .infinity)
             if session.detailTier != .live {
                 Text(session.detailTier == .full ? "full" : "detail")
                     .font(Theme.Font.caption)

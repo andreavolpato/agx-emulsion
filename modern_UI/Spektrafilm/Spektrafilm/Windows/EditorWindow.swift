@@ -23,8 +23,7 @@ struct EditorWindow: View {
             if session.browsing && !session.frames.isEmpty {
                 BrowseView(session: session)
                     .padding(.horizontal, Theme.Metric.outerX)
-                    .padding(.bottom, Theme.Metric.outerY)
-                    .padding(.top, Theme.Metric.titleBarHeight)
+                    .padding(.vertical, Theme.Metric.outerY)
                     .transition(.opacity)
             } else {
                 printLayout
@@ -33,14 +32,6 @@ struct EditorWindow: View {
         .animation(.easeOut(duration: 0.18), value: session.browsing)
         .background(Theme.ground)
         .ignoresSafeArea()
-        // The reserved strip is the window's only drag handle now that the
-        // titlebar is hidden, and SwiftUI's ground colour would swallow the
-        // gesture. The window server draws the traffic lights above the
-        // content, so they keep their clicks; this handles the rest of the
-        // strip, including double-click to zoom, exactly as a titlebar does.
-        .overlay(alignment: .top) {
-            WindowDragHandle().frame(height: Theme.Metric.titleBarHeight)
-        }
         .preferredColorScheme(.dark)
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             Task { @MainActor in
@@ -83,11 +74,7 @@ struct EditorWindow: View {
             }
         }
         .padding(.horizontal, Theme.Metric.outerX)
-        // The traffic lights are window chrome the drawing never had. They are
-        // reserved a strip at the top so they sit on the ground rather than on
-        // the left card; see Theme.Metric.titleBarHeight.
-        .padding(.top, Theme.Metric.titleBarHeight)
-        .padding(.bottom, Theme.Metric.outerY)
+        .padding(.vertical, Theme.Metric.outerY)
         .transition(.opacity)
     }
 }
