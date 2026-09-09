@@ -503,3 +503,88 @@ pixel, not a disagreement about which pixels are in the picture.
 | end-to-end dE2000 | mean 6.9e-5, p99 2.9e-4, max 1.5e-3; no structure (row/col profile 1.5 / 1.2, tile grid 0.45–1.67) |
 | full render, numba → Metal | 6.44 s → **0.41 s** (the crop is 40 % of the frame; the uncropped render is 0.99 s) |
 | the node itself | 2.04 s (NumPy gather) → 10 ms |
+
+
+---
+
+## 10. Concurrency, verified (added 2026-09-10)
+
+DR-9 reported `concurrent: false` because nothing had been checked. This
+section is the check, and what it changed.
+
+### 10.1 What the engine does under concurrent entry
+
+`scripts/gpu_native/concurrency_check.py`, M3 Max, 45.75 MP frame:
+
+| test | result |
+|---|---|
+| 4 pipelines on 4 threads, deterministic config, live and preview tiers, 5 rounds | every output **bit-identical** to the sequential render; no errors |
+| the same with grain and glare on (fresh Philox seeds), plus a thread constructing and rendering new pipelines throughout | no errors |
+| two 45 MP renders (grain + glare on), sequential vs concurrent | 2.01 s vs 1.76 s: **1.14×** — one GPU, already busy |
+| a live-tier render issued while a 45 MP render runs, no yielding | 49 ms alone → **362 ms** |
+
+The one thing that must stay serialised is **pipeline construction**: the
+1×1 reference probes in `SimulationPipeline.__init__` go through numba
+kernels compiled `parallel=True`, and numba's `workqueue` layer aborts the
+process on concurrent entry. `session.BUILD_LOCK` covers it. Rendering on the
+Metal core never enters numba (the only remaining host work is colour-science
+setup and a strided auto-exposure sample), and MLX accepts kernel launches
+from several Python threads on its default stream — 20 rounds × 4 threads
+produced no fault and no wrong pixel. The kernel cache in `msl.py` and the
+setup caches (`_setup_for`, `tc_b_matrix`) are plain dicts; a race there
+compiles or computes a constant twice and stores an equal value, which is
+harmless and was exercised by the construction-under-load round.
+
+### 10.2 What the service does with it
+
+- **Locks per session tier**, not one global lock. Different tiers render
+  concurrently (they are separate pipeline objects); the same tier queues.
+- **Deferred deltas.** `set_params` never blocks behind a render: a delta
+  for a tier that is rendering is queued and applied by that thread when it
+  finishes. The in-flight render reflects the parameters as of its start; a
+  shoot-layer edit that lands mid-render bumps a generation counter so the
+  negative being computed is not cached stale.
+- **`open` waits** for the previous session's in-flight renders before
+  releasing it.
+- **The transport stays in-order by default**, because the shipping client
+  reads the next line as the reply to its last request. `configure_transport
+  {"concurrent": true}` moves request handling to a worker pool; replies then
+  arrive in completion order and `progress` / `cancel` are answered on the
+  reader thread — so cancel works mid-render for the first time on this
+  transport. Turning it off drains the pool before the next request.
+
+### 10.3 The interactive yield
+
+Concurrency alone made a live render *worse* (49 → 362 ms) because the GPU
+queue was full of the export's kernels. A background render therefore yields
+to a pending live render: `RenderProgress.yield_fn` is called between nodes,
+and — because halation and the couplers are single 300 ms nodes — also
+between kernel launches inside the blur chains (`device.yield_scope` /
+`yield_point`, ~30 ms granularity). The wait is bounded at 1 s per yield
+point so a continuous drag cannot starve an export.
+
+Measured through the service (`concurrency_check.py --service`: an `export`
+with a live `reprint` arriving 200 ms in):
+
+| | live reprint | export |
+|---|---|---|
+| alone | 27 ms | 1.03 s render + TIFF write |
+| concurrent, no yield | 423 ms | 2.06 s |
+| yield between nodes | 285 ms | 1.81 s |
+| **yield between kernels** | **44 ms** | 1.99 s |
+
+### 10.4 What this means for batch processing
+
+One GPU renders one 45 MP frame in a second whether or not another render
+shares it (1.14× for two). Batch throughput does not come from concurrent
+renders on the service; it comes from overlapping the **client's decode**
+(Core Image, ~3 s per NEF on this machine) with the service's render, which
+the in-order transport already allows — decode image k+1 while `export`
+renders image k — and which the concurrent transport makes simpler (issue
+the `open` early; it waits for the running export by itself). Multi-session
+(several images open at once) is not implemented: a session holds three tier
+images and up to three negatives, and at 45 MP that is the memory budget.
+
+`capabilities.backend.concurrent` is now `true` on the Metal core; the
+transport block and `configure_transport` are recorded in contract §6, and
+the client-side prerequisite (match replies by id) in §5.
