@@ -588,3 +588,39 @@ images and up to three negatives, and at 45 MP that is the memory budget.
 `capabilities.backend.concurrent` is now `true` on the Metal core; the
 transport block and `configure_transport` are recorded in contract §6, and
 the client-side prerequisite (match replies by id) in §5.
+
+---
+
+## 11. The tier downscale (added 2026-09-10, HANDOFF-GPU-WIRING §2.1)
+
+`utils/preview.resize_for_preview` — skimage's anti-aliased resize — survived
+the rewrite because it produces a node's input rather than being a node, and
+once the render was 37 ms it was the largest single cost in opening a frame:
+1.6–2.4 s per tier on the 45 MP source (trap 10, again). It is now ported,
+not replaced: `backends/metal/resize.py` reproduces skimage's parameters —
+`sigma = max(0, (factor − 1)/2)` per axis, `truncate = 4.0`, and ndimage's
+**mirror** edges (skimage's `mode='reflect'` is the numpy-pad name for
+ndimage `mirror`, which is where a first attempt with scipy `reflect` bit:
+5e-2 at the edges, 1.8e-7 inside) — followed by `ndi.zoom(order=1,
+mode='mirror', grid_mode=True)`, with the sample coordinate computed as an
+exact rational so the base index is an integer and only the fraction rounds.
+
+| | skimage (CPU) | Metal | max abs vs skimage |
+|---|---|---|---|
+| 45 MP → live (1600 px) | 1.60 s | **54 ms** | 1.2e-7 |
+| 45 MP → preview (3400 px) | 1.84 s | **62 ms** | 1.2e-7 |
+| synthetic 300×200 / 257×411×4 / 1000×700 / 4000×2999 | | | 1.8e-7 (edges included) |
+
+`RenderSession._downscale` uses it when the session renders on the Metal
+core and returns the result to host, so nothing else in the session changes.
+The RGBA frame is uploaded as it is and alpha dropped on device; slicing on
+the host first was a 540 MB copy that cost more than the downscale.
+
+`open` on the 45 MP frame, warm: 2.6 s → **278 ms** on an uncompressed
+4-channel half TIFF (what the client writes: 8256×5504×4×2 bytes = 364 MB,
+which reads in ~0.1 s). The TIFF *read* is the remaining variable, and it is
+about compression, not size: measured on the same frame, OIIO reads an
+uncompressed half TIFF in 0.07 s (3 ch) / 0.11 s (4 ch), an LZW one in
+1.3 / 1.6 s and a ZIP one in 1.1 / 1.35 s, regardless of thread count. So
+HANDOFF-GPU-WIRING §2.2's handoff is fine as long as the client keeps
+writing it uncompressed.
