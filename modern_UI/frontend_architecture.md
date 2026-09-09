@@ -307,11 +307,23 @@ higher tier and swaps it in when it lands:
 | 200 % | full | native |
 
 A frame no larger than the live tier never escalates. The request is debounced
-700 ms and never starts while the scheduler owes the service a render — the
-transport is single-flight, so a full-resolution render (17 s cold, 6 s warm on
-a 45 MP frame) would sit in front of the user's next slider release. Zooming
-back out is instant: the detail texture stays resident and the live tier comes
-back without a render.
+180 ms and never starts while the scheduler owes the service a render — the
+transport is single-flight (`capabilities` reports `concurrent: false`), so a
+detail render sits in front of the user's next slider release.
+
+The debounce was 700 ms, sized against a full render that took 17 s cold and
+6 s warm on a 45 MP frame. The GPU-native core (RFC-011) took that to 0.99 s
+cold / 0.237 s warm, at which point waiting 700 ms to decide is most of the
+cost of just doing it. **The escalation is still two steps, but the reason is
+now memory rather than time**: a full-tier rgba16 texture at 45 MP is 360 MB
+against the preview tier's ~90 MB, so going straight to `full` at 100 % would
+be about as fast and cost four times the resident memory for detail the
+viewport cannot show.
+
+Zooming back out is instant: the detail texture stays resident and the live
+tier comes back without a render. Zooming back *in* is too — the slot answers
+"this tier or sharper" and is stamped with the parameters it was made from, so
+it is a cache rather than a coincidence.
 
 The viewport is expressed against the **live** tier's pixel size, not the
 texture's. `Renderer.canvasUniforms` scales by `logicalWidth / textureWidth`,

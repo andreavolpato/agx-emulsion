@@ -795,17 +795,33 @@ final class Session: CanvasHost {
 
     // MARK: - resolution follows the zoom
     //
-    // The live tier is 1600 px on the long edge, chosen for the ~0.4 s reprint
-    // that makes a slider drag feel live. Past 100 % zoom it is being
+    // The live tier is 1600 px on the long edge. Past 100 % zoom it is being
     // interpolated, which is exactly where grain and halation become the
     // reason to zoom — and an interpolated live tier cannot show them
     // (frontend SPEC §5.0). So the canvas asks for a real render at the zoom
     // level and swaps it in when it lands, never blocking the gesture.
     //
-    // Measured on the 45 MP Nikon Z7 II frame (5504×8256): live reprint
-    // 0.44 s, preview tier (3400 px) 2.75 s, full 17.3 s cold / 6.2 s warm.
-    // That is why the escalation is two steps and why it waits for the gesture
-    // to stop.
+    // Measured on the 45 MP Nikon Z7 II frame (5504×8256), full render /
+    // reprint:
+    //
+    //   |         | numba (2026-08) | GPU-native core (RFC-011) |
+    //   |---------|-----------------|---------------------------|
+    //   | live    | 0.57 / 0.20 s   | 0.042 / 0.012 s           |
+    //   | preview | 2.38 / 0.82 s   | 0.173 / 0.046 s           |
+    //   | full    | 13.7 / 4.73 s   | 0.990 / 0.237 s           |
+    //
+    // The escalation was designed around the left-hand column: a render that
+    // takes six to seventeen seconds and cannot be cancelled once the service
+    // has started it is worth a long wait before committing to. The
+    // right-hand column is a different problem, so `detailDebounce` came down
+    // from 700 ms to 180 — at 0.99 s cold, waiting 700 ms to decide is most
+    // of the cost of just doing it.
+    //
+    // **The escalation stays two steps, and the reason is now memory rather
+    // than time.** A full-tier rgba16 texture at 45 MP is 360 MB; the preview
+    // tier is ~90 MB. Going straight to `full` at 100 % zoom would be about
+    // as fast and would cost four times the resident memory for detail the
+    // viewport cannot show.
 
     /// 100 % — one image pixel per device pixel.
     nonisolated static let detailZoomFraction: CGFloat = 1.0
@@ -813,6 +829,10 @@ final class Session: CanvasHost {
     /// 3400 px preview tier can feed.
     nonisolated static let fullZoomFraction: CGFloat = 2.0
     nonisolated static let previewEdge = 3400
+    /// How long the zoom must be still before a detail render is committed
+    /// to. Sized against the *current* cost of that render — see the table
+    /// above; it was 700 when a full render was seventeen seconds.
+    nonisolated static let detailDebounceMs = 180
 
     nonisolated static func wantedTier(zoomFraction: CGFloat, imageLongEdge: CGFloat) -> DetailTier {
         guard imageLongEdge > CGFloat(Session.liveEdge) else { return .live }
@@ -892,20 +912,24 @@ final class Session: CanvasHost {
         let tier = detailTier
         detailTask?.cancel()
         detailTask = Task { [weak self] in
-            // Wait for the gesture (and any edit) to stop. A full-resolution
-            // render takes 6–17 s and cannot be cancelled once the service has
-            // started it, because `cancel` cannot arrive mid-render on stdio.
-            try? await Task.sleep(for: .milliseconds(700))
+            // Wait for the gesture (and any edit) to stop. The render still
+            // cannot be cancelled once the service has started it — `cancel`
+            // cannot arrive mid-render on stdio — so some wait is right; it
+            // is 180 ms rather than 700 because the thing being deferred is
+            // now a second rather than seventeen.
+            try? await Task.sleep(for: .milliseconds(Session.detailDebounceMs))
             guard let self, !Task.isCancelled, gen == self.detailGeneration else { return }
             await self.renderDetail(tier: tier, for: url, sessionID: sid, generation: gen)
         }
     }
 
     private func renderDetail(tier: DetailTier, for url: URL, sessionID: String, generation gen: Int) async {
-        // The transport is single-flight: a detail render would sit in front of
-        // the user's next slider release. Never start one while an edit is
-        // still owed a render — wait for the scheduler to go idle and ask
-        // again, rather than dropping the escalation.
+        // The transport is single-flight, so a detail render sits in front of
+        // the user's next slider release. That is a quarter second now rather
+        // than six, but single-flight has not changed and `capabilities`
+        // still reports `concurrent: false`, so the rule stands: never start
+        // one while an edit is owed a render — wait for the scheduler to go
+        // idle and ask again, rather than dropping the escalation.
         guard !busy, !scheduler.pending, detailTier == tier, selection == url else {
             if detailTier == tier, selection == url { scheduleDetail() }
             return
