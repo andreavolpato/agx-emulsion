@@ -613,5 +613,14 @@ exact rational so the base index is an integer and only the fraction rounds.
 
 `RenderSession._downscale` uses it when the session renders on the Metal
 core and returns the result to host, so nothing else in the session changes.
-`open` on the 45 MP frame: 2.6 s → **1.31 s**, of which the TIFF read is now
-almost all (HANDOFF-GPU-WIRING §2.2, the frontend's call).
+The RGBA frame is uploaded as it is and alpha dropped on device; slicing on
+the host first was a 540 MB copy that cost more than the downscale.
+
+`open` on the 45 MP frame, warm: 2.6 s → **278 ms** on an uncompressed
+4-channel half TIFF (what the client writes: 8256×5504×4×2 bytes = 364 MB,
+which reads in ~0.1 s). The TIFF *read* is the remaining variable, and it is
+about compression, not size: measured on the same frame, OIIO reads an
+uncompressed half TIFF in 0.07 s (3 ch) / 0.11 s (4 ch), an LZW one in
+1.3 / 1.6 s and a ZIP one in 1.1 / 1.35 s, regardless of thread count. So
+HANDOFF-GPU-WIRING §2.2's handoff is fine as long as the client keeps
+writing it uncompressed.
