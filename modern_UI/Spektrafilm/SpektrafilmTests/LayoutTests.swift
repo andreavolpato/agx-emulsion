@@ -29,7 +29,7 @@ final class LayoutTests: XCTestCase {
             let canvasX = leftX + leftW + m.gutter
             let canvasW = rightX - m.gutter - canvasX
             XCTAssertGreaterThan(canvasW, 500, "\(name): canvas too narrow")
-            let canvasTop = m.outerY + m.topBarHeight + m.gutter
+            let canvasTop = m.titleBarHeight + m.topBarHeight + m.gutter
             let canvasBottom = size.height - m.outerY - m.filmstripHeight - m.gutter
             XCTAssertGreaterThan(canvasBottom - canvasTop, 400, "\(name): canvas too short")
             // The fit-scale rule: with a 3:2 image the canvas is wider than tall on every size.
@@ -51,6 +51,10 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(1920 - m.outerX - m.rightPanelWidth, 1625, accuracy: 1)
         // Canvas column x: 690.5 / 2.
         XCTAssertEqual(m.outerX + m.leftPanelWidth + m.gutter, 345, accuracy: 1)
+        // The reserved strip must clear the traffic lights, whose measured
+        // extent is y 5–26 pt (Theme.Metric.titleBarHeight).
+        XCTAssertGreaterThan(m.titleBarHeight, 26)
+        XCTAssertLessThan(m.titleBarHeight, 48, "more than a native titlebar of height")
     }
 
     func testMinimumWindowStillFitsBothPanels() {

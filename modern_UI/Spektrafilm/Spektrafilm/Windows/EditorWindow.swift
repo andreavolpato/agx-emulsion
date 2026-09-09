@@ -23,7 +23,8 @@ struct EditorWindow: View {
             if session.browsing && !session.frames.isEmpty {
                 BrowseView(session: session)
                     .padding(.horizontal, Theme.Metric.outerX)
-                    .padding(.vertical, Theme.Metric.outerY)
+                    .padding(.bottom, Theme.Metric.outerY)
+                    .padding(.top, Theme.Metric.titleBarHeight)
                     .transition(.opacity)
             } else {
                 printLayout
@@ -32,6 +33,14 @@ struct EditorWindow: View {
         .animation(.easeOut(duration: 0.18), value: session.browsing)
         .background(Theme.ground)
         .ignoresSafeArea()
+        // The reserved strip is the window's only drag handle now that the
+        // titlebar is hidden, and SwiftUI's ground colour would swallow the
+        // gesture. The window server draws the traffic lights above the
+        // content, so they keep their clicks; this handles the rest of the
+        // strip, including double-click to zoom, exactly as a titlebar does.
+        .overlay(alignment: .top) {
+            WindowDragHandle().frame(height: Theme.Metric.titleBarHeight)
+        }
         .preferredColorScheme(.dark)
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             Task { @MainActor in
@@ -74,7 +83,11 @@ struct EditorWindow: View {
             }
         }
         .padding(.horizontal, Theme.Metric.outerX)
-        .padding(.vertical, Theme.Metric.outerY)
+        // The traffic lights are window chrome the drawing never had. They are
+        // reserved a strip at the top so they sit on the ground rather than on
+        // the left card; see Theme.Metric.titleBarHeight.
+        .padding(.top, Theme.Metric.titleBarHeight)
+        .padding(.bottom, Theme.Metric.outerY)
         .transition(.opacity)
     }
 }
@@ -163,4 +176,20 @@ struct SnapshotCanvas: View {
 private struct SnapshotModeKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
     var snapshotMode: Bool { get { self[SnapshotModeKey.self] } set { self[SnapshotModeKey.self] = newValue } }
+}
+
+/// The window's drag handle. `.windowStyle(.hiddenTitleBar)` removes the
+/// titlebar a window is normally dragged by, and the strip reserved for the
+/// traffic lights is SwiftUI content, which would otherwise eat the gesture.
+/// `performDrag` hands it to the window server the way the real titlebar does.
+struct WindowDragHandle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class DragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 { window?.performZoom(nil) } else { window?.performDrag(with: event) }
+        }
+    }
 }

@@ -17,6 +17,7 @@ fixed width and the centre column absorbs the remainder.
 
 ```
  ┌───────────────────────────── 1920 × 1080 pt ──────────────────────────────┐
+ │  traffic lights on the ground · reserved strip 32                         │
  │  9                                                                     9  │
  │ ┌────────────┐ 8 ┌──────────────────────────────────┐ 8 ┌──────────────┐  │ 7
  │ │            │   │            top bar 41            │   │              │  │
@@ -31,7 +32,11 @@ fixed width and the centre column absorbs the remainder.
 ```
 
 Every number is the SVG's, divided by two — the drawing is a 3840 × 2160
-canvas, which is this window at 2×.
+canvas, which is this window at 2×. The one thing the drawing does not have is
+window chrome: `.windowStyle(.hiddenTitleBar)` still floats the traffic lights
+over the content, so the layout reserves `Theme.Metric.titleBarHeight` (32 pt)
+at the top for them. The cards keep the drawing's widths, gutters and radius,
+and are 25 pt shorter; the top bar and filmstrip keep their drawn heights.
 
 | card | SVG rect (x, y, w, h) | points |
 |---|---|---|
@@ -50,13 +55,16 @@ on every card.
   room; a narrower one takes it from the canvas. Panel width therefore trades
   against how much of the frame you see at once, never against what you can
   inspect — zoom does that.
-- **The left card's header starts 70 pt in.** `.windowStyle(.hiddenTitleBar)`
-  floats the three window buttons over that corner — measured x 10–57 pt,
-  y 5–20 pt — and the drawing puts the import glyph at x 12. Every other card
-  keeps the drawing's 12 pt; only this row is inset
-  (`Theme.Metric.panelHeaderLeading`). The window server draws those buttons,
-  so `Tools/snapshot.sh` cannot see the collision this avoids;
-  `Tools/capture-live.sh` is the check.
+- **The window reserves a 32 pt strip at the top for the traffic lights.**
+  `.windowStyle(.hiddenTitleBar)` does not remove the three window buttons; it
+  floats them over the content (measured x 10–57, y 5–26 pt). The drawing has
+  no window chrome, so the first build put them on the left card's header, in
+  the same row as import and export. Shifting that row right cleared the
+  *glyphs* but left the buttons painted on the card, which still read as a
+  collision. `Theme.Metric.titleBarHeight` puts them on the ground instead.
+  The strip is also the window's drag handle (`WindowDragHandle`), because
+  hiding the titlebar removes the usual one; the window server draws the
+  buttons above the content, so they keep their clicks.
 - **Collapsing removes a card from the stack**, so the canvas grows into its
   place rather than being overlapped. The pill tab on each canvas edge brings
   it back. `⌘\` folds both side panels; `⇧⌘F` the filmstrip.

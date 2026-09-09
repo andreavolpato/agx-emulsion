@@ -44,6 +44,13 @@ ground colour punched through the card, text `#faf8f4`, one accent
 items (cap height 8.45 pt measured from the glyph paths), 11 pt labels,
 10.5 pt monospaced-digit values.
 
+The drawing has no window chrome. `.windowStyle(.hiddenTitleBar)` still floats
+the traffic lights over the content, so `Theme.Metric.titleBarHeight` (32 pt)
+is reserved above the cards and they sit on the ground instead of under the
+buttons; the cards lose 25 pt of height and keep everything else.
+`Tools/compare-layout.py` applies the same offset, so it still checks the
+drawing's geometry rather than the chrome.
+
 Side panels are fixed width; the canvas takes whatever the window gives. A
 collapsed card leaves the `HStack`/`VStack`, so the canvas grows into its
 place, and the pill tab on that canvas edge brings it back. `⌘\` folds both

@@ -7,6 +7,13 @@ Finds the four card-coloured (#2c2d2b) regions in the capture and reports
 each one's rectangle in points next to the SVG's rectangle (÷2), plus the
 delta. Anything over 2 pt is drift worth looking at. The capture must be a
 1920×1080 window at 2× (3840×2160 px), which is the drawing's own frame.
+
+The drawing has no window chrome. `.windowStyle(.hiddenTitleBar)` still floats
+the three window buttons over the content, so the layout reserves
+`TITLEBAR_INSET` points at the top for them (Theme.Metric.titleBarHeight minus
+the drawing's own 7 pt margin) and every card is that much shorter. The
+comparison below applies the same shift, so a card that matches the drawing's
+widths and relative geometry still reads OK.
 """
 from __future__ import annotations
 
@@ -23,6 +30,17 @@ DRAWING = {
     "top":   (690.5 / 2, 15.5 / 2, 2547.9 / 2, 82.7 / 2),
     "strip": (690.5 / 2, 1895.3 / 2, 2547.9 / 2, 250.6 / 2),
     "right": (3250.1 / 2, 15.5 / 2, 572.3 / 2, 2131.8 / 2),
+}
+# Theme.Metric.titleBarHeight (32) − Theme.Metric.outerY (7).
+TITLEBAR_INSET = 25.0
+# What reserving the strip does to each card. The full-height cards start lower
+# and are shorter; the top bar only moves down (it keeps its drawn 41 pt); the
+# filmstrip is anchored to the bottom and does not move at all.
+CHROME = {
+    "left":  (TITLEBAR_INSET, -TITLEBAR_INSET),
+    "right": (TITLEBAR_INSET, -TITLEBAR_INSET),
+    "top":   (TITLEBAR_INSET, 0.0),
+    "strip": (0.0, 0.0),
 }
 
 
@@ -47,6 +65,9 @@ def main() -> None:
     found = boxes(mask, scale)
     ok = True
     for name, (x, y, w, h) in DRAWING.items():
+        dy, dh = CHROME[name]
+        y += dy
+        h += dh
         # Nearest by origin, but only if it is plausibly the same rectangle.
         # Without the size check a missing card matches whichever card is
         # closest and reports drift instead of absence -- which is what

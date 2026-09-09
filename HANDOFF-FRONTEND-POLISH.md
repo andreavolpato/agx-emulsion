@@ -19,7 +19,7 @@ tier through the real render path.
 
 | § | item | status |
 |---|---|---|
-| 1 | traffic lights over the left panel | **done** — the header starts 70 pt into the card (`Theme.Metric.panelHeaderLeading`). Every other card keeps the drawing's 12 pt. Checked with a live window capture, which is the only harness that sees window chrome |
+| 1 | traffic lights over the left panel | **done, differently from the recommendation above** — shifting the header row cleared the *glyphs* but left the buttons painted on the card, which still read as a collision in a live capture. The layout now reserves a 32 pt strip at the top (`Theme.Metric.titleBarHeight`) so the buttons sit on the ground; the header returns to the drawing's 12 pt inset, the cards keep the drawing's widths and gutters and lose 25 pt of height. The strip doubles as the window's drag handle, since `.hiddenTitleBar` removes the usual one. `Tools/compare-layout.py` applies the same offset |
 | 2 | opening a folder commits to a render | **done, minimally** — a folder or a multi-file selection lands in a new Browse state and renders nothing; one file still goes straight to Print. The grid is a `LazyVGrid` inside one card, not the full-bleed surface §5.1 describes. Prefetch is now decode-preview only |
 | 3.1.1 | the cache is unbounded | **done** — `Import/LinearCache.swift`, 4 GB LRU by modification date, pruned before every write |
 | 3.1.2 | a file per slider value | **done** — the TIFF is written after the cancellation guard, so a superseded white-balance value never writes one |
@@ -138,6 +138,11 @@ Whatever is chosen, check it at all three window shapes with
 `Tools/capture-live.sh` — the traffic lights are drawn by the window server
 and do not appear in `Tools/snapshot.sh` output at all, which is why the
 collision survived every capture until the app was run for real.
+
+**Taken instead (2026-09-09): a 32 pt strip reserved at the top**, so the
+buttons sit on the ground. The recommended header-row shift cleared the glyphs
+but a live capture still showed the buttons painted on the card, which reads
+as the same collision. See §0.
 
 ---
 

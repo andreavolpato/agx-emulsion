@@ -59,20 +59,20 @@ enum Theme {
         static let filmstripHeight: CGFloat = 125
         /// Well inset from the card edge (36.2 − 17.9 → 9).
         static let wellInset: CGFloat = 9
-        /// Leading inset for the left panel's header row.
+        /// Height reserved above the cards for the window's traffic lights.
         ///
-        /// `.windowStyle(.hiddenTitleBar)` floats the three window buttons
-        /// over the top-left corner of the left card: measured x 10–57 pt,
-        /// y 5–20 pt on `design/snapshots/live-window.png`. The card starts at
-        /// x 9, so the first glyph must begin at x ≥ 78 — 69 pt inside the
-        /// card. This is the one place the built interface deliberately
-        /// departs from the drawing, which puts the import glyph at x 12;
-        /// HANDOFF-FRONTEND-POLISH §1 chose that over inset rows or moving
-        /// import/export into the top bar, because it costs no vertical space
-        /// and no card geometry. The window server draws the buttons, so no
-        /// offscreen capture (`Tools/snapshot.sh`) can see the collision this
-        /// avoids — `Tools/capture-live.sh` is the check.
-        static let panelHeaderLeading: CGFloat = 70
+        /// `.windowStyle(.hiddenTitleBar)` does not remove the three window
+        /// buttons; it floats them over the content. The drawing has no window
+        /// chrome, so the first build put them on the left card's header, in
+        /// the same row as import and export. Shifting the header row right
+        /// cleared the *glyphs* but left the buttons painted on the card,
+        /// which still reads as a collision. Reserving a strip at the top puts
+        /// them on the ground instead. Measured button extent on this machine:
+        /// x 10–57, y 5–26 pt; the strip is 32, so the card starts 6 pt clear.
+        /// The cost is 25 pt of card height (the drawing's own 7 pt top margin
+        /// becomes 32) and nothing else — the cards stay aligned with each
+        /// other and with the drawing's widths, gutters and radius.
+        static let titleBarHeight: CGFloat = 32
         /// Text inset from the well edge (label x 62 → 31, well x 18 → 13).
         static let wellPadding: CGFloat = 13
         /// Section header height and the gap wells keep from headers.
