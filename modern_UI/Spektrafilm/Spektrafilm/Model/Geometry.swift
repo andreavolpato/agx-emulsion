@@ -378,6 +378,37 @@ struct Geometry: Codable, Equatable, Sendable {
                        y: c.y + (px * sa + py * ca) / h)
     }
 
+    /// The inverse of `sourcePoint(forOutput:imageSize:)`: where a point on
+    /// the source appears in the output.
+    ///
+    /// Needed because masks are anchored to the **source** — a mask stays on
+    /// the face when you re-crop, which is what a mask anchored to the output
+    /// would not do — while the canvas shows the output. Anything that draws
+    /// a mask handle goes through here.
+    func outputPoint(forSource p: CGPoint, imageSize: CGSize) -> CGPoint {
+        let w = max(imageSize.width, 1), h = max(imageSize.height, 1)
+        let c = centre
+        // 1. undo the rotation about the crop's centre, in pixels
+        let dx = (p.x - c.x) * w, dy = (p.y - c.y) * h
+        let a = -angle * .pi / 180
+        let ca = cos(a), sa = sin(a)
+        let px = dx * ca - dy * sa, py = dx * sa + dy * ca
+        // 2. crop-local → 0…1 across the crop
+        var u = CGPoint(x: px / (crop.width * w) + 0.5, y: py / (crop.height * h) + 0.5)
+        // 3. undo the quarter turns — the inverse of turning by k is turning
+        //    by 4 − k, in the same forward form.
+        switch (4 - (((quarterTurns % 4) + 4) % 4)) % 4 {
+        case 1: u = CGPoint(x: u.y, y: 1 - u.x)
+        case 2: u = CGPoint(x: 1 - u.x, y: 1 - u.y)
+        case 3: u = CGPoint(x: 1 - u.y, y: u.x)
+        default: break
+        }
+        // 4. undo the flips
+        if flipH { u.x = 1 - u.x }
+        if flipV { u.y = 1 - u.y }
+        return u
+    }
+
     // MARK: the uniform the shader gets
     //
     // Packed so the kernel does no trigonometry per pixel: the rotation is

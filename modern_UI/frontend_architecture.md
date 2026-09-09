@@ -155,9 +155,17 @@ The panel a control sits in *is* its layer, and that is the whole rule.
   `layer2` compute kernel in under a millisecond, reaching no service at all.
   The bypass switch in the right header shows the pure simulation.
 
-There is **no mask interface**. The drawing has none and none was built; the
-proposed section sits below Enlarger in the left panel — see
-`../HANDOFF-MASKS.md` §3.
+**Masks are in the right panel**, and that is a reversal of
+`../HANDOFF-MASKS.md` §3.1, which argued for the left. That argument followed
+from the dodge-and-burn model — a mask was a value in stops, whose correct
+application point is the enlarger, which is Layer 1. The user rejected that
+model in favour of Lightroom's, where a mask carries a *set of adjustments*.
+That makes masking Layer 2 by construction: it runs in the `layer2` kernel,
+costs under a millisecond, and reaches no service. The panel a control sits in
+is its layer, and that rule outranks the earlier argument for breaking it.
+Selecting a mask opens a **sublayer** inside the section — inset, with an
+accent rail — because the local sliders are otherwise identical to the global
+ones two sections above, and that is the one way this interface could mislead.
 
 Two controls break the panel rule and say so in their own comments:
 **Vignetting** (Layer 2, but placed in Camera where a photographer looks for
@@ -243,6 +251,34 @@ tool re-expresses it against the crop and refits. `Renderer.logicalSize(forSourc
 is the one place that decision is made. The detail tier follows the *cropped*
 long edge, so a 20 % crop of a 45 MP frame no longer escalates to a
 full-resolution render for detail the crop threw away.
+
+### Masks
+
+A mask is a **region plus its own adjustments** (`Model/Mask.swift`). A region
+is a union of `add` components minus `subtract` components — "the sky, minus
+the trees" is two components in one mask — and the first component is always
+additive because there is nothing to subtract from yet. Four kinds ship:
+linear gradient, radial gradient, luminance range and colour range. All four
+are **closed-form**, so coverage is evaluated per pixel from parameters at
+whatever resolution the canvas is showing: a radial is exact at 400 % zoom and
+costs no memory at any tier. `brush` exists in the model and in the shader as
+component kind 4, with `MaskUniform.rasterSlice` and a texture-array binding
+waiting for it, and is deliberately absent from the add menu until something
+rasterises strokes.
+
+A mask's tone controls are the **same** controls, the same ranges and the same
+arithmetic as the global panel's — `Layer2Uniforms.tone` is one function with
+two callers — so "+1 stop" means one stop wherever it was typed. What a mask
+does not carry is as deliberate: no curves, no colour balance, no vignette. A
+curve is a global statement about a tone scale and a vignette is a lens.
+
+Coverage is computed against the print *before* the global adjustments, so a
+luminance- or colour-range mask selects what the photograph has in it rather
+than what the exposure slider just did to it. Masks are anchored to the
+**source**, not the crop, so re-cropping leaves a mask on the face; the canvas
+shows the crop, so every handle goes source → output → view through
+`Geometry.outputPoint(forSource:imageSize:)`. Eight masks, six components
+each, one uniform buffer, no allocation.
 
 ### Browse and Print
 
@@ -346,6 +382,8 @@ Model/Params.swift           Layer 1, mirrors service/schema.py
 Model/Adjustments.swift      Layer 2 + the shader uniform block
 Model/CurveMath.swift        monotone cubic, no view code
 Model/Geometry.swift         the oriented crop, straighten, turns and flips
+Model/Mask.swift             masks: components, per-mask adjustments, uniforms
+Canvas/MaskOverlay.swift     the selected mask's axis, ellipse and grips
 Model/Sidecar.swift          <image>.spektra.json (schema 3)
 Canvas/CropOverlay.swift     handles, thirds grid, straighten line
 Model/StockCatalog.swift     Resources/StockCatalog.json

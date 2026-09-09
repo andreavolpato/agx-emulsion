@@ -70,6 +70,135 @@ final class Session: CanvasHost {
     /// The live tier's pixel size, which is what the geometry is normalised
     /// against. Zero before the first image lands.
     var sourceImageSize: CGSize { renderer.sourceSize ?? .zero }
+
+    // MARK: masks (蒙版) — Layer 2, local
+    //
+    // A mask is a region plus its own adjustments (`Model/Mask.swift`), so it
+    // runs in the same kernel the right panel does and reaches no service.
+    // Everything here is one write path: change the list, repack, redraw.
+
+    var masks: [EditMask] {
+        get { sidecar.masks }
+        set { guard newValue != sidecar.masks else { return }
+              pushUndo()
+              sidecar.masks = newValue
+              syncMasks()
+              scheduleSave() }
+    }
+    /// The mask being edited. Its region is tinted red on the canvas (unless
+    /// the overlay is off) and its handles are draggable.
+    var selectedMaskID: UUID? { didSet { guard oldValue != selectedMaskID else { return }; syncMasks() } }
+    /// The red coverage tint. Every editor has one and every editor's users
+    /// turn it off, so it is a toggle rather than a mode.
+    var maskOverlayVisible = true { didSet { guard oldValue != maskOverlayVisible else { return }; syncMasks() } }
+    /// The colour-range component waiting for an eyedropper click, if any.
+    var maskColorPick: UUID?
+
+    var selectedMask: EditMask? {
+        get { masks.first { $0.id == selectedMaskID } }
+        set {
+            guard let newValue, let i = masks.firstIndex(where: { $0.id == newValue.id }) else { return }
+            var list = masks; list[i] = newValue; masks = list
+        }
+    }
+
+    /// Repack for the kernel. Disabled and empty masks are dropped here
+    /// rather than branched on per pixel, so the shader's loop is only over
+    /// masks that can actually do something.
+    private func syncMasks() {
+        let live = masks.filter { $0.enabled && !$0.isEmpty }.prefix(EditMask.maxCount)
+        renderer.masks = live.map { $0.uniform() }
+        renderer.maskOverlay = maskOverlayVisible
+            ? Int32(live.firstIndex { $0.id == selectedMaskID }.map(Int32.init) ?? -1)
+            : -1
+        renderer.needsDraw?()
+    }
+
+    /// The draggable grips on the selected mask's geometry, in
+    /// source-normalised coordinates. `CanvasNSView` hit-tests these and
+    /// `MaskOverlay` draws them, so the two cannot disagree about where a
+    /// grip is.
+    var maskHandles: [MaskHandle] {
+        guard let m = selectedMask, m.enabled, sourceImageSize.width > 1 else { return [] }
+        let size = sourceImageSize
+        return m.components.flatMap { c -> [MaskHandle] in
+            switch c.kind {
+            case .linearGradient:
+                [MaskHandle(component: c.id, role: .a, position: c.a),
+                 MaskHandle(component: c.id, role: .b, position: c.b)]
+            case .radialGradient:
+                [MaskHandle(component: c.id, role: .centre, position: c.a),
+                 MaskHandle(component: c.id, role: .radiusX, position: MaskGeometry.point(on: c, at: 0, imageSize: size)),
+                 MaskHandle(component: c.id, role: .radiusY, position: MaskGeometry.point(on: c, at: .pi / 2, imageSize: size)),
+                 MaskHandle(component: c.id, role: .rotate, position: MaskGeometry.point(on: c, at: 0, scale: 1.3, imageSize: size))]
+            default: []
+            }
+        }
+    }
+
+    /// Apply a grip drag. `n` is where the pointer is, source-normalised.
+    func maskHandleDragged(_ h: MaskHandle, to n: CGPoint) {
+        guard var m = selectedMask, let i = m.components.firstIndex(where: { $0.id == h.component }) else { return }
+        var c = m.components[i]
+        let size = sourceImageSize
+        // Long-edge units, matching `toLongEdge` in the shader — the radii
+        // are in them, so the arithmetic has to be too or a drag on a 3:2
+        // frame resizes the wrong axis.
+        let long = max(size.width, size.height)
+        let sx = size.width / long, sy = size.height / long
+        switch h.role {
+        case .a: c.a = n
+        case .b: c.b = n
+        case .centre:
+            let d = CGSize(width: n.x - c.a.x, height: n.y - c.a.y)
+            c.a = n
+            // A linear component in the same mask does not move with a
+            // radial's centre, but a radial's own geometry is its centre, so
+            // there is nothing else to carry.
+            _ = d
+        case .radiusX, .radiusY, .rotate:
+            let dx = (n.x - c.a.x) * sx, dy = (n.y - c.a.y) * sy
+            if h.role == .rotate {
+                c.angle = atan2(dy, dx) * 180 / .pi
+            } else {
+                let a = c.angle * .pi / 180
+                let ex = dx * cos(a) + dy * sin(a)
+                let ey = -dx * sin(a) + dy * cos(a)
+                if h.role == .radiusX { c.radii.width = max(abs(ex), 0.01) }
+                else { c.radii.height = max(abs(ey), 0.01) }
+            }
+        }
+        m.components[i] = c
+        selectedMask = m
+    }
+
+    func addMask(_ kind: MaskComponentKind) {
+        guard masks.count < EditMask.maxCount else {
+            lastError = "Eight masks is the limit."
+            return
+        }
+        var m = EditMask.make(kind)
+        // Names repeat in Lightroom too, but a number is worth more than a
+        // second "Radial Gradient" in the list.
+        let n = masks.filter { $0.name.hasPrefix(kind.label) }.count
+        if n > 0 { m.name = "\(kind.label) \(n + 1)" }
+        masks.append(m)
+        selectedMaskID = m.id
+    }
+
+    func deleteMask(_ id: UUID) {
+        masks.removeAll { $0.id == id }
+        if selectedMaskID == id { selectedMaskID = masks.last?.id }
+    }
+
+    func duplicateMask(_ id: UUID) {
+        guard masks.count < EditMask.maxCount, var m = masks.first(where: { $0.id == id }) else { return }
+        m.id = UUID()
+        m.name += " copy"
+        m.components = m.components.map { var c = $0; c.id = UUID(); return c }
+        masks.append(m)
+        selectedMaskID = m.id
+    }
     private(set) var decoded: DecodedImage?
     /// The source's native long edge. The escalation decision is about the
     /// *file's* resolution, not the live tier's 1600 px: a 45 MP frame needs a
@@ -107,7 +236,7 @@ final class Session: CanvasHost {
     private(set) var straightenPreview: StraightenLine?
     var curvePickerActive = false
     var wbPickerActive = false
-    var pickerActive: Bool { curvePickerActive || wbPickerActive }
+    var pickerActive: Bool { curvePickerActive || wbPickerActive || maskColorPick != nil }
     var zoomPercent = 100
     var isFit = true
     /// Mirrors `Renderer.showOriginal` so the canvas badge can react: the
@@ -312,6 +441,8 @@ final class Session: CanvasHost {
         renderer.layer2 = sidecar.adjustments.uniforms
         renderer.setCurves(sidecar.adjustments.curves)
         renderer.geometry = sidecar.geometry
+        selectedMaskID = sidecar.masks.first?.id
+        syncMasks()
         decoded = nil
         exif = EXIFReadout.read(url)
         stockWarning = nil
@@ -580,6 +711,17 @@ final class Session: CanvasHost {
     func picked(normalised n: CGPoint) {
         if wbPickerActive { wbPickerActive = false; pickNeutral(at: n) }
         else if curvePickerActive { curvePickerActive = false; addCurvePoint(at: n) }
+        else if let id = maskColorPick { maskColorPick = nil; pickMaskColor(id, at: n) }
+    }
+
+    /// Sample the print under the cursor into a colour-range component. Read
+    /// from the *base* texture — the print before Layer 2 — because that is
+    /// what the shader's coverage test compares against.
+    private func pickMaskColor(_ component: UUID, at n: CGPoint) {
+        guard let base = renderer.base, let rgb = Session.sample(base, at: n),
+              var m = selectedMask, let i = m.components.firstIndex(where: { $0.id == component }) else { return }
+        m.components[i].color = SIMD3<Double>(Double(rgb.x), Double(rgb.y), Double(rgb.z))
+        selectedMask = m
     }
     func geometryChanged(_ g: Geometry) { geometry = g }
     func straightenPreview(_ line: StraightenLine?) { straightenPreview = line }
@@ -820,6 +962,8 @@ final class Session: CanvasHost {
         renderer.layer2 = previous.adjustments.uniforms
         renderer.setCurves(previous.adjustments.curves)
         renderer.geometry = previous.geometry
+        selectedMaskID = previous.masks.first { $0.id == selectedMaskID }?.id ?? previous.masks.last?.id
+        syncMasks()
         if current.decode != previous.decode {
             previewSoft = true
             scheduleReopen()

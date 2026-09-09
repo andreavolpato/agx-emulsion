@@ -17,6 +17,7 @@ struct RightPanel: View {
                     ExposureSection(session: session)
                     CurveSection(session: session)
                     ColorBalanceSection(session: session)
+                    MasksSection(session: session)
                 }
                 .padding(.top, 4)
             }

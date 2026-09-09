@@ -32,6 +32,10 @@ protocol CanvasHost: AnyObject {
     /// The line being drawn for a ⌘-drag straighten, or nil. Published so
     /// `CropOverlay` can draw it; the gesture itself stays in the view.
     func straightenPreview(_ line: StraightenLine?)
+    /// The selected mask's grips, source-normalised. Empty unless a mask with
+    /// draggable geometry is selected.
+    var maskHandles: [MaskHandle] { get }
+    func maskHandleDragged(_ handle: MaskHandle, to normalised: CGPoint)
     func toggledOriginal(_ on: Bool)
     func contextMenu() -> NSMenu?
     func hovered(normalised: CGPoint?)
@@ -50,6 +54,11 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
     /// dragged; the rest carry what the drag needs to be idempotent — every
     /// mouse move recomputes from `origin` rather than accumulating, so a
     /// gesture that hits the frame edge and comes back does not drift.
+    /// A mask grip being dragged. Masks are edited with the *select* tool,
+    /// the way Lightroom does it: a grip takes the drag, and anywhere else
+    /// still pans.
+    private var maskDrag: MaskHandle?
+
     private enum CropDrag {
         case handle(CropHandle, origin: Geometry, grabOffset: CGSize)
         case draw(from: CGPoint)
@@ -197,8 +206,30 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
                 cropDrag = .draw(from: n)
             }
         default:
+            // A mask grip claims the drag before the pan does, and only
+            // within the same 10 pt it is drawn inside.
+            if let h = maskHandle(near: p) { maskDrag = h; return }
             dragStart = p
         }
+    }
+
+    /// The mask grip under a view point, if any. Positions come from the
+    /// host, so this and `MaskOverlay` cannot disagree about where a grip is.
+    private func maskHandle(near p: CGPoint) -> MaskHandle? {
+        guard let host, let renderer else { return nil }
+        let handles = host.maskHandles
+        guard !handles.isEmpty else { return nil }
+        let size = host.sourceImageSize
+        let v = renderer.viewport
+        var best: (MaskHandle, CGFloat)?
+        for h in handles {
+            let o = host.geometry.outputPoint(forSource: h.position, imageSize: size)
+            let q = CGPoint(x: v.offset.x + o.x * v.image.width * v.scale,
+                            y: v.offset.y + o.y * v.image.height * v.scale)
+            let d = hypot(q.x - p.x, q.y - p.y)
+            if d <= CanvasNSView.handleGrab, best == nil || d < best!.1 { best = (h, d) }
+        }
+        return best?.0
     }
 
     /// Radius of a crop grip's grab area, in view points.
@@ -207,6 +238,14 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
     override func mouseDragged(with e: NSEvent) {
         guard let renderer, let host else { return }
         let p = local(e)
+        if let h = maskDrag {
+            // Through the crop: the grip is anchored to the source and the
+            // canvas is showing the output.
+            if let out = renderer.viewport.normalised(atView: p) {
+                host.maskHandleDragged(h, to: host.geometry.sourcePoint(forOutput: out, imageSize: host.sourceImageSize))
+            }
+            return
+        }
         if let drag = cropDrag, host.tool == .crop {
             // Clamped rather than dropped: a drag that leaves the image still
             // has a meaning, and `Geometry` fits whatever comes out of it.
@@ -256,6 +295,7 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
 
     override func mouseUp(with e: NSEvent) {
         dragStart = nil
+        maskDrag = nil
         if case .straighten(let from, let origin) = cropDrag, let host, let renderer {
             let n = renderer.viewport.normalised(atView: local(e)) ?? from
             if let deg = Geometry.straightenAngle(from: from, to: n, in: host.sourceImageSize) {

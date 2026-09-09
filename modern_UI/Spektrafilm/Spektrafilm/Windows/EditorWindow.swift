@@ -96,6 +96,8 @@ struct CanvasArea: View {
             // the dimming; this does the lines, which want to stay crisp.
             if session.tool == .crop && !snapshotMode {
                 CropOverlay(session: session)
+            } else if !snapshotMode && session.selectedMask != nil {
+                MaskOverlay(session: session)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -136,28 +138,40 @@ struct CanvasArea: View {
 
 /// Snapshot stand-in: the renderer draws offscreen into an image at the
 /// canvas's real size, so a capture shows the real render path.
+///
+/// It takes over `Renderer.needsDraw`, which in the running app is the
+/// `MTKView`'s `scheduleDraw`. That is the whole point: the previous version
+/// re-rendered on a hand-written list of properties — `previewSoft`,
+/// `histogram`, `zoomPercent`, `detailTier`, `detailPending` — and so was
+/// blind to every state that invalidates the canvas without touching one of
+/// them. Masks were the case that found it: `--mask` captured an image with
+/// no mask in it, and the feature was fine. Anything the renderer considers a
+/// reason to redraw is now a reason to re-capture, with no list to maintain.
 struct SnapshotCanvas: View {
     @Bindable var session: Session
     @State private var image: CGImage?
+    @State private var revision = 0
+    @State private var rendering = false
 
     var body: some View {
         GeometryReader { geo in
             Group {
                 if let image { Image(decorative: image, scale: 2).resizable() } else { Theme.ground }
             }
+            .onAppear { session.renderer.needsDraw = { revision &+= 1 } }
             .onChange(of: geo.size, initial: true) { _, size in render(size) }
-            .onChange(of: session.previewSoft) { _, _ in render(geo.size) }
-            .onChange(of: session.histogram) { _, _ in render(geo.size) }
-            // The stand-in has to follow the same state the real canvas does,
-            // or a capture of the detail tier shows the live tier.
-            .onChange(of: session.zoomPercent) { _, _ in render(geo.size) }
-            .onChange(of: session.detailTier) { _, _ in render(geo.size) }
-            .onChange(of: session.detailPending) { _, _ in render(geo.size) }
+            .onChange(of: revision) { _, _ in render(geo.size) }
         }
     }
 
     private func render(_ size: CGSize) {
         guard size.width > 1, size.height > 1 else { return }
+        // A render can invalidate the canvas again (the detail tier swaps a
+        // texture in), and that arrives here as another revision. One level
+        // is enough; re-entering would be a loop.
+        guard !rendering else { return }
+        rendering = true
+        defer { rendering = false }
         session.renderer.viewport.backingScale = 2
         session.renderer.viewport.resize(viewport: size)
         session.viewportChanged()

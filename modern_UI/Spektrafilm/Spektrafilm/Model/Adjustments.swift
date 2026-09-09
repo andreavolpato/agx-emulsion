@@ -70,21 +70,17 @@ struct Adjustments: Codable, Equatable, Sendable {
     /// The per-frame uniform block the shader reads. Computed on the CPU once
     /// per change, not per pixel.
     var uniforms: Layer2Uniforms {
-        var u = Layer2Uniforms()
+        // The tone block is `Layer2Uniforms.tone` — the *same* function every
+        // mask uses (`Model/Mask.swift`). Temperature and tint become channel
+        // gains there, ±100 → roughly ±0.18 on the opposing channels, which
+        // is the visual range of a scan white-balance correction rather than
+        // a scene one. Sharing it is what makes "+1 stop" mean one stop
+        // whether the slider was the global one or a mask's.
+        var u = Layer2Uniforms.tone(temperature: temperature, tint: tint, exposure: exposure,
+                                    contrast: contrast, brightness: brightness, saturation: saturation,
+                                    highlights: highlights, shadows: shadows,
+                                    blackPoint: blackPoint, whitePoint: whitePoint)
         u.enabled = enabled ? 1 : 0
-        // Temperature/tint as channel gains. ±100 → roughly ±0.18 on the
-        // opposing channels, which matches the visual range of a scan WB
-        // correction rather than a scene one.
-        let t = Float(temperature) / 100, g = Float(tint) / 100
-        u.wbGain = SIMD3<Float>(1 + 0.18 * t, 1 - 0.12 * g, 1 - 0.18 * t)
-        u.exposureGain = Float(pow(2.0, exposure))
-        u.contrast = Float(contrast) / 100
-        u.brightness = Float(brightness) / 100
-        u.saturation = 1 + Float(saturation) / 100
-        u.highlights = Float(highlights) / 100
-        u.shadows = Float(shadows) / 100
-        u.blackPoint = Float(blackPoint) / 100
-        u.whitePoint = Float(whitePoint) / 100
         u.cbMaster = colorBalance.master.rgbOffset
         u.cbShadows = colorBalance.shadows.rgbOffset
         u.cbMidtones = colorBalance.midtones.rgbOffset

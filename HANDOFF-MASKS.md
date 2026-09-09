@@ -2,12 +2,17 @@
 
 | | |
 |---|---|
-| **Status** | Designed in the frontend spec, drawn nowhere, built not at all. The sidecar has no field for it, the shader has no stage for it, and the engine has no surface for the physically correct version. |
+| **Status** | **Superseded on 2026-09-10.** The user rejected §1's dodge-and-burn model on use — "I don't really want the 1-1 digital mimic of darkroom logic with actual dodge and burn, this is too fucking not smooth user experience" — and asked for Lightroom's model instead: a mask is a region that carries its own set of adjustments. What shipped is `Model/Mask.swift`, `MasksSection`, `MaskOverlay` and the mask stage in the `layer2` kernel; see `modern_UI/frontend_architecture.md` §"Masks". This document is kept for §2 (the Vision API sequence, still correct and still unbuilt), §4.2 and §4.4 (rasterisation and export resolution, still the right advice for the brush and Vision components), and for the record of what was decided against and why. |
 | **Why it is not just plumbing** | The drawing this frontend was built from has **no mask interface in it**. Everything else in the app could be measured against `reference_layout/`; this has to be designed. That is the substance of this task, and §3 is a proposal, not a specification. |
 | **Read first** | `modern_UI/frontend_architecture.md` for the layout and the two-layer rule. The mask model itself is `modern_UI/SPEC-spektrafilm-desktop-frontend.md` §5.2 item 3 and §1.5 (recover it from git — it is deleted in the working tree). |
 | **Date** | 2026-09-08 |
 
 ---
+
+> **Superseded.** §1, §3 and §5 describe a design that was not built. §2, §4.2
+> and §4.4 are still live guidance for the components that remain unbuilt
+> (brush, Vision subject/people). The decision that overrode this document is
+> recorded in the table above and argued in `frontend_architecture.md`.
 
 ## 1. What a mask is here, and what it is not
 

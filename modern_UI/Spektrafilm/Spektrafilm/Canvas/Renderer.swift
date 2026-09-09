@@ -70,6 +70,11 @@ final class Renderer: NSObject {
     /// Shown instead of the adjusted image while Space is held.
     var original: MTLTexture?
     private var adjusted: MTLTexture?
+    /// Rasterised coverage for the mask kinds that cannot be closed-form.
+    /// Nothing writes it yet — brush and the Vision sources are the next
+    /// component kinds and this is the seam they land on
+    /// (`MaskComponentKind.isRaster`, `MaskUniform.rasterSlice`).
+    var maskRasters: MTLTexture?
     private var layer2Dirty = true
 
     var viewport = ViewportState()
@@ -103,6 +108,13 @@ final class Renderer: NSObject {
     /// and what `logicalSize(forSource:)` turns into the viewport's units.
     private(set) var sourceSize: CGSize?
     var layer2 = Layer2Uniforms() { didSet { layer2Dirty = true } }
+    /// The masks, already packed. Set from `Session` whenever the mask list
+    /// changes; at most `EditMask.maxCount`.
+    var masks: [MaskUniform] = [] { didSet { layer2Dirty = true; needsDraw?() } }
+    /// Index into `masks` of the one whose coverage is tinted red, or −1.
+    /// Only one at a time: every mask's coverage at once is a red picture
+    /// that says nothing about the one being edited.
+    var maskOverlay: Int32 = -1 { didSet { if oldValue != maskOverlay { layer2Dirty = true; needsDraw?() } } }
     var onHistogram: (@MainActor ([Float]) -> Void)?
     var needsDraw: (@MainActor () -> Void)?
     /// Fired whenever the renderer itself moves the viewport — which
@@ -236,14 +248,43 @@ final class Renderer: NSObject {
         return adjusted
     }
 
+    /// A 1×1×1 stand-in for the brush-raster array. Sampling an unbound
+    /// texture is undefined, and a mask made only of closed-form components
+    /// binds no raster — which is every mask today — so something has to be
+    /// there. One texel of zero costs nothing and removes the branch from the
+    /// binding code.
+    private lazy var emptyRasterArray: MTLTexture? = {
+        let d = MTLTextureDescriptor()
+        d.textureType = .type2DArray
+        d.pixelFormat = .r8Unorm
+        d.width = 1; d.height = 1; d.arrayLength = 1
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        return device.makeTexture(descriptor: d)
+    }()
+
     private func encodeLayer2(_ cb: MTLCommandBuffer, src: MTLTexture, dst: MTLTexture) {
         guard let enc = cb.makeComputeCommandEncoder() else { return }
         enc.setComputePipelineState(layer2Pipeline)
         enc.setTexture(src, index: 0)
         enc.setTexture(dst, index: 1)
         enc.setTexture(curveTable, index: 2)
+        enc.setTexture(maskRasters ?? emptyRasterArray, index: 3)
         var u = layer2
         enc.setBytes(&u, length: MemoryLayout<Layer2Uniforms>.stride, index: 0)
+        var list = Array(masks.prefix(EditMask.maxCount))
+        var count = UInt32(list.count)
+        var overlay = maskOverlay
+        if list.isEmpty {
+            // `setBytes` refuses a zero length, and the kernel reads nothing
+            // when the count is zero.
+            var dummy = MaskUniform()
+            enc.setBytes(&dummy, length: MemoryLayout<MaskUniform>.stride, index: 1)
+        } else {
+            enc.setBytes(&list, length: MemoryLayout<MaskUniform>.stride * list.count, index: 1)
+        }
+        enc.setBytes(&count, length: MemoryLayout<UInt32>.size, index: 2)
+        enc.setBytes(&overlay, length: MemoryLayout<Int32>.size, index: 3)
         let w = layer2Pipeline.threadExecutionWidth
         let h = max(1, layer2Pipeline.maxTotalThreadsPerThreadgroup / w)
         enc.dispatchThreads(MTLSize(width: dst.width, height: dst.height, depth: 1),

@@ -43,13 +43,16 @@ struct Sidecar: Codable, Equatable, Sendable {
     var adjustments = Adjustments.default
     /// Crop, straighten, quarter turns and flips (`Model/Geometry.swift`).
     var geometry = Geometry.default
+    /// Local adjustments (`Model/Mask.swift`). Layer 2, like the right panel
+    /// they live in.
+    var masks: [EditMask] = []
     /// The solve the service returned for this frame (EV, filter neutrals),
     /// kept so the UI can show the sliders as offsets from it.
     var solvedEV: Double?
     var state: FrameState = .unprocessed
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, decoder, decode, params, adjustments, geometry, solvedEV, state
+        case schemaVersion, decoder, decode, params, adjustments, geometry, masks, solvedEV, state
         /// Schema 2's field. Read, never written.
         case crop
     }
@@ -69,6 +72,7 @@ struct Sidecar: Codable, Equatable, Sendable {
         adjustments = try c.decodeIfPresent(Adjustments.self, forKey: .adjustments) ?? .default
         solvedEV = try c.decodeIfPresent(Double.self, forKey: .solvedEV)
         state = try c.decodeIfPresent(FrameState.self, forKey: .state) ?? .unprocessed
+        masks = try c.decodeIfPresent([EditMask].self, forKey: .masks) ?? []
         if let g = try c.decodeIfPresent(Geometry.self, forKey: .geometry) {
             geometry = g
         } else if let legacy = try c.decodeIfPresent(CropRect.self, forKey: .crop) {
@@ -89,6 +93,7 @@ struct Sidecar: Codable, Equatable, Sendable {
         try c.encode(params, forKey: .params)
         try c.encode(adjustments, forKey: .adjustments)
         try c.encode(geometry, forKey: .geometry)
+        if !masks.isEmpty { try c.encode(masks, forKey: .masks) }
         try c.encodeIfPresent(solvedEV, forKey: .solvedEV)
         try c.encode(state, forKey: .state)
     }

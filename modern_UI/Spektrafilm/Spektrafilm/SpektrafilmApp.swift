@@ -69,6 +69,23 @@ struct EditorCommands: Commands {
             Button("Previous") { session.selectRelative(-1) }.keyboardShortcut("[")
             Button("Next") { session.selectRelative(1) }.keyboardShortcut("]")
         }
+        CommandMenu("Mask") {
+            Button("Add Linear Gradient") { session.addMask(.linearGradient) }
+                .keyboardShortcut("m", modifiers: [.shift])
+            Button("Add Radial Gradient") { session.addMask(.radialGradient) }
+                .keyboardShortcut("m", modifiers: [.shift, .option])
+            Button("Add Luminance Range") { session.addMask(.luminanceRange) }
+            Button("Add Colour Range") { session.addMask(.colorRange) }
+            Divider()
+            Button("Show Mask Overlay") { session.maskOverlayVisible.toggle() }
+                .keyboardShortcut("o", modifiers: [.shift])
+            Button("Invert Mask") {
+                if var m = session.selectedMask { m.inverted.toggle(); session.selectedMask = m }
+            }.disabled(session.selectedMask == nil)
+            Divider()
+            Button("Delete Mask") { if let id = session.selectedMaskID { session.deleteMask(id) } }
+                .disabled(session.selectedMaskID == nil)
+        }
         CommandMenu("Crop") {
             Button("Rotate Left") { session.geometry = session.geometry.turned(by: -1) }
                 .keyboardShortcut("[", modifiers: [.command, .option])
@@ -100,6 +117,11 @@ struct SnapshotRequest {
     /// Unlike the canvas itself, this one *is* visible offscreen: the
     /// geometry is applied while sampling, and `renderOffscreen` samples.
     var geometry: Geometry?
+    /// `--mask kind,exposure[,overlay]` — add one mask before capturing, so
+    /// the mask path has a regression capture. Like the geometry, this one is
+    /// visible offscreen: it happens in the `layer2` kernel and
+    /// `renderOffscreen` runs it.
+    var mask: (kind: MaskComponentKind, exposure: Double, overlay: Bool)?
 
     static func parse(_ args: [String]) -> SnapshotRequest? {
         guard let i = args.firstIndex(of: "--snapshot"), args.count > i + 2 else { return nil }
@@ -109,6 +131,12 @@ struct SnapshotRequest {
         if let j = args.firstIndex(of: "--open"), args.count > j + 1 { r.open = URL(fileURLWithPath: args[j + 1]) }
         if let j = args.firstIndex(of: "--wait"), args.count > j + 1, let w = Double(args[j + 1]) { r.wait = w }
         if let j = args.firstIndex(of: "--zoom"), args.count > j + 1, let z = Double(args[j + 1]) { r.zoom = CGFloat(z) }
+        if let j = args.firstIndex(of: "--mask"), args.count > j + 1 {
+            let f = args[j + 1].split(separator: ",").map(String.init)
+            if let kind = MaskComponentKind(rawValue: f[0]) {
+                r.mask = (kind, f.count > 1 ? Double(f[1]) ?? -1 : -1, f.count > 2 && f[2] == "overlay")
+            }
+        }
         if let j = args.firstIndex(of: "--geometry"), args.count > j + 1 {
             let f = args[j + 1].split(separator: ",").compactMap { Double($0) }
             if f.count >= 5 {
@@ -204,6 +232,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     session.frameStates[sel] == .processed { break }
         }
         try? await Task.sleep(for: .milliseconds(400))
+        if let m = req.mask {
+            session.addMask(m.kind)
+            if var mask = session.selectedMask {
+                mask.adjustments.exposure = m.exposure
+                session.selectedMask = mask
+            }
+            session.maskOverlayVisible = m.overlay
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         if let g = req.geometry {
             session.geometry = g.fitted(in: session.sourceImageSize)
             try? await Task.sleep(for: .milliseconds(300))
