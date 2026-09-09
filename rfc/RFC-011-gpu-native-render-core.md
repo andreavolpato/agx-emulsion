@@ -450,3 +450,56 @@ three moments and tile invariance, the curve interpolator on the
 non-monotonic toe, per-node parity on a real frame against the bounds in §4,
 end-to-end dE2000 with a structure check, the harness's refusal of
 stochastic parameters, and grain skewness per density band.
+
+---
+
+## 9. Geometry at the head of the graph (contract §3.1, added 2026-09-10)
+
+The frontend's crop/straighten (`Model/Geometry.swift`, FE commit 18d55de)
+is an oriented rectangle: a normalised crop with a top-left origin, rotated
+about its own centre by a straighten angle that is rigid in *pixels*, then
+quarter turns, then flips. The engine now carries the same model
+(`utils/geometry.py`, `GeometryParams` on `io`, eight scalar transport
+fields) and applies it as `preprocess.geometry` immediately after
+`decode_input`:
+
+- **before auto-exposure**, so the meter reads the frame the user composed;
+- **before `crop_rescale`**, so every node after it pays only the crop's
+  share — at 0.99 s for the full frame that is now the largest proportional
+  win on the table;
+- with the film pixel pitch taken from the *uncropped* frame
+  (`ResizingService.source_long_edge`), because the negative's grain does
+  not get coarser when a user keeps less of it.
+
+`source_point` is a transliteration of `sourcePoint(forOutput:imageSize:)`
+and the sampler of `geometryResample` (pixel centres at (i + 0.5)/N,
+bilinear, clamp to edge; output size = round(crop × source), axes swapped for
+odd quarter turns). `tests/fixtures/geometry_pairs.json` freezes fifteen
+(output uv → source uv) pairs on the 8256×5504 frame for the five cases
+`GeometryTests.swift` uses, so either side can check the other without
+running its code. Quarter turns and flips are exact pixel permutations; an
+axis-aligned crop is an exact slice; the identity is pruned and the render
+is bit-identical to one without the node.
+
+On device the node is one gather kernel. A first version mapped
+coordinates in float32 and measured 1.2e-4 max abs against the float64
+reference on the real frame: a normalised uv on an 8 k-pixel frame carries
+only ~5e-4 px of position, and the pipeline amplifies that at hard edges into
+dE2000 max 2e-2 with visible edge structure in the map. The kernel now does
+the mapping in double-float (the same `DF_HEADER` the recursive Gaussian
+uses) in *pixel* units, and splits the sample position into an integer base
+and an exact fraction, so the position agrees with float64 to ~1e-7 px.
+The frontend's canvas and export kernels are float32 and keep the ~5e-4 px
+property; that is a preview-vs-engine difference of a two-thousandth of a
+pixel, not a disagreement about which pixels are in the picture.
+
+### 9.1 Measured, 45.75 MP source, 60 % × 66 % crop straightened by 7.5°
+
+`scripts/gpu_native/parity.py ... --geometry 0.2,0.15,0.6,0.66,7.5 --end-to-end`:
+
+| | |
+|---|---|
+| `preprocess.geometry` vs reference | max abs 1.2e-5, mean 2.0e-9 (max abs / max ref 1.5e-5) |
+| end-to-end dE2000 | mean 6.9e-5, p99 2.9e-4, max 1.5e-3; no structure (row/col profile 1.5 / 1.2, tile grid 0.45–1.67) |
+| full render, numba → Metal | 6.44 s → **0.41 s** (the crop is 40 % of the frame; the uncropped render is 0.99 s) |
+| the node itself | 2.04 s (NumPy gather) → 10 ms |
