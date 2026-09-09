@@ -22,8 +22,46 @@ struct Capabilities: Decodable, Sendable {
     let tiers: [String: Int?]
     let transportVersion: Int
     let schemaVersion: Int
+    let backend: Backend?
+
+    /// Which executor is actually rendering. The client had no way to ask
+    /// this and it cost real time: with the engine on a branch the app did
+    /// not have, every render ran on the CPU core and the only symptom was
+    /// that things felt slow. A number in a log is not a substitute for the
+    /// app knowing, so this is read at `open` and shown in the status bar.
+    struct Backend: Decodable, Sendable {
+        /// `"metal"` · `"mlx"` · `"cpu"` (contract §6, 2026-09-10).
+        let renderCore: String?
+        let gpu: String?
+        let gpuAvailable: Bool?
+        let workingPrecision: String?
+        /// Whether concurrent requests are safe. The client stays serial
+        /// regardless until `configure_transport` is opted into.
+        let concurrent: Bool?
+        enum CodingKeys: String, CodingKey {
+            case gpu, concurrent
+            case renderCore = "render_core", gpuAvailable = "gpu_available"
+            case workingPrecision = "working_precision"
+        }
+        /// What the status bar shows. `nil` from a service too old to report
+        /// one is not the same as "cpu", and saying so is the point.
+        var label: String {
+            switch renderCore {
+            case "metal": "Metal"
+            case "mlx": "MLX"
+            case "cpu": "CPU"
+            case let other?: other
+            case nil: "unreported"
+            }
+        }
+        /// True only when we know we are *not* on the GPU-native core. Drives
+        /// the warning, so a service that does not report the field is not
+        /// accused of anything.
+        var isSlowPath: Bool { renderCore == "cpu" || renderCore == "mlx" }
+    }
+
     enum CodingKeys: String, CodingKey {
-        case version, engine, tiers
+        case version, engine, tiers, backend
         case maxMP = "max_mp", transportVersion = "transport_version", schemaVersion = "schema_version"
     }
 }
@@ -39,6 +77,9 @@ struct OpenResponse: Decodable, Sendable {
     let meta: Meta
     let detectedInput: DetectedInput
     let params: [String: ParamValue]
+    /// `open` echoes the full capabilities block, so the client learns which
+    /// executor it got without a second round trip.
+    let capabilities: Capabilities?
     struct Meta: Decodable, Sendable { let width: Int, height: Int, megapixels: Double, source: String }
     struct DetectedInput: Decodable, Sendable {
         let inputColorSpace: String
@@ -50,7 +91,10 @@ struct OpenResponse: Decodable, Sendable {
             case inputColorSpaceSource = "input_color_space_source", rawEngine = "raw_engine"
         }
     }
-    enum CodingKeys: String, CodingKey { case sessionID = "session_id", meta, params, detectedInput = "detected_input" }
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id", meta, params, capabilities
+        case detectedInput = "detected_input"
+    }
 }
 
 struct SolveRequest: Encodable, Sendable {

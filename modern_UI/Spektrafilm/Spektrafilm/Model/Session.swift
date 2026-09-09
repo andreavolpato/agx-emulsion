@@ -234,6 +234,12 @@ final class Session: CanvasHost {
     private(set) var viewportSnapshot = ViewportState()
     /// The ⌘-drag straighten line, while one is being drawn.
     private(set) var straightenPreview: StraightenLine?
+    /// Which executor the service is rendering with, once `open` has said.
+    /// Shown in the status bar: "it feels slow" is not diagnosable without
+    /// it, and the app ran a whole session on the CPU core because nothing
+    /// asked.
+    private(set) var backend: Capabilities.Backend?
+    var renderCore: String? { backend?.renderCore }
     var curvePickerActive = false
     var wbPickerActive = false
     var pickerActive: Bool { curvePickerActive || wbPickerActive || maskColorPick != nil }
@@ -341,6 +347,33 @@ final class Session: CanvasHost {
         Task { await client.set(onTermination: { [weak self] reason in
             Task { @MainActor in self?.serviceReady = false; self?.status = reason; self?.lastError = reason }
         }) }
+        warmUp()
+    }
+
+    /// Start the service and pay for its imports before anyone asks it to do
+    /// something.
+    ///
+    /// `call` starts the process lazily, so the first request of the session
+    /// was always `open` — and it carried ~1.9 s of Python interpreter start
+    /// and module import (numpy, mlx, colour-science) on its back. Measured
+    /// through the app: `service.open` 4.5 s cold against 2.6 s for the same
+    /// call in a warm process. The app knows at launch that it is going to
+    /// need the service, so it should not make the user's first frame pay for
+    /// finding that out.
+    ///
+    /// `capabilities` is the request to warm with: it touches the import path
+    /// and the Metal device, and it is how the client learns which executor
+    /// it got — so the status bar can say "Metal" before a frame is open
+    /// rather than after the first render.
+    private func warmUp() {
+        Task { [weak self] in
+            guard let self else { return }
+            let caps: Capabilities? = try? await self.client.call(.capabilities, as: Capabilities.self)
+            guard let caps else { return }
+            self.backend = caps.backend
+            self.serviceReady = true
+            canvasLog("service warm · core=\(caps.backend?.renderCore ?? "?") · engine \(caps.engine)")
+        }
     }
 
     // MARK: - library
@@ -463,8 +496,35 @@ final class Session: CanvasHost {
 
     // MARK: - the load pipeline
 
+    /// Wall-clock for one stage of the open path, logged under
+    /// `SPEKTRAFILM_CANVAS_LOG=1`.
+    ///
+    /// This exists because "opening a frame takes eight seconds" is not
+    /// actionable and points at the wrong half of the app. The render service
+    /// is the visible, instrumented part — it reports `elapsed_ms` and the
+    /// status bar shows it — so a slow open reads as a slow *render*. It was
+    /// not: with the GPU-native core a live reprint is ~20 ms and the eight
+    /// seconds are the client's own RAW decode and the 363 MB TIFF it writes
+    /// to hand the frame over. One line per stage is the difference between
+    /// knowing that and guessing it.
+    struct LoadClock {
+        private var last = Date()
+        private var total = Date()
+        private var parts: [String] = []
+        mutating func lap(_ name: String) {
+            let now = Date()
+            parts.append("\(name) \(Int(now.timeIntervalSince(last) * 1000))")
+            last = now
+        }
+        func summary() -> String {
+            "open path (ms): " + parts.joined(separator: " · ") +
+            " · TOTAL \(Int(Date().timeIntervalSince(total) * 1000))"
+        }
+    }
+
     private func load(_ url: URL) async {
         status = "Decoding \(url.lastPathComponent)…"
+        var clock = LoadClock()
         let settings = sidecar.decode
         let device = renderer.device
         let liveEdge = Session.liveEdge
@@ -474,10 +534,12 @@ final class Session: CanvasHost {
         let decodedImage: DecodedImage? = await Task.detached(priority: .userInitiated) {
             try? ImageDecoder.decode(url, settings: settings)
         }.value
+        clock.lap("decode")
         guard !Task.isCancelled, selection == url, let d = decodedImage else { return }
         let preview: TextureBox = await Task.detached(priority: .userInitiated) {
             TextureBox(ImageDecoder.makePreviewTexture(d, device: device, maxEdge: liveEdge))
         }.value
+        clock.lap("preview-texture")
         if let tex = preview.texture, !Task.isCancelled, selection == url {
             renderer.store.setSource(tex, for: url)
             renderer.original = tex
@@ -496,13 +558,15 @@ final class Session: CanvasHost {
         let tiff: URL? = await Task.detached(priority: .userInitiated) {
             try? Session.linearTIFF(for: d, settings: settings)
         }.value
+        clock.lap("linear-tiff")
         guard !Task.isCancelled, selection == url, let tiff else {
             status = "Could not decode \(url.lastPathComponent)."; return
         }
-        await openInService(tiff: tiff, for: url)
+        await openInService(tiff: tiff, for: url, clock: &clock)
     }
 
-    private func openInService(tiff: URL, for url: URL) async {
+    private func openInService(tiff: URL, for url: URL, clock: inout LoadClock) async {
+        var clock = clock          // `inout` cannot be held across an await
         status = "Developing…"
         busy = true
         startClock()
@@ -510,6 +574,8 @@ final class Session: CanvasHost {
         do {
             let req = OpenRequest(imagePath: tiff.path, paramsDelta: sidecar.params.fullDelta)
             let r: OpenResponse = try await client.call(.open, req)
+            clock.lap("service.open")
+            backend = r.capabilities?.backend
             guard selection == url, !Task.isCancelled else { return }
             serviceReady = true
             serviceSessionID = r.sessionID
@@ -525,10 +591,18 @@ final class Session: CanvasHost {
                 sidecar.solvedEV = ev
                 scheduleSave()
             }
+            clock.lap("solve")
             let rr: RenderResponse = try await client.call(.reprint, RenderRequest(sessionID: r.sessionID))
+            clock.lap("reprint")
+            canvasLog(clock.summary() + "  ·  core=\(renderCore ?? "?")")
             guard selection == url else { return }
             applyRender(rr, generation: serviceGeneration)
             statusBase = "\(url.lastPathComponent)  ·  \(r.meta.width)×\(r.meta.height)  ·  \(r.detectedInput.inputColorSpace)"
+            if let b = backend, b.isSlowPath {
+                // Loud, because the symptom is otherwise just "slow" and the
+                // cause is usually that the engine is not in this checkout.
+                stockWarning = "Rendering on the \(b.label) path, not the GPU core — see HANDOFF-GPU-WIRING.md."
+            }
             status = "\(statusBase!)  ·  \(rr.reprint ? "reprint" : "render") \(Int(rr.elapsedMs)) ms"
             // The user may have moved a slider while the film side was running.
             scheduler.request(sidecar.params)
