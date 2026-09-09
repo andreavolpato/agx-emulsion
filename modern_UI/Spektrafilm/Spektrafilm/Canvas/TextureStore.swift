@@ -18,9 +18,37 @@
 //
 //  The detail texture is deliberately *not* kept per frame: at the full tier
 //  one is 360 MB, so eight would be 2.9 GB.
+//
+//  The one detail slot is **ranked and stamped**, and both matter:
+//
+//  - **Ranked.** A `full` render contains everything a `preview` render does,
+//    so a lookup asks for "this tier *or sharper*". Without that, zooming
+//    200 % → 120 % asked for `preview`, missed, spent 2.75 s re-rendering
+//    detail the resident texture already had — and the result then evicted
+//    the `full` one, so zooming back cost another 6–17 s. The slot only ever
+//    moves *up* within one frame and one set of parameters.
+//  - **Stamped** with the parameters the service rendered it from, so
+//    validity is data rather than timing. An undo, or a slider dragged back
+//    to where it was, makes the resident render correct again and it is
+//    shown instead of re-rendered.
+//
+//  Showing a sharper texture than the zoom asked for is free and correct:
+//  `canvasFragment` picks its sampler from the *texture* scale, so a native
+//  texture drawn at 120 % minifies with `filter::linear` exactly as a 3400 px
+//  one would.
 
 import Foundation
 import Metal
+
+/// One resident higher-resolution render: which frame, which tier, which
+/// parameters made it, and how sharp it is relative to the other tiers.
+struct DetailEntry: @unchecked Sendable {
+    let url: URL
+    let tier: String
+    let rank: Int
+    let stamp: String
+    let texture: MTLTexture
+}
 
 final class TextureStore: @unchecked Sendable {
     let device: MTLDevice
@@ -29,7 +57,11 @@ final class TextureStore: @unchecked Sendable {
     /// One higher-resolution print, for the current frame only. A full-res
     /// 45 MP rgba16 texture is 360 MB, so eight of them is not an option the
     /// way eight live-tier prints (14 MB each) is.
-    private var detail: (url: URL, tier: String, texture: MTLTexture)?
+    ///
+    /// `rank` orders the tiers (live 0 · preview 1 · full 2) and `stamp` is
+    /// the Layer 1 parameters it was rendered from. Together they are what
+    /// makes a lookup a cache hit rather than a coincidence.
+    private var detail: DetailEntry?
     private var order: [URL] = []
     private let capacity = 8
     private let lock = NSLock()
@@ -38,16 +70,38 @@ final class TextureStore: @unchecked Sendable {
 
     func source(for url: URL) -> MTLTexture? { lock.withLock { sources[url] } }
     func print(for url: URL) -> MTLTexture? { lock.withLock { prints[url] } }
-    func detail(for url: URL, tier: String) -> MTLTexture? {
-        lock.withLock { detail?.url == url && detail?.tier == tier ? detail?.texture : nil }
+
+    /// The resident detail render for `url`, if it was made from `stamp` and
+    /// is at least as sharp as `rank`. Returns what is actually resident —
+    /// which may be sharper than asked for — so the caller can record the
+    /// tier it is really showing rather than the one it wanted.
+    func detail(for url: URL, stamp: String, atLeast rank: Int) -> DetailEntry? {
+        lock.withLock {
+            guard let d = detail, d.url == url, d.stamp == stamp, d.rank >= rank else { return nil }
+            return d
+        }
     }
 
     func setSource(_ t: MTLTexture, for url: URL) { lock.withLock { sources[url] = t; touch(url) } }
     func setPrint(_ t: MTLTexture?, for url: URL) { lock.withLock { prints[url] = t; touch(url) } }
-    func setDetail(_ t: MTLTexture?, tier: String, for url: URL) {
-        lock.withLock { detail = t.map { (url, tier, $0) } }
+    /// Take a detail render into the slot. A render is only ever accepted if
+    /// it is sharper than what is already there for the same frame and the
+    /// same parameters — a lower tier for an unchanged frame is by definition
+    /// information the slot already holds, and letting it in is what used to
+    /// evict a 17 s `full` render in favour of a 2.75 s `preview` one.
+    func setDetail(_ t: MTLTexture, tier: String, rank: Int, stamp: String, for url: URL) {
+        lock.withLock {
+            if let d = detail, d.url == url, d.stamp == stamp, d.rank >= rank { return }
+            detail = DetailEntry(url: url, tier: tier, rank: rank, stamp: stamp, texture: t)
+        }
     }
     func dropDetail() { lock.withLock { detail = nil } }
+    /// Free the slot unless it still matches these parameters. Called when a
+    /// new print lands: if the edit was an undo back to what the resident
+    /// render was made from, it is still the truth and is kept.
+    func dropDetail(unless stamp: String, for url: URL) {
+        lock.withLock { if detail?.url != url || detail?.stamp != stamp { detail = nil } }
+    }
     func invalidatePrint(for url: URL) { lock.withLock { prints[url] = nil } }
     func removeAll() { lock.withLock { sources.removeAll(); prints.removeAll(); detail = nil; order.removeAll() } }
 

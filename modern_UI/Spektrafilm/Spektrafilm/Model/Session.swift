@@ -112,7 +112,18 @@ final class Session: CanvasHost {
     /// 1600 px print; the other two are rendered on demand and swapped in
     /// when they land. A frame no larger than the live tier is already native
     /// and never escalates.
-    enum DetailTier: String, Sendable { case live, preview, full }
+    /// `rank` orders the tiers. A render at a higher rank contains
+    /// everything a lower one does, which is what lets the store answer
+    /// "this tier or sharper" and turns a zoom-out-and-back into a swap
+    /// rather than a re-render.
+    enum DetailTier: String, Sendable, CaseIterable {
+        case live, preview, full
+        var rank: Int { switch self { case .live: 0; case .preview: 1; case .full: 2 } }
+        init?(rank: Int) {
+            guard let t = DetailTier.allCases.first(where: { $0.rank == rank }) else { return nil }
+            self = t
+        }
+    }
     private(set) var detailTier: DetailTier = .live
     private(set) var detailPending = false
     private var detailTask: Task<Void, Never>?
@@ -396,13 +407,21 @@ final class Session: CanvasHost {
         scheduleSave()
         updateThumbnail(url, from: tex)
         try? FileManager.default.removeItem(atPath: path)
-        // A resident detail render was made from the previous parameters, so
-        // it is no longer the print on screen. Drop it and ask again once the
-        // edits settle; showing it would be showing a different film.
+        // A resident detail render made from *different* parameters is no
+        // longer the print on screen and showing it would be showing a
+        // different film. One made from these parameters is still the truth:
+        // an undo, or a slider dragged back to where it started, lands here
+        // and used to throw away a 17 s render for no reason.
         if detailTier != .live {
-            renderer.dropDetail()
-            renderer.store.dropDetail()
-            scheduleDetail()
+            let stamp = printStamp
+            if let resident = renderer.store.detail(for: url, stamp: stamp, atLeast: detailTier.rank) {
+                detailTier = DetailTier(rawValue: resident.tier) ?? detailTier
+                renderer.setDetail(resident.texture)
+            } else {
+                renderer.dropDetail()
+                renderer.store.dropDetail(unless: stamp, for: url)
+                scheduleDetail()
+            }
         }
     }
 
@@ -633,24 +652,57 @@ final class Session: CanvasHost {
         return .live
     }
 
+    /// The Layer 1 parameters a print was made from, as a comparable string.
+    /// This is what stamps a detail render, so whether a resident texture is
+    /// still the truth is a question about *data* rather than about which
+    /// callback happened to run last.
+    nonisolated static func printStamp(_ p: FilmParams) -> String {
+        p.wire.map { "\($0.name)=\($0.value)" }.joined(separator: ";")
+    }
+
+    /// What the *service* currently holds — not `sidecar.params`, which may
+    /// already be a slider ahead of it. The live print on screen was made
+    /// from `sent`, so stamping the detail render with anything else would
+    /// let the two disagree about which film they are showing.
+    private var printStamp: String { Session.printStamp(scheduler.sent) }
+
     private func updateDetailTier() {
         guard !browsing, let url = selection, decoded != nil, sourceLongEdge > 0 else { return }
         let want = Session.wantedTier(zoomFraction: renderer.viewport.zoomFraction,
                                       imageLongEdge: sourceLongEdge)
-        guard want != detailTier else { return }
-        detailTier = want
-        detailTask?.cancel(); detailTask = nil
-        detailPending = false
-        guard want != .live else {
-            // The resident detail texture stays in the store, so zooming back
-            // in shows it again without a render.
+
+        if want == .live {
+            guard detailTier != .live else { return }
+            detailTier = .live
+            detailTask?.cancel(); detailTask = nil
+            detailPending = false
+            // The texture stays in the store, so zooming back in is a swap.
             renderer.hideDetail()
             return
         }
-        if let cached = renderer.store.detail(for: url, tier: want.rawValue) {
-            renderer.setDetail(cached)
+
+        // Already showing something at least this sharp. This is the early
+        // out that keeps a pan at 400 % free.
+        if renderer.showsDetail, detailTier.rank >= want.rank { return }
+
+        // A resident render of this frame, made from these parameters, at
+        // this tier *or sharper*. Record the tier that is actually on screen,
+        // not the one that was asked for — otherwise the next zoom step
+        // thinks it needs a render it already has.
+        if let resident = renderer.store.detail(for: url, stamp: printStamp, atLeast: want.rank) {
+            detailTask?.cancel(); detailTask = nil
+            detailPending = false
+            detailTier = DetailTier(rawValue: resident.tier) ?? want
+            renderer.setDetail(resident.texture)
             return
         }
+
+        // Nothing resident. Leave an identical request that is already on its
+        // way alone; anything else starts one.
+        if want == detailTier, detailPending || detailTask != nil { return }
+        detailTier = want
+        detailTask?.cancel(); detailTask = nil
+        detailPending = false
         scheduleDetail()
     }
 
@@ -681,6 +733,10 @@ final class Session: CanvasHost {
         }
         detailPending = true
         startClock()
+        // Stamped here, before the call, from what the service holds. The
+        // guard above has just established that no edit is owed a render, so
+        // `sent` is exactly what this reprint will be made from.
+        let stamp = printStamp
         canvasLog("detail \(tier.rawValue) requested for \(url.lastPathComponent)")
         defer { detailPending = false }
         do {
@@ -694,7 +750,7 @@ final class Session: CanvasHost {
             guard let tex = renderer.store.uploadRGBA16(path: path, width: w, height: h) else {
                 canvasLog("detail \(tier.rawValue) upload failed for \(w)x\(h)"); return
             }
-            renderer.store.setDetail(tex, tier: tier.rawValue, for: url)
+            renderer.store.setDetail(tex, tier: tier.rawValue, rank: tier.rank, stamp: stamp, for: url)
             renderer.setDetail(tex)
             canvasLog("detail \(tier.rawValue) \(w)x\(h) landed in \(Int(r.elapsedMs)) ms")
             if let base = statusBase { status = base }
