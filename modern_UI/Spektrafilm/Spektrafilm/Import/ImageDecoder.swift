@@ -156,6 +156,17 @@ enum ImageDecoder {
         image = image.transformed(by: .init(translationX: -image.extent.origin.x, y: -image.extent.origin.y))
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Half float: OIIO reads it as float (so the service treats it as linear) at half the bytes.
+        //
+        // `options: [:]` means **uncompressed**, and that is load-bearing
+        // rather than incidental. Measured by the engine side on this frame,
+        // reading it back: uncompressed 0.11 s · LZW 1.6 s · ZIP 1.35 s, and
+        // threads make no difference. Compressing this file to save 180 MB of
+        // cache would put more than a second back into every `open` — the
+        // exact cost that was just taken out of it. Do not add a compression
+        // option here; `TIFFHandoffTests` fails if one appears.
+        //
+        // Export is the opposite case and does use LZW (`Exporter.write`):
+        // nothing reads those files back in a hurry.
         try context.writeTIFFRepresentation(of: image, to: url, format: .RGBAh, colorSpace: space, options: [:])
     }
 

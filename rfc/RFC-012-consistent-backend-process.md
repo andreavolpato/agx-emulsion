@@ -51,26 +51,44 @@ architecture spends another 10 ms handing it over. That single row is the
 strongest argument in this document, and it is an argument about *IPC*, not
 about Python.
 
-### 1.2 Where opening a frame's 3.85 s goes
+### 1.2 Where opening a frame's 1.4 s goes
 
-From `Session.LoadClock` (`SPEKTRAFILM_CANVAS_LOG=1`), after the fixes in
-`699a7c8` and `61f3bd4`:
+From `Session.LoadClock` (`SPEKTRAFILM_CANVAS_LOG=1`), warm:
 
 ```
-decode 95 · preview-texture 239 · linear-tiff 42 · service.open 3315
-· solve 111 · reprint 37 · TOTAL 3841 · core=metal
+decode 96 · preview-texture 230 · linear-tiff 12 · service.open 922
+· solve 117 · reprint 36 · TOTAL 1415 · core=metal
 ```
 
-- `service.open` 3.3 s, of which **~2.4 s is one `skimage.resize`** on the CPU
-  (`HANDOFF-GPU-WIRING.md` §2.1). That is a *library* cost, not a language
-  cost: scipy's `correlate1d` is already C. Rewriting it in Rust buys roughly
-  nothing; moving it to the GPU removes it.
-- **~1.9 s of interpreter start and imports**, paid once per session. Now
-  hidden by warming the service at launch (`61f3bd4`). A native binary makes
-  it ~0. This is the *entire* speed case for a language change, and it is
-  one-time.
+Cold (no cached TIFF) is 2.34 s; the difference is the RAW decode and the
+364 MB write. **This was ~8 s when the question in §0 was asked**, and the
+journey there is the evidence for the answer:
+
+| | open, warm | what changed |
+|---|---|---|
+| the app as found | ~8 s | running the numba core, because the engine was on a branch this checkout did not have |
+| merge the GPU core | 7.3 s | `core=metal`; the *render* becomes 37 ms |
+| build tier downscales lazily (`699a7c8`) | 5.0 s | `open` was resizing for every tier, including one usually unused |
+| warm the service at launch (`61f3bd4`) | 3.85 s | the first request no longer pays 1.9 s of interpreter start |
+| port the downscale to Metal (RFC-011 §11) | **1.4 s** | the last big CPU stage in `open` |
+
+**Every one of those was a wiring, scheduling or kernel fix. None of them was
+a language change, and a language change would have fixed none of them.** That
+is the §0 answer in one table.
+
+What is left, and none of it argues for Rust either:
+
+- `service.open` 922 ms. The engine measures its own share at 278 ms on this
+  frame; the rest is the round trip, the 364 MB read (0.11 s uncompressed) and
+  per-session setup. Worth profiling, not worth rewriting.
+- **~1.9 s of interpreter start and imports**, paid once per session and now
+  hidden rather than removed. A native binary makes it ~0. This is the *entire*
+  speed case for a language change, and it is one-time.
 - The 364 MB linear TIFF, written by the client and read back by the service,
-  because large data crosses the boundary as a path (contract §1).
+  because large data crosses the boundary as a path (contract §1). It must
+  stay **uncompressed** — measured on the read side, LZW costs 1.6 s against
+  0.11 s, so compressing it to save cache space would put more than a second
+  back into every open. `TIFFHandoffTests` pins that.
 
 ### 1.3 What has to be bundled today
 
@@ -248,8 +266,11 @@ Each step is independently valuable and independently abandonable.
 
 1. **Spike MLX from a non-Python host** (§4.3). One kernel, one array, byte
    comparison. This is a gate, not a task: everything below assumes it passes.
-2. **Finish the GPU resize** (`HANDOFF-GPU-WIRING.md` §2.1). Takes `open` from
-   3.3 s to a few hundred ms. Needed in every option, including staying on A.
+2. ~~**Finish the GPU resize**~~ — **done** (RFC-011 §11, merged `d8c4881`).
+   `open` 2.6 s → 278 ms in the engine, 1.4 s end to end in the app. Held to
+   float32 storage epsilon against skimage (max abs 1.2e-7); the edge mode was
+   the trap, as expected — skimage's `mode='reflect'` is the numpy-pad name and
+   maps to ndimage *mirror*, not scipy reflect.
 3. **Bake the colour-science constants** (§2.2), with the re-derivation test.
    Removes 148 MB and the last per-render third-party call. Valuable even if
    this RFC goes no further.
@@ -294,9 +315,13 @@ professional application should have one — and land §5 anyway.
 
 ## 7. Recommendation
 
-Do **1, 2 and 3** now: they are needed under every option, they are the whole
-of the remaining speed problem, and step 3 alone removes 148 MB and the last
-per-render dependency.
+Step 2 is already done. Do **1 and 3** now: they are needed under every option,
+and step 3 alone removes 148 MB and the last per-render third-party call.
+
+Note what the table in §1.2 means for urgency: the speed problem is
+substantially *solved*, by fixes that had nothing to do with the language. So
+this RFC should now be read purely as what it is — a **distribution** RFC. The
+app is fast. It still cannot be given to anyone.
 
 Then **C**, then **D** as its own RFC.
 

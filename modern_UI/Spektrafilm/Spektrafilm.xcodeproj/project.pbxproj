@@ -210,6 +210,7 @@
 		D535AB20AF82118A0962C13F /* ParamsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ParamsTests.swift"; sourceTree = "<group>"; };
 		70F2B5843ED40F2BAD7DFEDD /* RendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RendererTests.swift"; sourceTree = "<group>"; };
 		5D57229935E7AD0FCCC76129 /* ServiceIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ServiceIntegrationTests.swift"; sourceTree = "<group>"; };
+		0A69EAE576B15BF34E5745A9 /* TIFFHandoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TIFFHandoffTests.swift"; sourceTree = "<group>"; };
 		B30E2FCC7C48E3CDEB2823F5 /* ViewportStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ViewportStateTests.swift"; sourceTree = "<group>"; };
 		09B059C0BF2C058329FCECB2 /* SpektrafilmTests */ = {
 			isa = PBXGroup;
@@ -224,6 +225,7 @@
 				D535AB20AF82118A0962C13F /* ParamsTests.swift */,
 				70F2B5843ED40F2BAD7DFEDD /* RendererTests.swift */,
 				5D57229935E7AD0FCCC76129 /* ServiceIntegrationTests.swift */,
+				0A69EAE576B15BF34E5745A9 /* TIFFHandoffTests.swift */,
 				B30E2FCC7C48E3CDEB2823F5 /* ViewportStateTests.swift */
 			);
 			path = "SpektrafilmTests";
@@ -407,6 +409,7 @@
 		D02819FD7044EC71BA226A8D /* ParamsTests.swift */ = {isa = PBXBuildFile; fileRef = D535AB20AF82118A0962C13F; };
 		BD843F73AD6BED906A1B0660 /* RendererTests.swift */ = {isa = PBXBuildFile; fileRef = 70F2B5843ED40F2BAD7DFEDD; };
 		8A047F3C281F0D95D232F01E /* ServiceIntegrationTests.swift */ = {isa = PBXBuildFile; fileRef = 5D57229935E7AD0FCCC76129; };
+		9DB35A897A64B6FBCCF1E787 /* TIFFHandoffTests.swift */ = {isa = PBXBuildFile; fileRef = 0A69EAE576B15BF34E5745A9; };
 		9A9E4DB1B80C5D6660C7250D /* ViewportStateTests.swift */ = {isa = PBXBuildFile; fileRef = B30E2FCC7C48E3CDEB2823F5; };
 		26A0631C1E76517F3DE5815A /* CropOverlay.swift */ = {isa = PBXBuildFile; fileRef = F5450AC21C24796E4C0E3D00; };
 		2F2D63AEA6A6F5150CCB8445 /* MaskOverlay.swift */ = {isa = PBXBuildFile; fileRef = AA71F11FFA333D653F211766; };
@@ -471,6 +474,7 @@
 				D02819FD7044EC71BA226A8D /* ParamsTests.swift */,
 				BD843F73AD6BED906A1B0660 /* RendererTests.swift */,
 				8A047F3C281F0D95D232F01E /* ServiceIntegrationTests.swift */,
+				9DB35A897A64B6FBCCF1E787 /* TIFFHandoffTests.swift */,
 				9A9E4DB1B80C5D6660C7250D /* ViewportStateTests.swift */,
 				26A0631C1E76517F3DE5815A /* CropOverlay.swift */,
 				2F2D63AEA6A6F5150CCB8445 /* MaskOverlay.swift */,
