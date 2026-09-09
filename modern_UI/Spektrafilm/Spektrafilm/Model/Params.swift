@@ -1,127 +1,135 @@
-//  Params.swift — the client's mirror of the service's transport schema.
+//  Params.swift — Layer 1: the engine's parameters, as the UI holds them.
 //
-//  These names are not invented. Every one is a wire name from
-//  `spektrafilm/service/schema.py::_FIELDS`, and the `layer` each belongs to
-//  is copied from the same table. That mapping is load-bearing rather than
-//  decorative: schema.py's own header says getting a field's layer wrong is a
-//  *correctness* bug, because it would let a shoot-side edit silently reuse a
-//  stale cached negative. The client therefore repeats the assignment instead
-//  of guessing it from the control's position in the panel.
+//  Mirrors `src/spektrafilm/service/schema.py` field for field. Two rules:
 //
-//  Ranges are likewise copied from `_FIELDS`, so a slider physically cannot
-//  travel somewhere `validate_delta` would reject.
-//
-//  Defaults are NOT copied. schema.py reads them from `params_schema.py` at
-//  import time precisely so the frontend does not re-decide them (API-SPEC
-//  §4's closing note). The values below are placeholders used only before a
-//  session is open; `open`'s response replaces every one of them.
+//  1. Wire names are the schema's names. `delta(from:)` produces exactly the
+//     `params_delta` object the service validates, nothing else.
+//  2. Every field knows its layer (`shoot` / `print`) — the same table the
+//     service uses to decide between a 190 ms reprint and a film-side
+//     re-render. The scheduler routes on it, so a wrong layer here is a
+//     correctness bug, not a metadata one.
 
 import Foundation
 
-enum ParamLayer: String, Sendable, Codable {
-    /// Upstream of `Tap.CMY_FILM`. Changing one invalidates the cached
-    /// negative and forces a film-side re-render (1–7 s, frontend SPEC §4).
-    case shoot
-    /// Enlarger, paper, scanner — everything reachable by `reprint` at
-    /// ~193 ms without touching the film side.
-    case print
-}
+enum ParamLayer: String, Codable, Sendable { case shoot, print }
 
-/// One declared transport field: wire name, layer, range, live-mutability.
-struct ParamField: Sendable, Hashable {
-    let name: String
-    let layer: ParamLayer
-    let range: ClosedRange<Double>?
-    /// Mirrors `schema.LIVE_MUTABLE` — the four fields the service can write
-    /// straight onto a live pipeline without rebuilding it. Deliberately
-    /// short; schema.py warns against widening it without re-running the
-    /// reprint-equivalence test per field added.
-    let liveMutable: Bool
-
-    init(_ name: String, _ layer: ParamLayer,
-         _ range: ClosedRange<Double>? = nil, live: Bool = false) {
-        self.name = name; self.layer = layer; self.range = range; self.liveMutable = live
-    }
-}
-
-enum Schema {
-    static let fields: [ParamField] = [
-        // mandatory stock selection — API-SPEC §4: no "off" state exists
-        .init("film_stock",  .shoot),
-        .init("print_stock", .print),
-        // shoot side
-        .init("exposure_compensation_ev", .shoot, -8...8),
-        .init("auto_exposure",            .shoot),
-        .init("film_format_mm",           .shoot, 4...200),
-        .init("lens_blur_um",             .shoot, 0...200),
-        .init("halation_active",          .shoot),
-        .init("halation_amount",          .shoot, 0...4),
-        .init("halation_boost_ev",        .shoot, 0...8),
-        .init("grain_active",             .shoot),
-        .init("grain_sublayers_active",   .shoot),
-        .init("dir_couplers_active",      .shoot),
-        .init("dir_couplers_amount",      .shoot, 0...4),
-        .init("density_curve_gamma",      .shoot, 0.2...4),
-        .init("input_color_space",        .shoot),
-        .init("input_cctf_decoding",      .shoot),
-        // print side — the sliders actually dragged
-        .init("print_exposure",   .print, 0.05...20, live: true),
-        .init("m_filter_shift",   .print, -1...1,    live: true),
-        .init("y_filter_shift",   .print, -1...1,    live: true),
-        .init("c_filter_neutral", .print, 0...200),
-        .init("m_filter_neutral", .print, 0...200),
-        .init("y_filter_neutral", .print, 0...200),
-        .init("preflash_exposure", .print, 0...1,    live: true),
-        .init("enlarger_illuminant",      .print),
-        .init("glare_active",             .print),
-        .init("scanner_white_correction", .print),
-        .init("scanner_black_correction", .print),
-        .init("scanner_lens_blur",        .print, 0...20),
-        .init("output_color_space",       .print),
-        .init("output_cctf_encoding",     .print),
-        .init("scan_film",                .print),
-    ]
-
-    static let byName: [String: ParamField] =
-        Dictionary(uniqueKeysWithValues: fields.map { ($0.name, $0) })
-
-    static func layer(of name: String) -> ParamLayer? { byName[name]?.layer }
-    static func range(of name: String) -> ClosedRange<Double>? { byName[name]?.range }
-
-    /// Which cache layers a delta invalidates — the client-side twin of
-    /// `schema.layers_touched`. Drives whether a commit routes to `reprint`
-    /// or to a full re-render, and therefore which feedback the canvas shows.
-    static func layersTouched(_ delta: [String: ParamValue]) -> Set<ParamLayer> {
-        Set(delta.keys.compactMap { layer(of: $0) })
-    }
-}
-
-/// A transport value. JSON-RPC carries exactly these three types for params.
-enum ParamValue: Sendable, Hashable, Codable {
-    case number(Double)
-    case flag(Bool)
-    case text(String)
-
-    var double: Double? { if case .number(let v) = self { return v }; return nil }
-    var bool: Bool?     { if case .flag(let v)   = self { return v }; return nil }
-    var string: String? { if case .text(let v)   = self { return v }; return nil }
+/// A JSON scalar for `params_delta`.
+enum ParamValue: Codable, Equatable, Sendable, CustomStringConvertible {
+    case double(Double), bool(Bool), string(String)
 
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
-        // Bool before Double: JSONDecoder will happily read `true` as 1.0,
-        // and schema.py's `validate_delta` rejects a bool where a float is
-        // declared, so the order here is not cosmetic.
-        if let b = try? c.decode(Bool.self)   { self = .flag(b);   return }
-        if let d = try? c.decode(Double.self) { self = .number(d); return }
-        self = .text(try c.decode(String.self))
+        if let b = try? c.decode(Bool.self) { self = .bool(b) }
+        else if let d = try? c.decode(Double.self) { self = .double(d) }
+        else { self = .string(try c.decode(String.self)) }
     }
-
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         switch self {
-        case .number(let v): try c.encode(v)
-        case .flag(let v):   try c.encode(v)
-        case .text(let v):   try c.encode(v)
+        case .double(let d): try c.encode(d)
+        case .bool(let b): try c.encode(b)
+        case .string(let s): try c.encode(s)
         }
     }
+    var description: String {
+        switch self {
+        case .double(let d): String(format: "%.4g", d)
+        case .bool(let b): b ? "true" : "false"
+        case .string(let s): s
+        }
+    }
+    var doubleValue: Double? { if case .double(let d) = self { d } else { nil } }
+    var boolValue: Bool? { if case .bool(let b) = self { b } else { nil } }
+    var stringValue: String? { if case .string(let s) = self { s } else { nil } }
+}
+
+/// Film formats the Camera section offers. `mm` is the long edge of the
+/// frame, which is what `camera.film_format_mm` means (the engine derives
+/// pixel pitch from it: `film_format_mm * 1000 / max(h, w)`), so it drives
+/// grain scale. Range accepted by the service: 4…200.
+struct FilmFormat: Identifiable, Hashable, Sendable {
+    let id: String
+    let mm: Double
+    static let all: [FilmFormat] = [
+        .init(id: "Super 8", mm: 5.8),
+        .init(id: "16mm", mm: 10.3),
+        .init(id: "Super 35", mm: 24.9),
+        .init(id: "35mm", mm: 36),
+        .init(id: "645", mm: 56),
+        .init(id: "6×6", mm: 56),
+        .init(id: "6×7", mm: 70),
+        .init(id: "6×9", mm: 84),
+        .init(id: "4×5", mm: 127),
+        .init(id: "8×10", mm: 200),
+    ]
+    static func nearest(mm: Double) -> FilmFormat {
+        all.min { abs($0.mm - mm) < abs($1.mm - mm) } ?? all[3]
+    }
+}
+
+struct FilmParams: Codable, Equatable, Sendable {
+    // --- stock (shoot for film, print for paper) ---
+    var filmStock: String = "kodak_portra_400"
+    var printStock: String = "kodak_supra_endura"
+    // --- shoot ---
+    var exposureCompensationEV: Double = 0          // -8…8
+    var filmFormatMM: Double = 36                    // 4…200
+    var grainActive: Bool = true
+    var halationActive: Bool = true
+    // --- print ---
+    /// UI stops, brighter positive. Wire: `print_exposure = 2^(-stops)`,
+    /// because less enlarger exposure prints brighter (API-SPEC §2).
+    var printBrightnessStops: Double = 0            // -3…3
+    var yFilterShift: Double = 0                     // -1…1  yellow ↔ blue
+    var mFilterShift: Double = 0                     // -1…1  magenta ↔ green
+    var glareActive: Bool = true
+
+    static let `default` = FilmParams()
+
+    /// Wire representation of every field. Order is stable for tests.
+    var wire: [(name: String, value: ParamValue, layer: ParamLayer)] {
+        [
+            ("film_stock", .string(filmStock), .shoot),
+            ("print_stock", .string(printStock), .print),
+            ("exposure_compensation_ev", .double(exposureCompensationEV), .shoot),
+            ("film_format_mm", .double(filmFormatMM), .shoot),
+            ("grain_active", .bool(grainActive), .shoot),
+            ("grain_sublayers_active", .bool(grainActive), .shoot),
+            ("halation_active", .bool(halationActive), .shoot),
+            ("print_exposure", .double(FilmParams.printExposure(stops: printBrightnessStops)), .print),
+            ("y_filter_shift", .double(yFilterShift), .print),
+            ("m_filter_shift", .double(mFilterShift), .print),
+            ("glare_active", .bool(glareActive), .print),
+        ]
+    }
+
+    static func printExposure(stops: Double) -> Double {
+        (pow(2.0, -stops)).clamped(to: 0.05...20)
+    }
+
+    /// The `params_delta` that turns `other` into `self`, and the layers it
+    /// touches. An empty delta means nothing to send.
+    func delta(from other: FilmParams) -> (delta: [String: ParamValue], layers: Set<ParamLayer>) {
+        var delta: [String: ParamValue] = [:]
+        var layers = Set<ParamLayer>()
+        let theirs = Dictionary(uniqueKeysWithValues: other.wire.map { ($0.name, $0.value) })
+        for f in wire where theirs[f.name] != f.value {
+            delta[f.name] = f.value
+            layers.insert(f.layer)
+        }
+        // A film change also invalidates the print side (the service says so).
+        if delta["film_stock"] != nil { layers.insert(.print) }
+        return (delta, layers)
+    }
+
+    /// Everything, as sent with `open`.
+    var fullDelta: [String: ParamValue] {
+        Dictionary(uniqueKeysWithValues: wire.map { ($0.name, $0.value) })
+    }
+
+    /// Fields the service can write onto a live pipeline without a rebuild
+    /// (`schema.LIVE_MUTABLE`). Informational — the client sends the same
+    /// delta either way — but the scheduler uses it to pick the tighter
+    /// debounce.
+    static let liveMutable: Set<String> = ["print_exposure", "m_filter_shift", "y_filter_shift"]
 }

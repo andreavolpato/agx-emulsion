@@ -1,190 +1,401 @@
-//  Renderer.swift — MTKViewDelegate. Draws on demand, never on a display link.
+//  Renderer.swift — owns the Metal state for the canvas and the offscreen
+//  Layer 2 pass used by export.
 //
-//  `isPaused = true` and `enableSetNeedsDisplay = true` (UI-GUIDELINE §4): a
-//  continuously rendering MTKView burns battery for an image that changes
-//  only when something is dragged.
+//  Draw-on-demand: the MTKView is paused and `needsDisplay` is set on state
+//  change (UI-GUIDELINE §4). Each draw: (1) if Layer 2 or its input changed,
+//  run the `layer2` kernel into `adjusted` and the `histogram` kernel over it;
+//  (2) blit `adjusted` (or the original, while Space is held) to the drawable
+//  through the sampling transform. The histogram buffer is read back on the
+//  command buffer's completion and published on the main actor.
 
+import Foundation
 import Metal
-import CoreGraphics
 import MetalKit
-import CoreImage
-import simd
+import QuartzCore
 
 struct CanvasUniforms {
-    var scale: SIMD2<Float> = .init(1, 1)
-    var offset: SIMD2<Float> = .zero
-    var exposure: Float = 0
-    var highlights: Float = 0
-    var shadows: Float = 0
-    var blackPoint: Float = 0
-    var whitePoint: Float = 0
-    var layer2Enabled: Float = 0
+    var viewportSize = SIMD2<Float>(1, 1)
+    var imageSize = SIMD2<Float>(1, 1)
+    var offset = SIMD2<Float>(0, 0)
+    var scale: Float = 1
+    var surroundGray: Float = 0x5F / 255.0
+    var crop = SIMD4<Float>(0, 0, 1, 1)
+    var showCrop: UInt32 = 0
+    var checker: UInt32 = 0
 }
 
 @MainActor
-final class Renderer: NSObject, MTKViewDelegate {
+final class Renderer: NSObject {
     let device: MTLDevice
-    private let queue: MTLCommandQueue
-    private var pipeline: MTLRenderPipelineState?
-    private var backdrop: MTLRenderPipelineState?
-    private let ciContext: CIContext
+    let queue: MTLCommandQueue
+    let store: TextureStore
+    private let layer2Pipeline: MTLComputePipelineState
+    private let histogramPipeline: MTLComputePipelineState
+    private let quadPipelineDrawable: MTLRenderPipelineState
+    private let quadPipelineOffscreen: MTLRenderPipelineState
+    private let curveTable: MTLTexture
+    private let histogramBuffer: MTLBuffer
+    private var histogramInFlight = false
 
-    /// The image currently resident on the GPU.
-    private(set) var texture: MTLTexture?
-    private(set) var textureSize = CGSize.zero
+    /// The interactive, live-tier image: the print if there is one, else the
+    /// decode preview. This is what the canvas shows at fit and while zoomed
+    /// out, and it is the texture the service's ~0.4 s reprints replace.
+    private(set) var live: MTLTexture?
+    /// A higher-resolution print of the same frame, rendered on demand when
+    /// the zoom passes the live tier's native resolution
+    /// (frontend SPEC §5.0). Kept separate from `live` so zooming back out is
+    /// instant and needs no render.
+    private(set) var detail: MTLTexture?
+    /// Whether `detail` is the image on screen. False at fit, true while
+    /// zoomed past the threshold — or true with a stale detail still shown
+    /// while a sharper one renders.
+    private(set) var showsDetail = false
+    /// The image the viewport is expressed against: the live tier's pixel
+    /// size, fixed per frame. A resolution swap must not move the view, so
+    /// `scale` stays points-per-live-pixel and the draw multiplies it by the
+    /// texture's own ratio (see `canvasUniforms`).
+    var logicalImageSize: CGSize? {
+        viewport.image == CGSize(width: 1, height: 1) ? nil : viewport.image
+    }
+    /// What the canvas draws: the detail print when one is shown, else the
+    /// live print or decode preview.
+    var base: MTLTexture? { showsDetail ? (detail ?? live) : live }
+    /// Shown instead of the adjusted image while Space is held.
+    var original: MTLTexture?
+    private var adjusted: MTLTexture?
+    private var layer2Dirty = true
 
-    var uniforms = CanvasUniforms()
-    /// Fit-scale zoom multiplier and pan offset, in image space.
-    var zoom: Double = 1.0
-    var pan: CGPoint = .zero
-    var fitToWindow = true
+    var viewport = ViewportState()
+    var showOriginal = false { didSet { if oldValue != showOriginal { needsDraw?() } } }
+    var crop = CropRect.full
+    var showCrop = false
+    var layer2 = Layer2Uniforms() { didSet { layer2Dirty = true } }
+    var onHistogram: (@MainActor ([Float]) -> Void)?
+    var needsDraw: (@MainActor () -> Void)?
+    /// Fired whenever the renderer itself moves the viewport — which
+    /// `setLive` does when it takes a new frame's logical size, because a new
+    /// image is fitted. Without it the zoom readout keeps whatever it computed
+    /// against the *previous* image; with no image that is a 1×1 placeholder,
+    /// and the pill read "Fit · 158,000 %".
+    var onViewportChanged: (@MainActor () -> Void)?
+    /// Incremented on every completed `draw(in:)`. The canvas cannot be seen
+    /// by an offscreen test, but *whether it drew* can be, and that is the
+    /// half that broke.
+    private(set) var drawCount = 0
 
-    /// Reported back so the inspector can show what the canvas actually did,
-    /// rather than what it was asked to do.
-    private(set) var lastUploadMs: Double?
-    private(set) var lastError: String?
+    /// The **drawable** format. `CAMetalLayer` accepts only a short list —
+    /// bgra8Unorm(_srgb), rgba16Float, rgb10a2Unorm, bgr10a2Unorm and the xr
+    /// variants — and setting anything else raises
+    /// `CAMetalLayerInvalid: invalid pixel format`. `rgba16Unorm` (110) is a
+    /// perfectly good *texture* format and is not on that list; it crashed the
+    /// app on the first real launch. Float16 also matches UI-GUIDELINE §4.
+    ///
+    /// This does not change the colour rule: the layer's colour space is
+    /// Display P3 and the values written are already P3-encoded, so ColorSync
+    /// still performs exactly one transform. Float storage is not linear
+    /// storage — the numbers are unchanged, only their container is.
+    static let drawableFormat: MTLPixelFormat = .rgba16Float
+    /// The **offscreen** format, for snapshots and export: 16-bit unorm, so
+    /// `makeCGImage()` can hand the bytes to ImageIO without a conversion.
+    static let offscreenFormat: MTLPixelFormat = .rgba16Unorm
 
     init?(device: MTLDevice? = MTLCreateSystemDefaultDevice()) {
         guard let device, let queue = device.makeCommandQueue() else { return nil }
         self.device = device
         self.queue = queue
-        // Core Image composites in a wide *linear extended* space; the
-        // single encode to Display P3 happens once, at render time, in
-        // ImageDecoder.makeTexture. `cacheIntermediates` off because the
-        // canvas holds one image and a CI cache would duplicate it.
-        self.ciContext = CIContext(mtlDevice: device, options: [
-            .workingColorSpace: ImageDecoder.compositingSpace as Any,
-            .cacheIntermediates: false,
-        ])
+        self.store = TextureStore(device: device)
+        guard let lib = try? device.makeDefaultLibrary(bundle: Bundle(for: Renderer.self)),
+              let l2 = lib.makeFunction(name: "layer2"),
+              let hist = lib.makeFunction(name: "histogram"),
+              let vs = lib.makeFunction(name: "canvasVertex"),
+              let fs = lib.makeFunction(name: "canvasFragment") else { return nil }
+        do {
+            layer2Pipeline = try device.makeComputePipelineState(function: l2)
+            histogramPipeline = try device.makeComputePipelineState(function: hist)
+            let rd = MTLRenderPipelineDescriptor()
+            rd.vertexFunction = vs
+            rd.fragmentFunction = fs
+            rd.colorAttachments[0].pixelFormat = Renderer.drawableFormat
+            quadPipelineDrawable = try device.makeRenderPipelineState(descriptor: rd)
+            rd.colorAttachments[0].pixelFormat = Renderer.offscreenFormat
+            quadPipelineOffscreen = try device.makeRenderPipelineState(descriptor: rd)
+        } catch { return nil }
+        guard let ct = store.makeCurveTable(),
+              let hb = device.makeBuffer(length: 4 * 256 * 4, options: .storageModeShared) else { return nil }
+        curveTable = ct
+        histogramBuffer = hb
         super.init()
-        buildPipelines()
+        store.upload(curves: CurveSet(), into: curveTable)
     }
 
-    private func buildPipelines() {
-        guard let library = device.makeDefaultLibrary() else {
-            lastError = "no default.metallib — are Shaders.metal in the target?"
-            return
+    // MARK: inputs
+
+    func setLive(_ texture: MTLTexture?, logical: CGSize? = nil) {
+        log("setLive \(texture.map { "\($0.width)x\($0.height)" } ?? "nil"), needsDraw=\(needsDraw != nil)")
+        live = texture
+        if texture == nil { showsDetail = false }
+        layer2Dirty = true
+        // The logical size is the live tier's, fixed per frame. The first
+        // image of a frame infers it (and refits); later live prints and every
+        // detail swap pass nil so the view does not move.
+        let target = logical ?? (logicalImageSize == nil ? texture.map { CGSize(width: $0.width, height: $0.height) } : nil)
+        if let target, target != viewport.image {
+            viewport.resize(viewport: viewport.viewport, image: target)
+            onViewportChanged?()
         }
-        func make(_ fragment: String) -> MTLRenderPipelineState? {
-            let d = MTLRenderPipelineDescriptor()
-            d.vertexFunction = library.makeFunction(name: "canvas_vertex")
-            d.fragmentFunction = library.makeFunction(name: fragment)
-            // Matches MTKView.colorPixelFormat below. Half-float, and
-            // explicitly not an `_srgb` format: the data is already
-            // P3-encoded and an `_srgb` format would decode on read and
-            // re-encode on write (UI-GUIDELINE §4 rule 2).
-            d.colorAttachments[0].pixelFormat = .rgba16Float
-            return try? device.makeRenderPipelineState(descriptor: d)
-        }
-        pipeline = make("canvas_fragment")
-        backdrop = make("canvas_backdrop")
-        if pipeline == nil { lastError = "canvas pipeline failed to build" }
+        needsDraw?()
     }
 
-    // MARK: - image
-
-    func load(_ decoded: DecodedImage, maxEdge: Int) {
-        let t0 = CFAbsoluteTimeGetCurrent()
-        guard let buffer = queue.makeCommandBuffer() else { return }
-        let made = ImageDecoder.makeTexture(decoded, context: ciContext, device: device,
-                                            commandBuffer: buffer, maxEdge: maxEdge)
-        buffer.commit()
-        buffer.waitUntilCompleted()
-        guard let made else {
-            lastError = "could not build a texture from \(decoded.sourceURL.lastPathComponent)"
-            return
-        }
-        texture = made
-        textureSize = CGSize(width: made.width, height: made.height)
-        lastUploadMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
-        lastError = nil
+    /// Put a higher-resolution render of the current frame on screen. The
+    /// viewport is unchanged: the draw scales the texture to the same
+    /// on-screen rectangle.
+    func setDetail(_ texture: MTLTexture?) {
+        detail = texture
+        showsDetail = texture != nil
+        layer2Dirty = true
+        needsDraw?()
     }
 
-    func clear() { texture = nil; textureSize = .zero }
+    /// Show the live tier again without discarding the detail texture, so
+    /// zooming back in is instant.
+    func hideDetail() {
+        guard showsDetail else { return }
+        showsDetail = false
+        layer2Dirty = true
+        needsDraw?()
+    }
 
-    // MARK: - MTKViewDelegate
+    /// Discard the detail texture. Used when it can no longer be trusted:
+    /// the parameters changed, or another frame is selected.
+    func dropDetail() {
+        guard detail != nil || showsDetail else { return }
+        detail = nil
+        showsDetail = false
+        layer2Dirty = true
+        needsDraw?()
+    }
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    func setCurves(_ curves: CurveSet) {
+        store.upload(curves: curves, into: curveTable)
+        layer2Dirty = true
+        needsDraw?()
+    }
+
+    var imageSize: CGSize? { base.map { CGSize(width: $0.width, height: $0.height) } }
+
+    // MARK: Layer 2
+
+    private func ensureAdjusted(for src: MTLTexture) -> MTLTexture? {
+        if let a = adjusted, a.width == src.width, a.height == src.height { return a }
+        adjusted = store.makeWritable(width: src.width, height: src.height)
+        return adjusted
+    }
+
+    private func encodeLayer2(_ cb: MTLCommandBuffer, src: MTLTexture, dst: MTLTexture) {
+        guard let enc = cb.makeComputeCommandEncoder() else { return }
+        enc.setComputePipelineState(layer2Pipeline)
+        enc.setTexture(src, index: 0)
+        enc.setTexture(dst, index: 1)
+        enc.setTexture(curveTable, index: 2)
+        var u = layer2
+        enc.setBytes(&u, length: MemoryLayout<Layer2Uniforms>.stride, index: 0)
+        let w = layer2Pipeline.threadExecutionWidth
+        let h = max(1, layer2Pipeline.maxTotalThreadsPerThreadgroup / w)
+        enc.dispatchThreads(MTLSize(width: dst.width, height: dst.height, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
+        enc.endEncoding()
+    }
+
+    private func encodeHistogram(_ cb: MTLCommandBuffer, src: MTLTexture) {
+        guard let blit = cb.makeBlitCommandEncoder() else { return }
+        blit.fill(buffer: histogramBuffer, range: 0..<histogramBuffer.length, value: 0)
+        blit.endEncoding()
+        guard let enc = cb.makeComputeCommandEncoder() else { return }
+        enc.setComputePipelineState(histogramPipeline)
+        enc.setTexture(src, index: 0)
+        enc.setBuffer(histogramBuffer, offset: 0, index: 0)
+        var stride = UInt32(max(1, Int((Double(src.width * src.height) / 200_000).squareRoot())))
+        enc.setBytes(&stride, length: 4, index: 1)
+        let gw = (src.width + Int(stride) - 1) / Int(stride), gh = (src.height + Int(stride) - 1) / Int(stride)
+        let w = histogramPipeline.threadExecutionWidth
+        let h = max(1, histogramPipeline.maxTotalThreadsPerThreadgroup / w)
+        enc.dispatchThreads(MTLSize(width: gw, height: gh, depth: 1),
+                            threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
+        enc.endEncoding()
+    }
+
+    private func publishHistogram() {
+        let p = histogramBuffer.contents().bindMemory(to: UInt32.self, capacity: 1024)
+        var bins = [Float](repeating: 0, count: 1024)
+        var maxv: Float = 1
+        for i in 0..<1024 {
+            let v = Float(p[i])
+            bins[i] = v
+            // Ignore the extreme bins for scaling: clipped black/white dominate.
+            if i % 256 > 1 && i % 256 < 254 { maxv = max(maxv, v) }
+        }
+        for i in 0..<1024 { bins[i] = min(1, bins[i] / maxv) }
+        onHistogram?(bins)
+    }
+
+    // MARK: drawing
+
+    /// `SPEKTRAFILM_CANVAS_LOG=1` prints one line per draw. The canvas is the
+    /// one surface no offscreen test can see (a `CAMetalLayer` renders nothing
+    /// into `cacheDisplay`), so when it is blank this is how you find out
+    /// which of the three possible reasons it is: no drawable, no base
+    /// texture, or a base that never reached the encoder.
+    static let logDraws = ProcessInfo.processInfo.environment["SPEKTRAFILM_CANVAS_LOG"] == "1"
+
+    private func log(_ message: @autoclosure () -> String) {
+        guard Renderer.logDraws else { return }
+        FileHandle.standardError.write(Data("canvas: \(message())\n".utf8))
+    }
+
+    /// The canvas uniforms for one draw. `shown` may be the live texture or a
+    /// detail texture several times its size; the viewport is always in live
+    /// pixels, so the texture scale is the viewport's scale times the ratio
+    /// of logical to texture pixels. Without that ratio a 5504 px detail
+    /// render would draw 5.2× too large — which is exactly what the first
+    /// capture of this path showed: a black canvas, because only a corner of
+    /// the magnified image was on screen.
+    private func canvasUniforms(shown: MTLTexture?, viewportSize: CGSize, backingScale: CGFloat) -> CanvasUniforms {
+        var u = CanvasUniforms()
+        u.viewportSize = SIMD2(Float(viewportSize.width), Float(viewportSize.height))
+        guard let shown else { return u }
+        let logicalWidth = max(viewport.image.width, 1)
+        let textureScale = viewport.scale * (logicalWidth / CGFloat(shown.width))
+        u.imageSize = SIMD2(Float(shown.width), Float(shown.height))
+        u.offset = SIMD2(Float(viewport.offset.x * backingScale), Float(viewport.offset.y * backingScale))
+        u.scale = Float(textureScale * backingScale)
+        u.crop = SIMD4(Float(crop.x), Float(crop.y), Float(crop.width), Float(crop.height))
+        u.showCrop = showCrop && !crop.isFull ? 1 : 0
+        return u
+    }
 
     func draw(in view: MTKView) {
-        guard let descriptor = view.currentRenderPassDescriptor,
-              let drawable = view.currentDrawable,
-              let buffer = queue.makeCommandBuffer(),
-              let encoder = buffer.makeRenderCommandEncoder(descriptor: descriptor)
-        else { return }
-
-        let viewport = view.drawableSize
-
-        if let backdrop {
-            encoder.setRenderPipelineState(backdrop)
-            var vp = SIMD2<Float>(Float(viewport.width), Float(viewport.height))
-            encoder.setFragmentBytes(&vp, length: MemoryLayout<SIMD2<Float>>.stride, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        // Counted here, before the drawable guard: the question a test needs
+        // answered is whether the invalidation reached the delegate at all.
+        // An off-screen window legitimately vends no drawable.
+        drawCount += 1
+        guard let drawable = view.currentDrawable, let rpd = view.currentRenderPassDescriptor,
+              let cb = queue.makeCommandBuffer() else {
+            log("no drawable (size \(view.drawableSize), window \(view.window != nil))")
+            return
         }
-
-        if let pipeline, let texture {
-            var u = uniforms
-            (u.scale, u.offset) = samplingTransform(viewport: viewport)
-            encoder.setRenderPipelineState(pipeline)
-            encoder.setFragmentTexture(texture, index: 0)
-            encoder.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        var shown: MTLTexture? = nil
+        if let base {
+            if showOriginal, let original { shown = original }
+            else if let dst = ensureAdjusted(for: base) {
+                if layer2Dirty {
+                    encodeLayer2(cb, src: base, dst: dst)
+                    layer2Dirty = false
+                    if !histogramInFlight {
+                        histogramInFlight = true
+                        encodeHistogram(cb, src: dst)
+                        cb.addCompletedHandler { [weak self] _ in
+                            Task { @MainActor in
+                                self?.histogramInFlight = false
+                                self?.publishHistogram()
+                            }
+                        }
+                    }
+                }
+                shown = dst
+            }
         }
-
-        encoder.endEncoding()
-        buffer.present(drawable)
-        buffer.commit()
+        let bs = Float(view.window?.backingScaleFactor ?? viewport.backingScale)
+        var u = canvasUniforms(shown: shown, viewportSize: view.drawableSize, backingScale: CGFloat(bs))
+        log("base=\(base.map { "\($0.width)x\($0.height)" } ?? "nil") shown=\(shown != nil) " +
+            "detail=\(showsDetail) scale=\(viewport.scale) offset=\(viewport.offset) drawable=\(view.drawableSize)")
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: Double(u.surroundGray), green: Double(u.surroundGray), blue: Double(u.surroundGray), alpha: 1)
+        guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
+        if let shown {
+            enc.setRenderPipelineState(quadPipelineDrawable)
+            enc.setFragmentTexture(shown, index: 0)
+            enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        }
+        enc.endEncoding()
+        cb.present(drawable)
+        cb.commit()
     }
 
-    /// Map viewport uv to image uv, fitted and clamped.
-    ///
-    /// Capture One's canvas behaviour, and the point of it: **the image never
-    /// leaves the viewport.** Below fit scale it is centred and pan is
-    /// ignored entirely; above it, pan is clamped so an image edge can never
-    /// be dragged inside the viewport edge. There is no scrollable void to
-    /// get lost in and no way to lose the picture off-screen — a free-panning
-    /// canvas costs the user a "where did it go" every time they zoom.
-    ///
-    /// Zoom is a transform on the sampling coordinates, not a re-render, so
-    /// all of this is free within the resident buffer.
-    func samplingTransform(viewport: CGSize) -> (SIMD2<Float>, SIMD2<Float>) {
-        guard textureSize.width > 0, textureSize.height > 0,
-              viewport.width > 0, viewport.height > 0 else {
-            return (.init(1, 1), .zero)
+    // MARK: offscreen (export, snapshot, tests)
+
+    /// Run Layer 2 over any texture synchronously. Used by export at full
+    /// resolution and by the tests.
+    func applyLayer2(to src: MTLTexture, uniforms: Layer2Uniforms? = nil) -> MTLTexture? {
+        guard let dst = store.makeWritable(width: src.width, height: src.height),
+              let cb = queue.makeCommandBuffer() else { return nil }
+        let saved = layer2
+        if let uniforms { layer2 = uniforms }
+        encodeLayer2(cb, src: src, dst: dst)
+        layer2 = saved
+        cb.commit()
+        cb.waitUntilCompleted()
+        return dst
+    }
+
+    /// Render the canvas exactly as the window would show it, into an image.
+    /// The snapshot harness uses this for the centre of the window.
+    func renderOffscreen(size: CGSize, backingScale: CGFloat) -> MTLTexture? {
+        let w = Int(size.width * backingScale), h = Int(size.height * backingScale)
+        guard w > 0, h > 0, let target = store.makeWritable(width: w, height: h, format: Renderer.offscreenFormat),
+              let cb = queue.makeCommandBuffer() else { return nil }
+        var shown: MTLTexture? = nil
+        if let base, let dst = ensureAdjusted(for: base) {
+            encodeLayer2(cb, src: base, dst: dst)
+            layer2Dirty = false
+            encodeHistogram(cb, src: dst)
+            shown = dst
         }
-        let imageAspect = textureSize.width / textureSize.height
-        let viewAspect = viewport.width / viewport.height
+        var u = canvasUniforms(shown: shown, viewportSize: CGSize(width: w, height: h), backingScale: backingScale)
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = target
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].storeAction = .store
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: Double(u.surroundGray), green: Double(u.surroundGray), blue: Double(u.surroundGray), alpha: 1)
+        guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
+        if let shown {
+            enc.setRenderPipelineState(quadPipelineOffscreen)
+            enc.setFragmentTexture(shown, index: 0)
+            enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        }
+        enc.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        if shown != nil { publishHistogram() }
+        return target
+    }
+}
 
-        // Fit: the whole frame visible, letterboxed on the shorter axis.
-        var sx = 1.0, sy = 1.0
-        if viewAspect > imageAspect { sx = viewAspect / imageAspect } else { sy = imageAspect / viewAspect }
-
-        let z = fitToWindow ? 1.0 : max(zoom / fitScale(viewport: viewport), 0.01)
-        sx /= z; sy /= z
-
-        // Centre, then pan — but only along an axis the image actually
-        // overflows. `sx < 1` means the sampled window is narrower than the
-        // image, i.e. there is something off-screen to pan to.
-        var ox = (1.0 - sx) / 2.0
-        var oy = (1.0 - sy) / 2.0
-        if sx < 1.0 { ox = (ox + pan.x).clamped(to: 0...(1.0 - sx)) }
-        if sy < 1.0 { oy = (oy + pan.y).clamped(to: 0...(1.0 - sy)) }
-        return (.init(Float(sx), Float(sy)), .init(Float(ox), Float(oy)))
+extension MTLTexture {
+    /// Read an rgba16Unorm texture back as a CGImage in Display P3 (no
+    /// conversion — the bytes are P3-encoded already; the tag says so).
+    func makeCGImage() -> CGImage? {
+        guard pixelFormat == .rgba16Unorm else { return nil }
+        let bpr = width * 8
+        var data = Data(count: bpr * height)
+        data.withUnsafeMutableBytes { raw in
+            getBytes(raw.baseAddress!, bytesPerRow: bpr, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        }
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 16, bitsPerPixel: 64, bytesPerRow: bpr,
+                       space: ImageDecoder.displayP3,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 
-    /// Screen pixels per image pixel when the frame is fitted. `zoom` is
-    /// expressed as an absolute magnification (1.0 == 100% == one image pixel
-    /// per point) so the toolbar can show a number that means something,
-    /// rather than a multiplier off an arbitrary fit.
-    func fitScale(viewport: CGSize) -> Double {
-        guard textureSize.width > 0, textureSize.height > 0 else { return 1 }
-        return min(viewport.width / textureSize.width, viewport.height / textureSize.height)
-    }
-
-    /// True when the canvas is magnifying past the resident buffer's own
-    /// resolution — there is no more data up there, so the badge says `soft`.
-    func isSoft(viewport: CGSize) -> Bool {
-        guard !fitToWindow, textureSize.width > 0 else { return false }
-        return zoom > 1.001
+    /// Raw 16-bit RGBA bytes, top row first.
+    func rgba16Bytes() -> Data {
+        let bpr = width * 8
+        var data = Data(count: bpr * height)
+        data.withUnsafeMutableBytes { raw in
+            getBytes(raw.baseAddress!, bytesPerRow: bpr, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        }
+        return data
     }
 }

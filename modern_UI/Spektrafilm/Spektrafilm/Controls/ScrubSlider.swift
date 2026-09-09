@@ -1,215 +1,161 @@
-//  ScrubSlider.swift — the one slider in the app.
+//  ScrubSlider.swift — the one slider. Label | track with a pill knob | value.
 //
-//  UI-GUIDELINE §5: build it once, use it everywhere, and do not let a second
-//  slider implementation appear. SwiftUI's `Slider` fails every requirement
-//  below, and this control is used for every parameter, so it is the one
-//  component worth building carefully.
-//
-//  The requirement that shapes the rest of the app is the last one:
-//
-//      continuous value updates during drag, with a distinct commit on release
-//
-//  The release is what fires `reprint`. Everything downstream — the ~193 ms
-//  budget, the `preview` badge, sending shoot-layer changes only on release
-//  because `cancel` cannot arrive mid-render — depends on drag and commit
-//  being two different events rather than one stream.
+//  Built once and used everywhere. Drag anywhere on the track, ⌥ for ×0.25
+//  sensitivity, ⇧ snaps to `snap`, double-click resets to `zero`, and the
+//  value column is an editable field. `onCommit` fires on release; continuous
+//  updates go through the binding while dragging.
 
 import SwiftUI
 
 struct ScrubSlider: View {
     let label: String
+    var sublabel: String? = nil
     @Binding var value: Double
     let range: ClosedRange<Double>
-
-    /// Where the tick goes, and what a double-click resets to.
-    ///
-    /// For print-side controls this is the **auto-solve value**, not the
-    /// parameter's mathematical zero. Frontend SPEC §5.2 puts PRD §0's model
-    /// — sliders exist to override the auto-solve — directly into the
-    /// interface, and it is what makes paste-settings meaningful across
-    /// frames: pasting offsets means "same print recipe, each frame solves
-    /// its own exposure", which is what a lab does across a roll.
     var zero: Double = 0
-
-    /// Display as an offset from `zero` rather than as an absolute value.
-    var showsOffset = false
-    var unit: String?
-    var decimals: Int = 2
-    /// Track tint. Only the two filter-pack sliders pass one — UI-GUIDELINE
-    /// §5 makes them the only coloured controls in the app.
-    var tint: LinearGradient?
-    /// Fires once, on release. Not on every drag event.
+    var snap: Double = 0.5
+    var format: (Double) -> String = { String(format: "%.1f", $0) }
+    var parse: (String) -> Double? = { Double($0.replacingOccurrences(of: ",", with: ".")) }
+    var trackGradient: [Color]? = nil
+    var disabled = false
     var onCommit: () -> Void = {}
 
     @State private var dragStart: Double?
     @State private var editing = false
-    @State private var draft = ""
-    @State private var hovering = false
-    @FocusState private var fieldFocused: Bool
-
-    private var fraction: Double {
-        (value - range.lowerBound) / max(range.upperBound - range.lowerBound, .ulpOfOne)
-    }
-    private var zeroFraction: Double {
-        (zero - range.lowerBound) / max(range.upperBound - range.lowerBound, .ulpOfOne)
-    }
-    private var displayed: Double { showsOffset ? value - zero : value }
-
-    private var text: String {
-        let v = displayed
-        let sign = (showsOffset && v > 0) ? "+" : ""
-        return sign + String(format: "%.\(decimals)f", v) + (unit.map { " \($0)" } ?? "")
-    }
+    @State private var text = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(label)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 4)
-                valueField
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(Theme.Font.label)
+                if let sublabel { Text(sublabel).font(Theme.Font.sublabel).foregroundStyle(Theme.secondaryText) }
             }
+            .foregroundStyle(disabled ? Theme.dim : Theme.text)
+            .frame(width: Theme.Metric.sliderLabelWidth, alignment: .leading)
+            .lineLimit(1)
             track
+            valueField
+                .frame(width: Theme.Metric.sliderValueWidth, alignment: .trailing)
         }
-        .onHover { hovering = $0 }
+        .frame(height: sublabel == nil ? Theme.Metric.rowHeight + 4 : Theme.Metric.rowHeight + 14)
+        .opacity(disabled ? 0.6 : 1)
+        .allowsHitTesting(!disabled)
     }
 
-    // MARK: - the editable numeric field
-
-    private var valueField: some View {
-        Group {
-            if editing {
-                TextField("", text: $draft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11, design: .monospaced))
-                    .monospacedDigit()
-                    .multilineTextAlignment(.trailing)
-                    .focused($fieldFocused)
-                    .onSubmit(commitDraft)
-                    .onExitCommand { editing = false }
-            } else {
-                Text(text)
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
-                    .onTapGesture(count: 2) { beginEditing() }
-            }
-        }
-        // Fixed width with tabular figures so the field does not jump while
-        // the value changes under a drag.
-        .frame(width: 64, alignment: .trailing)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
-        .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary))
-        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(
-            editing ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Theme.hairline),
-            lineWidth: 1))
+    private var fraction: CGFloat {
+        CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound)).clamped(to: 0...1)
     }
-
-    private func beginEditing() {
-        draft = String(format: "%.\(decimals)f", displayed)
-        editing = true
-        fieldFocused = true
+    private var zeroFraction: CGFloat {
+        CGFloat((zero - range.lowerBound) / (range.upperBound - range.lowerBound)).clamped(to: 0...1)
     }
-
-    private func commitDraft() {
-        if let typed = Double(draft.trimmingCharacters(in: .whitespaces)) {
-            value = (showsOffset ? typed + zero : typed).clamped(to: range)
-            onCommit()
-        }
-        editing = false
-    }
-
-    // MARK: - the track
 
     private var track: some View {
         GeometryReader { geo in
             let w = geo.size.width
+            let knobW = Theme.Metric.knobSize.width
+            let x = fraction * (w - knobW) + knobW / 2
             ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary).frame(height: 4)
-                if let tint {
-                    Capsule().fill(tint).frame(height: 4).opacity(0.8)
+                Group {
+                    if let g = trackGradient {
+                        Capsule().fill(LinearGradient(colors: g, startPoint: .leading, endPoint: .trailing))
+                    } else {
+                        Capsule().fill(Theme.dim)
+                    }
                 }
-
-                // Fill drawn from the zero tick outward, not from the left
-                // edge. On a bipolar control (the filter shifts) filling from
-                // the left would read as "how much" when the value is "which
-                // direction, how far".
-                let x0 = min(zeroFraction, fraction) * w
-                let x1 = max(zeroFraction, fraction) * w
-                Capsule()
-                    .fill(tint == nil ? AnyShapeStyle(Color.accentColor)
-                                      : AnyShapeStyle(Color.accentColor.opacity(0.45)))
-                    .frame(width: max(x1 - x0, 0), height: 4)
-                    .offset(x: x0)
-
-                // The zero tick. Must be legible: print-side sliders show
-                // offset from the solve, so this is where "no override" is.
-                Rectangle()
-                    .fill(.secondary)
-                    .frame(width: 1, height: 9)
-                    .offset(x: zeroFraction * w - 0.5)
-
-                Circle()
-                    .fill(.white)
-                    .frame(width: hovering || dragStart != nil ? 11 : 9)
-                    .shadow(color: .black.opacity(0.5), radius: 1, y: 0.5)
-                    .offset(x: fraction * w - (hovering || dragStart != nil ? 5.5 : 4.5))
+                .frame(height: Theme.Metric.trackHeight)
+                .padding(.horizontal, knobW / 2)
+                // Zero tick, only when zero is not at an end.
+                if zeroFraction > 0.001 && zeroFraction < 0.999 && abs(fraction - zeroFraction) > 0.02 {
+                    Rectangle().fill(Theme.text.opacity(0.55)).frame(width: 1, height: 6)
+                        .offset(x: zeroFraction * (w - knobW) + knobW / 2 - 0.5)
+                }
+                RoundedRectangle(cornerRadius: Theme.Metric.knobRadius, style: .continuous)
+                    .fill(Theme.knob)
+                    .frame(width: knobW, height: Theme.Metric.knobSize.height)
+                    .offset(x: x - knobW / 2)
             }
-            .frame(height: 14)
-            .contentShape(.rect)
-            // Drag anywhere on the track, not just on the knob.
+            .frame(height: geo.size.height)
+            .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .modifiers([])
-                    .onChanged { g in scrub(g, width: w, sensitivity: 1.0, snap: false) }
-                    .onEnded { _ in endScrub() }
+                    .onChanged { g in
+                        let mods = NSEvent.modifierFlags
+                        let span = range.upperBound - range.lowerBound
+                        if dragStart == nil {
+                            dragStart = value
+                            // Jump to the click point on a fresh press.
+                            let f = ((g.startLocation.x - knobW / 2) / max(w - knobW, 1)).clamped(to: 0...1)
+                            let target = range.lowerBound + Double(f) * span
+                            if abs(target - value) > span * 0.03 { dragStart = target }
+                        }
+                        let sens: Double = mods.contains(.option) ? 0.25 : 1
+                        var v = (dragStart ?? value) + Double(g.translation.width / max(w - knobW, 1)) * span * sens
+                        if mods.contains(.shift) { v = (v / snap).rounded() * snap }
+                        value = v.clamped(to: range)
+                    }
+                    .onEnded { _ in dragStart = nil; onCommit() }
             )
-            // ⌥ for fine adjustment at 1/4 sensitivity; ⇧ to snap. Separate
-            // gestures rather than reading NSEvent modifiers inside one,
-            // because SwiftUI delivers modifier state on the gesture, not on
-            // the value.
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .modifiers(.option)
-                    .onChanged { g in scrub(g, width: w, sensitivity: 0.25, snap: false) }
-                    .onEnded { _ in endScrub() }
-            )
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .modifiers(.shift)
-                    .onChanged { g in scrub(g, width: w, sensitivity: 1.0, snap: true) }
-                    .onEnded { _ in endScrub() }
-            )
-            .onTapGesture(count: 2) {
-                value = zero
-                onCommit()
-            }
+            .simultaneousGesture(TapGesture(count: 2).onEnded { value = zero; onCommit() })
         }
-        .frame(height: 14)
+        .frame(height: Theme.Metric.rowHeight)
     }
 
-    private func scrub(_ g: DragGesture.Value, width: CGFloat,
-                       sensitivity: Double, snap: Bool) {
-        // Capture the start on begin, then add scaled translation. Reading
-        // `g.location` directly would make ⌥ fine-adjust impossible, since a
-        // position-based track has no notion of sensitivity.
-        if dragStart == nil { dragStart = value }
-        guard let start = dragStart, width > 0 else { return }
-        let span = range.upperBound - range.lowerBound
-        var next = start + (g.translation.width / width) * span * sensitivity
-        if snap {
-            let step = span > 20 ? 5.0 : (span > 4 ? 0.5 : 0.1)
-            next = (next / step).rounded() * step
+    private var valueField: some View {
+        Group {
+            if editing {
+                TextField("", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(Theme.Font.value)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(Theme.text)
+                    .focused($focused)
+                    .onSubmit { commitText() }
+                    .onChange(of: focused) { _, f in if !f { commitText() } }
+            } else {
+                Text(format(value))
+                    .font(Theme.Font.value)
+                    .foregroundStyle(Theme.text)
+                    .contentShape(Rectangle())
+                    .onTapGesture { text = format(value); editing = true; focused = true }
+            }
         }
-        value = next.clamped(to: range)
+        .lineLimit(1)
     }
 
-    private func endScrub() {
-        dragStart = nil
-        // The one call. Everything downstream of a parameter change hangs off
-        // this, not off the drag.
-        onCommit()
+    private func commitText() {
+        if let v = parse(text) { value = v.clamped(to: range); onCommit() }
+        editing = false
+    }
+}
+
+/// A checkbox drawn as the design draws it: a 9 pt hollow square, filled when on.
+struct CheckBox: View {
+    @Binding var isOn: Bool
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 1.5).stroke(Theme.text, lineWidth: 1.2)
+                if isOn { RoundedRectangle(cornerRadius: 1).fill(Theme.text).padding(2.2) }
+            }
+            .frame(width: Theme.Metric.checkbox, height: Theme.Metric.checkbox)
+            .padding(6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Label at the left, checkbox at the right — the Features rows.
+struct ToggleRow: View {
+    let label: String
+    @Binding var isOn: Bool
+    var body: some View {
+        HStack {
+            Text(label).font(Theme.Font.label).foregroundStyle(Theme.text)
+            Spacer()
+            CheckBox(isOn: $isOn).padding(.trailing, -6)
+        }
+        .frame(height: Theme.Metric.rowHeight + 3)
     }
 }

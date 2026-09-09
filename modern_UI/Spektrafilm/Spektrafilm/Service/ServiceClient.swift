@@ -1,169 +1,187 @@
-//  ServiceClient.swift — the stdio JSON-RPC client. Defined, not yet launched.
+//  ServiceClient.swift — one long-lived `python -m spektrafilm.service`,
+//  JSON-RPC 2.0 over stdio, one request at a time.
 //
-//  Step one of the build deliberately does not hook this up: the shell is
-//  verified on its own first (UI-GUIDELINE §10 steps 1–3), and the service is
-//  step 4. What exists here is the transport, correct and complete, so that
-//  wiring it up later is a call site change and not a redesign.
-//
-//  An `actor`, because the transport is single-flight by design and not by
-//  accident: `transport.py` handles one request at a time on the main thread
-//  because numba's `workqueue` threading layer is not threadsafe and aborts
-//  the *process* on concurrent entry (API-SPEC §10.5). The actor makes that a
-//  compile-time property instead of a convention someone breaks later.
-//
-//  One process per app launch, never per request: API-SPEC §10.5 measured a
-//  1.76 s import plus a one-time JIT cost, and flat RSS with no drift over 12
-//  consecutive reprints. Process-per-request pays the import on every slider
-//  release.
+//  An actor, so the single-flight property of the transport (numba's
+//  `workqueue` layer is not threadsafe — API-SPEC §10.5) is enforced by the
+//  compiler instead of by convention. Large data never crosses this channel:
+//  the service writes files and returns paths.
 
 import Foundation
 
 actor ServiceClient {
-    enum Failure: Error, LocalizedError {
-        case notRunning
-        case terminated(status: Int32, stderr: String)
-        case badResponse(String)
-        case service(ServiceError)
+    enum State: Sendable, Equatable { case stopped, starting, running, failed(String) }
 
-        var errorDescription: String? {
-            switch self {
-            case .notRunning: "the render service is not running"
-            case .terminated(let s, let e): "the render service exited (\(s))\n\(e)"
-            case .badResponse(let m): "malformed response: \(m)"
-            case .service(let e): e.message
-            }
-        }
+    private(set) var state: State = .stopped
+    private var process: Process?
+    private var stdin: FileHandle?
+    private var reader: LineReader?
+    private var nextID = 1
+    let workspace: URL
+    let repo: URL
+
+    /// Called on the main actor when the process ends unexpectedly.
+    var onTermination: (@Sendable (String) -> Void)?
+
+    init(repo: URL, workspace: URL) {
+        self.repo = repo
+        self.workspace = workspace
     }
 
-    private var process: Process?
-    private var toService: FileHandle?
-    private var fromService: FileHandle?
-    private var stderrTail: [String] = []
-    private var nextID = 1
-    /// Bytes read from stdout that do not yet form a complete line. The
-    /// service writes one JSON object per line; a pipe read does not respect
-    /// that boundary, so partial lines must be carried across reads.
-    private var inbox = Data()
-
-    // MARK: - lifecycle
-
-    /// Launch `python -m spektrafilm.service --workspace <dir>`.
-    ///
-    /// `interpreter` is the bundled standalone CPython once bundling lands
-    /// (UI-GUIDELINE §9); during development it is the repo's `.venv`.
-    func start(interpreter: URL, repoRoot: URL, workspace: URL) throws {
-        try FileManager.default.createDirectory(
-            at: workspace, withIntermediateDirectories: true)
-
-        let p = Process()
-        p.executableURL = interpreter
-        p.arguments = ["-m", "spektrafilm.service", "--workspace", workspace.path]
-        p.currentDirectoryURL = repoRoot
-
-        var env = ProcessInfo.processInfo.environment
-        // §9: the bundled interpreter must not be shadowed by a user
-        // site-packages directory.
-        env["PYTHONNOUSERSITE"] = "1"
-        env["PYTHONUNBUFFERED"] = "1"
-        p.environment = env
-
-        let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
-        p.standardInput = inPipe; p.standardOutput = outPipe; p.standardError = errPipe
-
-        // An unread stderr pipe eventually fills and blocks the child, and the
-        // tail is the only diagnostic when the service dies mid-render.
-        errPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { await self?.appendStderr(text) }
+    static func defaultRepo() -> URL {
+        if let env = ProcessInfo.processInfo.environment["SPEKTRAFILM_REPO"] {
+            return URL(fileURLWithPath: env)
         }
+        if let stored = UserDefaults.standard.string(forKey: "repoPath"), !stored.isEmpty {
+            return URL(fileURLWithPath: stored)
+        }
+        // The app lives at <repo>/modern_UI/Spektrafilm/...; walk up until
+        // `src/spektrafilm` is found.
+        var url = Bundle.main.bundleURL
+        for _ in 0..<8 {
+            url.deleteLastPathComponent()
+            if FileManager.default.fileExists(atPath: url.appending(path: "src/spektrafilm").path) { return url }
+        }
+        return URL(fileURLWithPath: NSHomeDirectory()).appending(path: "Documents/Summer 2026/spektrafilm")
+    }
 
+    func start() throws {
+        guard state != .running, state != .starting else { return }
+        state = .starting
+        let python = repo.appending(path: ".venv/bin/python")
+        guard FileManager.default.isExecutableFile(atPath: python.path) else {
+            state = .failed("no interpreter at \(python.path)")
+            throw ClientError.noInterpreter(python.path)
+        }
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let p = Process()
+        p.executableURL = python
+        p.arguments = ["-W", "ignore", "-m", "spektrafilm.service", "--workspace", workspace.path]
+        p.currentDirectoryURL = repo
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONPATH"] = repo.appending(path: "src").path
+        p.environment = env
+        let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
+        p.standardInput = inPipe
+        p.standardOutput = outPipe
+        p.standardError = errPipe
+        let stderrLog = workspace.appending(path: "service.stderr.log")
+        FileManager.default.createFile(atPath: stderrLog.path, contents: nil)
+        let errHandle = try FileHandle(forWritingTo: stderrLog)
+        errPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData
+            if !d.isEmpty { try? errHandle.write(contentsOf: d) }
+        }
+        let term = onTermination
+        p.terminationHandler = { proc in
+            let reason = "render service exited (status \(proc.terminationStatus)); see \(stderrLog.path)"
+            Task { @MainActor in term?(reason) }
+        }
         try p.run()
         process = p
-        toService = inPipe.fileHandleForWriting
-        fromService = outPipe.fileHandleForReading
-        inbox = Data()
+        stdin = inPipe.fileHandleForWriting
+        reader = LineReader(handle: outPipe.fileHandleForReading)
+        state = .running
     }
 
     func stop() {
-        toService?.closeFile()
         process?.terminate()
-        process = nil; toService = nil; fromService = nil
+        process = nil
+        state = .stopped
     }
 
-    var isRunning: Bool { process?.isRunning ?? false }
-    var recentStderr: String { stderrTail.suffix(40).joined(separator: "\n") }
-
-    private func appendStderr(_ text: String) {
-        stderrTail.append(contentsOf: text.split(separator: "\n").map(String.init))
-        if stderrTail.count > 200 { stderrTail.removeFirst(stderrTail.count - 200) }
-    }
-
-    // MARK: - calling
-
-    func call<Response: Decodable>(_ method: Method,
-                                   _ params: some Encodable = EmptyParams(),
-                                   as: Response.Type = Response.self) throws -> Response {
-        let line = try roundTrip(method: method.rawValue, params: params)
-        let envelope = try JSONDecoder().decode(Envelope<Response>.self, from: line)
-        if let error = envelope.error {
-            // `data` carries the service's own taxonomy; the JSON-RPC `code`
-            // is only a transport code and says nothing about the category.
-            throw Failure.service(error.data ?? ServiceError(
-                code: "transport", category: "bug",
-                message: error.message, param: nil, traceback: nil))
-        }
-        guard let result = envelope.result else {
-            throw Failure.badResponse("neither result nor error")
-        }
-        return result
-    }
-
-    private func roundTrip(method: String, params: some Encodable) throws -> Data {
-        guard let toService, let fromService, process?.isRunning == true else {
-            throw Failure.notRunning
-        }
-        nextID += 1
-        let request = Request(id: nextID, method: method, params: params)
-        var payload = try JSONEncoder().encode(request)
-        payload.append(0x0A)                                  // newline framing
-        try toService.write(contentsOf: payload)
-
-        while true {
-            if let newline = inbox.firstIndex(of: 0x0A) {
-                let line = inbox[inbox.startIndex..<newline]
-                inbox.removeSubrange(inbox.startIndex...newline)
-                if !line.isEmpty { return Data(line) }
-                continue
+    enum ClientError: Error, CustomStringConvertible {
+        case noInterpreter(String), notRunning, badResponse(String), rpc(ServiceError), transport(String)
+        var description: String {
+            switch self {
+            case .noInterpreter(let p): "no Python interpreter at \(p)"
+            case .notRunning: "render service is not running"
+            case .badResponse(let s): "bad response: \(s)"
+            case .rpc(let e): e.description
+            case .transport(let s): s
             }
-            let chunk = fromService.availableData
-            if chunk.isEmpty {
-                let status = process?.terminationStatus ?? -1
-                throw Failure.terminated(status: status, stderr: recentStderr)
-            }
-            inbox.append(chunk)
         }
-    }
-
-    // MARK: - wire shapes
-
-    struct EmptyParams: Encodable, Sendable {}
-
-    private struct Request<P: Encodable>: Encodable {
-        let jsonrpc = "2.0"
-        let id: Int
-        let method: String
-        let params: P
     }
 
     private struct Envelope<R: Decodable>: Decodable {
+        let id: Int?
         let result: R?
-        let error: ErrorBody?
+        let error: RPCError?
+        struct RPCError: Decodable { let code: Int; let message: String; let data: ServiceError? }
+    }
 
-        struct ErrorBody: Decodable {
-            let code: Int
-            let message: String
-            let data: ServiceError?
+    /// Send one request and wait for its reply. Serialised by the actor.
+    func call<P: Encodable, R: Decodable>(_ method: Method, _ params: P, as: R.Type = R.self) async throws -> R {
+        if state != .running { try start() }
+        guard let stdin, let reader else { throw ClientError.notRunning }
+        let id = nextID; nextID += 1
+        let enc = JSONEncoder()
+        let paramsData = try enc.encode(params)
+        let paramsJSON = String(decoding: paramsData, as: UTF8.self)
+        let line = "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"method\":\"\(method.rawValue)\",\"params\":\(paramsJSON)}\n"
+        try stdin.write(contentsOf: Data(line.utf8))
+        guard let reply = await reader.readLine() else {
+            state = .failed("service closed its output")
+            throw ClientError.transport("render service closed its output")
+        }
+        let env: Envelope<R>
+        do { env = try JSONDecoder().decode(Envelope<R>.self, from: reply) }
+        catch { throw ClientError.badResponse(String(decoding: reply.prefix(400), as: UTF8.self)) }
+        if let e = env.error {
+            throw ClientError.rpc(e.data ?? ServiceError(code: "rpc_\(e.code)", category: "bug", message: e.message, param: nil, traceback: nil))
+        }
+        guard let r = env.result else { throw ClientError.badResponse("no result") }
+        return r
+    }
+
+    func call<R: Decodable>(_ method: Method, as: R.Type = R.self) async throws -> R {
+        try await call(method, [String: String](), as: R.self)
+    }
+}
+
+/// Reads newline-delimited messages from a pipe on a background thread.
+final class LineReader: @unchecked Sendable {
+    private let handle: FileHandle
+    private var buffer = Data()
+    private let lock = NSLock()
+    private var waiters: [CheckedContinuation<Data?, Never>] = []
+    private var lines: [Data] = []
+    private var closed = false
+
+    init(handle: FileHandle) {
+        self.handle = handle
+        handle.readabilityHandler = { [weak self] h in
+            let d = h.availableData
+            self?.push(d)
+        }
+    }
+
+    private func push(_ d: Data) {
+        lock.lock()
+        if d.isEmpty { closed = true } else {
+            buffer.append(d)
+            while let nl = buffer.firstIndex(of: 0x0A) {
+                let line = buffer.subdata(in: buffer.startIndex..<nl)
+                buffer.removeSubrange(buffer.startIndex...nl)
+                if !line.isEmpty { lines.append(line) }
+            }
+        }
+        var wake: [(CheckedContinuation<Data?, Never>, Data?)] = []
+        while !waiters.isEmpty, (!lines.isEmpty || closed) {
+            let w = waiters.removeFirst()
+            wake.append((w, lines.isEmpty ? nil : lines.removeFirst()))
+        }
+        lock.unlock()
+        for (w, l) in wake { w.resume(returning: l) }
+    }
+
+    func readLine() async -> Data? {
+        await withCheckedContinuation { c in
+            lock.lock()
+            if !lines.isEmpty { let l = lines.removeFirst(); lock.unlock(); c.resume(returning: l); return }
+            if closed { lock.unlock(); c.resume(returning: nil); return }
+            waiters.append(c)
+            lock.unlock()
         }
     }
 }

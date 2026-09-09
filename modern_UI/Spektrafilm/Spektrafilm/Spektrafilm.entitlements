@@ -2,19 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- UI-GUIDELINE §9. The App Sandbox is OFF deliberately: this app spawns
-	     a Python subprocess and reads arbitrary folders. The sandbox buys
-	     nothing for a personal tool and costs a week. -->
-	<key>com.apple.security.app-sandbox</key>
-	<false/>
-
-	<!-- numba JIT writes executable memory, which the hardened runtime blocks.
-	     Without this the service dies on the first render with no useful
-	     message. If llvmlite still fails, add
-	     com.apple.security.cs.allow-unsigned-executable-memory. -->
-	<key>com.apple.security.cs.allow-jit</key>
-	<true/>
-	<key>com.apple.security.cs.disable-library-validation</key>
-	<true/>
+	<!-- App Sandbox is OFF on purpose: the app spawns a Python subprocess
+	     (the render service) and reads arbitrary folders. -->
+	<key>com.apple.security.app-sandbox</key><false/>
+	<key>com.apple.security.cs.allow-jit</key><true/>
+	<key>com.apple.security.cs.disable-library-validation</key><true/>
 </dict>
 </plist>

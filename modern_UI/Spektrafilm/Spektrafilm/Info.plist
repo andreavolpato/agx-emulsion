@@ -2,44 +2,30 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>0.1</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>15.0</string>
-	<key>NSHighResolutionCapable</key>
-	<true/>
-	<!-- Opening a folder is the entire session model (frontend SPEC §7). -->
-	<key>NSDocumentsFolderUsageDescription</key>
-	<string>Spektrafilm opens a folder of negatives to print from.</string>
-	<key>NSDesktopFolderUsageDescription</key>
-	<string>Spektrafilm opens a folder of negatives to print from.</string>
-	<key>NSDownloadsFolderUsageDescription</key>
-	<string>Spektrafilm opens a folder of negatives to print from.</string>
+	<key>CFBundleDevelopmentRegion</key><string>en</string>
+	<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>0.2</string>
+	<key>CFBundleVersion</key><string>2</string>
+	<key>LSMinimumSystemVersion</key><string>15.0</string>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>NSDocumentsFolderUsageDescription</key><string>Spektrafilm opens a folder of negatives to print from.</string>
+	<key>NSDesktopFolderUsageDescription</key><string>Spektrafilm opens a folder of negatives to print from.</string>
+	<key>NSDownloadsFolderUsageDescription</key><string>Spektrafilm opens a folder of negatives to print from.</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
+			<key>CFBundleTypeRole</key><string>Editor</string>
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>public.camera-raw-image</string>
 				<string>public.tiff</string>
 				<string>public.png</string>
 				<string>public.jpeg</string>
+				<string>public.heic</string>
 				<string>public.folder</string>
 			</array>
 		</dict>

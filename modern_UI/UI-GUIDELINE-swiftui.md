@@ -59,7 +59,7 @@ Spektrafilm.xcodeproj
     Canvas/
       MetalCanvasView.swift        NSViewRepresentable wrapping MTKView
       Renderer.swift               MTKViewDelegate, command encoding
-      Shaders.metal                LUT sample, layer-2 adjustments, masks
+      Shaders.metal                LUT sample, layer-2 adjustments, masks 
       TextureStore.swift           negative / LUT / ROI texture lifetimes
     Panels/
       FilmPanel.swift              left column — layer 1

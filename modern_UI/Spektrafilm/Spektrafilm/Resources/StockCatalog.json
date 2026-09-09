@@ -1,0 +1,312 @@
+{
+ "stocks": [
+  {
+   "id": "fujifilm_c200",
+   "name": "Fujifilm C200",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "fujifilm_crystal_archive_typeii",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  },
+  {
+   "id": "fujifilm_crystal_archive_typeii",
+   "name": "Fujifilm Crystal Archive Type II",
+   "stage": "printing",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": null,
+   "hasPreviewLUT": true,
+   "pairedFilm": "fujifilm_pro_400h",
+   "cover": null
+  },
+  {
+   "id": "fujifilm_pro_400h",
+   "name": "Fujifilm Pro 400H",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "fujifilm_crystal_archive_typeii",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  },
+  {
+   "id": "fujifilm_provia_100f",
+   "name": "Fujifilm Provia 100F",
+   "stage": "filming",
+   "use": "still",
+   "type": "positive",
+   "targetPrint": null,
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "fujifilm_provia_100f.jpg"
+  },
+  {
+   "id": "fujifilm_velvia_100",
+   "name": "Fujifilm Velvia 100",
+   "stage": "filming",
+   "use": "still",
+   "type": "positive",
+   "targetPrint": null,
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "fujifilm_velvia_100.jpg"
+  },
+  {
+   "id": "fujifilm_xtra_400",
+   "name": "Fujifilm X-Tra 400",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "fujifilm_crystal_archive_typeii",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "fujifilm_xtra_400.jpg"
+  },
+  {
+   "id": "kodak_2383",
+   "name": "Kodak Vision 2383",
+   "stage": "printing",
+   "use": "cine",
+   "type": "negative",
+   "targetPrint": null,
+   "hasPreviewLUT": true,
+   "pairedFilm": "kodak_vision3_250d",
+   "cover": null
+  },
+  {
+   "id": "kodak_2393",
+   "name": "Kodak Vision Premier 2393",
+   "stage": "printing",
+   "use": "cine",
+   "type": "negative",
+   "targetPrint": null,
+   "hasPreviewLUT": true,
+   "pairedFilm": "kodak_vision3_250d",
+   "cover": null
+  },
+  {
+   "id": "kodak_ektachrome_100",
+   "name": "Kodak Ektachrome 100",
+   "stage": "filming",
+   "use": "still",
+   "type": "positive",
+   "targetPrint": null,
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "kodak_ektachrome_100.jpg"
+  },
+  {
+   "id": "kodak_ektacolor_edge",
+   "name": "Kodak Ektacolor Edge",
+   "stage": "printing",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": null,
+   "hasPreviewLUT": true,
+   "pairedFilm": "kodak_portra_400",
+   "cover": null
+  },
+  {
+   "id": "kodak_ektar_100",
+   "name": "Kodak Ektar 100",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "kodak_portra_endura",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  },
+  {
+   "id": "kodak_endura_premier",
+   "name": "Kodak Professional Endura Premier",
+   "stage": "printing",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": null,
+   "hasPreviewLUT": true,
+   "pairedFilm": "kodak_portra_400",
+   "cover": null
+  },
+  {
+   "id": "kodak_gold_200",
+   "name": "Kodak Gold 200",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "kodak_portra_endura",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "kodak_gold_200.jpg"
+  },
+  {
+   "id": "kodak_kodachrome_64",
+   "name": "Kodak Kodachrome 64",
+   "stage": "filming",
+   "use": "still",
+   "type": "positive",
+   "targetPrint": null,
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  },
+  {
+   "id": "kodak_portra_160",
+   "name": "Kodak Portra 160",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "kodak_portra_endura",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "kodak_portra_160.jpg"
+  },
+  {
+   "id": "kodak_portra_400",
+   "name": "Kodak Portra 400",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "kodak_portra_endura",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "kodak_portra_400.jpg"
+  },
+  {
+   "id": "kodak_portra_800",
+   "name": "Kodak Portra 800",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "kodak_portra_endura",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "kodak_portra_800.jpg"
+  },
+  {
+   "id": "kodak_portra_800_push1",
+   "name": "Kodak Portra 800 (Push 1)",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "kodak_portra_endura",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "kodak_portra_800_push1.jpg"
+  },
+  {
+   "id": "kodak_portra_800_push2",
+   "name": "Kodak Portra 800 (Push 2)",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "kodak_portra_endura",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "kodak_portra_800_push2.jpg"
+  },
+  {
+   "id": "kodak_portra_endura",
+   "name": "Kodak Professional Portra Endura",
+   "stage": "printing",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": null,
+   "hasPreviewLUT": true,
+   "pairedFilm": "kodak_portra_400",
+   "cover": null
+  },
+  {
+   "id": "kodak_supra_endura",
+   "name": "Kodak Professional Supra Endura",
+   "stage": "printing",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": null,
+   "hasPreviewLUT": true,
+   "pairedFilm": "kodak_portra_400",
+   "cover": null
+  },
+  {
+   "id": "kodak_ultra_endura",
+   "name": "Kodak Professional Ultra Endura",
+   "stage": "printing",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": null,
+   "hasPreviewLUT": true,
+   "pairedFilm": "kodak_portra_400",
+   "cover": null
+  },
+  {
+   "id": "kodak_ultramax_400",
+   "name": "Kodak Ultramax 400",
+   "stage": "filming",
+   "use": "still",
+   "type": "negative",
+   "targetPrint": "kodak_portra_endura",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": "kodak_ultramax_400.jpg"
+  },
+  {
+   "id": "kodak_verita_200d",
+   "name": "Kodak Verita 200D",
+   "stage": "filming",
+   "use": "cine",
+   "type": "negative",
+   "targetPrint": "kodak_2383",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  },
+  {
+   "id": "kodak_vision3_200t",
+   "name": "Kodak Vision3 200T",
+   "stage": "filming",
+   "use": "cine",
+   "type": "negative",
+   "targetPrint": "kodak_2383",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  },
+  {
+   "id": "kodak_vision3_250d",
+   "name": "Kodak Vision3 250D",
+   "stage": "filming",
+   "use": "cine",
+   "type": "negative",
+   "targetPrint": "kodak_2383",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  },
+  {
+   "id": "kodak_vision3_500t",
+   "name": "Kodak Vision3 500T",
+   "stage": "filming",
+   "use": "cine",
+   "type": "negative",
+   "targetPrint": "kodak_2383",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  },
+  {
+   "id": "kodak_vision3_50d",
+   "name": "Kodak Vision3 50D",
+   "stage": "filming",
+   "use": "cine",
+   "type": "negative",
+   "targetPrint": "kodak_2383",
+   "hasPreviewLUT": false,
+   "pairedFilm": null,
+   "cover": null
+  }
+ ]
+}
