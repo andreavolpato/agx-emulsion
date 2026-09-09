@@ -157,8 +157,9 @@ category of confusing failure).
 | date | from | to | request | status |
 |---|---|---|---|---|
 | 2026-09-09 | FE | BE | §3.1 `geometry` in `params_delta` — crop/rotate must survive export | open |
-| 2026-09-09 | FE | BE | §3.2 `exposure_mask` on `reprint` — not blocking, ships after the Layer-2 approximation | open |
-| 2026-09-09 | FE | BE | §3.3 ROI render | open |
+| 2026-09-09 | FE | BE | §3.2 `exposure_mask` on `reprint` — not blocking, ships after the Layer-2 approximation | **withdrawn 2026-09-10** — the user overrode HANDOFF-MASKS §1 and asked for Lightroom's masking (per-mask adjustment sets) rather than the darkroom dodge-and-burn model. That makes masks Layer 2 by construction, so this engine surface has no customer. |
+| 2026-09-09 | FE | BE | §3.3 ROI render | open, **low** — at 0.237 s for a full-tier reprint the latency it protects against has mostly evaporated |
+| 2026-09-10 | FE | BE | §3.1 raised to **first priority**: proportional to the render, and the render is now 1 s rather than 14. `Model/Geometry.swift`'s `sourcePoint(forOutput:imageSize:)` is the definition — top-left origin, rotation rigid in *pixels* | accepted by BE |
 | 2026-09-09 | FE | BE | §3.4 report `concurrent` in `capabilities` when true | open |
 
 ## 6. Wire changes actually made (append; this is the changelog FE reads)
