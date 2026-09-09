@@ -14,6 +14,9 @@ import SwiftUI
 
 enum CanvasTool: String, CaseIterable, Sendable { case select, hand, crop }
 
+/// A straighten gesture in progress, in source-normalised coordinates.
+struct StraightenLine: Equatable, Sendable { var from: CGPoint; var to: CGPoint }
+
 @MainActor
 protocol CanvasHost: AnyObject {
     var renderer: Renderer { get }
@@ -21,7 +24,14 @@ protocol CanvasHost: AnyObject {
     var pickerActive: Bool { get }
     func viewportChanged()
     func picked(normalised: CGPoint)
-    func cropDragged(rect: CropRect)
+    var geometry: Geometry { get }
+    /// The live tier's pixel size. The geometry is normalised against it, and
+    /// the rotation is rigid in *pixels*, so the hit tests need it.
+    var sourceImageSize: CGSize { get }
+    func geometryChanged(_ geometry: Geometry)
+    /// The line being drawn for a ⌘-drag straighten, or nil. Published so
+    /// `CropOverlay` can draw it; the gesture itself stays in the view.
+    func straightenPreview(_ line: StraightenLine?)
     func toggledOriginal(_ on: Bool)
     func contextMenu() -> NSMenu?
     func hovered(normalised: CGPoint?)
@@ -36,8 +46,17 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
     weak var host: CanvasHost?
     private var drawScheduled = false
     private var dragStart: CGPoint?
-    private var cropStart: CGPoint?
-    private var cropOrigin = CropRect.full
+    /// The crop gesture in flight. `.none` when the crop tool is not being
+    /// dragged; the rest carry what the drag needs to be idempotent — every
+    /// mouse move recomputes from `origin` rather than accumulating, so a
+    /// gesture that hits the frame edge and comes back does not drift.
+    private enum CropDrag {
+        case handle(CropHandle, origin: Geometry, grabOffset: CGSize)
+        case draw(from: CGPoint)
+        case straighten(from: CGPoint, origin: Geometry)
+    }
+    private var cropDrag: CropDrag?
+
     private var trackingArea: NSTrackingArea?
 
     override var isFlipped: Bool { true }
@@ -155,24 +174,69 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
         }
         switch host.tool {
         case .crop:
-            if let n = renderer.viewport.normalised(atView: p) {
-                cropStart = n
-                cropOrigin = renderer.crop
+            guard let n = renderer.viewport.normalised(atView: p) else { return }
+            let g = host.geometry
+            let size = host.sourceImageSize
+            // ⌘-drag draws a line that should be horizontal, and the frame
+            // straightens to it. Lightroom's and Capture One's gesture, and
+            // the only one that beats nudging a slider by eye.
+            if e.modifierFlags.contains(.command) {
+                cropDrag = .straighten(from: n, origin: g)
+                host.straightenPreview(StraightenLine(from: n, to: n))
+                return
+            }
+            // A grab area that is a constant size on screen: 10 pt, converted
+            // through the viewport so it is not enormous at 12 % zoom and
+            // unhittable at 400 %.
+            let tolerance = CanvasNSView.handleGrab / max(renderer.viewport.scale, 1e-6)
+            if let handle = g.handle(at: n, in: size, tolerance: tolerance) {
+                let c = g.centre
+                cropDrag = .handle(handle, origin: g,
+                                   grabOffset: CGSize(width: n.x - c.x, height: n.y - c.y))
+            } else {
+                cropDrag = .draw(from: n)
             }
         default:
             dragStart = p
         }
     }
 
+    /// Radius of a crop grip's grab area, in view points.
+    static let handleGrab: CGFloat = 10
+
     override func mouseDragged(with e: NSEvent) {
         guard let renderer, let host else { return }
         let p = local(e)
-        if let cropStart, host.tool == .crop {
-            let n = renderer.viewport.normalised(atView: p) ?? CGPoint(x: p.x.clamped(to: 0...1), y: p.y.clamped(to: 0...1))
-            let x0 = min(cropStart.x, n.x), y0 = min(cropStart.y, n.y)
-            let w = abs(n.x - cropStart.x), h = abs(n.y - cropStart.y)
-            if w > 0.01 && h > 0.01 {
-                host.cropDragged(rect: CropRect(x: x0, y: y0, width: w, height: h))
+        if let drag = cropDrag, host.tool == .crop {
+            // Clamped rather than dropped: a drag that leaves the image still
+            // has a meaning, and `Geometry` fits whatever comes out of it.
+            let ip = renderer.viewport.imagePoint(atView: p)
+            let img = renderer.viewport.image
+            let n = CGPoint(x: (ip.x / max(img.width, 1)).clamped(to: 0...1),
+                            y: (ip.y / max(img.height, 1)).clamped(to: 0...1))
+            let size = host.sourceImageSize
+            switch drag {
+            case .handle(.body, let origin, let grab):
+                let target = CGPoint(x: n.x - grab.width, y: n.y - grab.height)
+                let delta = CGSize(width: target.x - origin.centre.x, height: target.y - origin.centre.y)
+                host.geometryChanged(origin.moved(by: delta, in: size))
+            case .handle(let handle, let origin, _):
+                host.geometryChanged(origin.resized(handle: handle,
+                                                    to: origin.unrotated(n, in: size), in: size))
+            case .draw(let from):
+                let x0 = min(from.x, n.x), y0 = min(from.y, n.y)
+                let w = abs(n.x - from.x), h = abs(n.y - from.y)
+                guard w * size.width > Geometry.minSide, h * size.height > Geometry.minSide else { return }
+                var g = host.geometry
+                g.crop = CropRect(x: x0, y: y0, width: w, height: h)
+                // A fresh rectangle is drawn axis-aligned to the *frame*, so
+                // it starts unstraightened; the angle is a separate decision
+                // and re-applying the old one would rotate a rectangle the
+                // user just drew square.
+                g.angle = 0
+                host.geometryChanged(g.constrained(in: size, anchor: anchorFor(from: from, to: n)))
+            case .straighten(let from, _):
+                host.straightenPreview(StraightenLine(from: from, to: n))
             }
             return
         }
@@ -184,9 +248,23 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
         }
     }
 
+    /// While drawing a rectangle the aspect constraint must grow from the
+    /// corner the drag started at, not from the centre.
+    private func anchorFor(from: CGPoint, to: CGPoint) -> CGPoint {
+        CGPoint(x: to.x >= from.x ? 0 : 1, y: to.y >= from.y ? 0 : 1)
+    }
+
     override func mouseUp(with e: NSEvent) {
         dragStart = nil
-        cropStart = nil
+        if case .straighten(let from, let origin) = cropDrag, let host, let renderer {
+            let n = renderer.viewport.normalised(atView: local(e)) ?? from
+            if let deg = Geometry.straightenAngle(from: from, to: n, in: host.sourceImageSize) {
+                host.geometryChanged(origin.straightened(to: origin.angle + deg, in: host.sourceImageSize))
+            }
+        }
+        cropDrag = nil
+        host?.straightenPreview(nil)
+        scheduleDraw()
     }
 
     override func mouseMoved(with e: NSEvent) {
@@ -209,7 +287,7 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
     override func resetCursorRects() {
         switch host?.tool {
         case .hand: addCursorRect(bounds, cursor: .openHand)
-        case .crop: addCursorRect(bounds, cursor: .crosshair)
+        case .crop: addCursorRect(bounds, cursor: .crosshair)   // grips get their own in CropOverlay
         default: addCursorRect(bounds, cursor: host?.pickerActive == true ? .crosshair : .arrow)
         }
     }

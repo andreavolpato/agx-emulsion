@@ -15,12 +15,18 @@ import QuartzCore
 
 struct CanvasUniforms {
     var viewportSize = SIMD2<Float>(1, 1)
+    /// The **output** size in logical pixels — the crop's size, not the
+    /// texture's. Everything the viewport measures is in these units.
     var imageSize = SIMD2<Float>(1, 1)
     var offset = SIMD2<Float>(0, 0)
+    /// Device pixels per output logical pixel.
     var scale: Float = 1
     var surroundGray: Float = 0x5F / 255.0
-    var crop = SIMD4<Float>(0, 0, 1, 1)
-    var showCrop: UInt32 = 0
+    /// Device pixels per *source texture* pixel. With a crop applied this is
+    /// no longer `scale`, and it is the one the sampler choice is made on.
+    var magnification: Float = 1
+    var geometry = Geometry.Uniform()
+    var editingCrop: UInt32 = 0
     var checker: UInt32 = 0
 }
 
@@ -31,6 +37,7 @@ final class Renderer: NSObject {
     let store: TextureStore
     private let layer2Pipeline: MTLComputePipelineState
     private let histogramPipeline: MTLComputePipelineState
+    private let geometryPipeline: MTLComputePipelineState
     private let quadPipelineDrawable: MTLRenderPipelineState
     private let quadPipelineOffscreen: MTLRenderPipelineState
     private let curveTable: MTLTexture
@@ -67,8 +74,34 @@ final class Renderer: NSObject {
 
     var viewport = ViewportState()
     var showOriginal = false { didSet { if oldValue != showOriginal { needsDraw?() } } }
-    var crop = CropRect.full
-    var showCrop = false
+    /// Crop, straighten, quarter turns and flips. Applied to what the canvas
+    /// draws, not only to what export writes — the two disagreeing is what
+    /// made the old crop a lie past the canvas edge.
+    var geometry = Geometry.default {
+        didSet {
+            guard oldValue != geometry else { return }
+            layer2Dirty = true
+            // While the crop tool is up the view stays on the whole frame, so
+            // a drag does not make the picture jump under the handles. The
+            // refit happens once, on leaving the tool.
+            if !editingCrop { refreshLogicalSize() }
+            needsDraw?()
+        }
+    }
+    /// True while the crop tool is active: the canvas then shows the whole
+    /// frame with the area outside the crop dimmed, rather than the cropped
+    /// result. Capture One's behaviour, and the only way to judge a crop.
+    var editingCrop = false {
+        didSet {
+            guard oldValue != editingCrop else { return }
+            layer2Dirty = true
+            refreshLogicalSize()
+            needsDraw?()
+        }
+    }
+    /// The live tier's pixel size — what the geometry is normalised against,
+    /// and what `logicalSize(forSource:)` turns into the viewport's units.
+    private(set) var sourceSize: CGSize?
     var layer2 = Layer2Uniforms() { didSet { layer2Dirty = true } }
     var onHistogram: (@MainActor ([Float]) -> Void)?
     var needsDraw: (@MainActor () -> Void)?
@@ -107,11 +140,13 @@ final class Renderer: NSObject {
         guard let lib = try? device.makeDefaultLibrary(bundle: Bundle(for: Renderer.self)),
               let l2 = lib.makeFunction(name: "layer2"),
               let hist = lib.makeFunction(name: "histogram"),
+              let geo = lib.makeFunction(name: "geometryResample"),
               let vs = lib.makeFunction(name: "canvasVertex"),
               let fs = lib.makeFunction(name: "canvasFragment") else { return nil }
         do {
             layer2Pipeline = try device.makeComputePipelineState(function: l2)
             histogramPipeline = try device.makeComputePipelineState(function: hist)
+            geometryPipeline = try device.makeComputePipelineState(function: geo)
             let rd = MTLRenderPipelineDescriptor()
             rd.vertexFunction = vs
             rd.fragmentFunction = fs
@@ -133,17 +168,27 @@ final class Renderer: NSObject {
     func setLive(_ texture: MTLTexture?, logical: CGSize? = nil) {
         log("setLive \(texture.map { "\($0.width)x\($0.height)" } ?? "nil"), needsDraw=\(needsDraw != nil)")
         live = texture
-        if texture == nil { showsDetail = false }
+        if texture == nil { showsDetail = false; sourceSize = nil }
         layer2Dirty = true
-        // The logical size is the live tier's, fixed per frame. The first
-        // image of a frame infers it (and refits); later live prints and every
-        // detail swap pass nil so the view does not move.
-        let target = logical ?? (logicalImageSize == nil ? texture.map { CGSize(width: $0.width, height: $0.height) } : nil)
-        if let target, target != viewport.image {
-            viewport.resize(viewport: viewport.viewport, image: target)
-            onViewportChanged?()
-        }
+        // `logical` is the live tier's source size, fixed per frame. The
+        // first image of a frame passes it (and refits); later live prints
+        // and every detail swap pass nil so the view does not move.
+        if let logical { sourceSize = logical }
+        else if sourceSize == nil, let texture { sourceSize = CGSize(width: texture.width, height: texture.height) }
+        refreshLogicalSize()
         needsDraw?()
+    }
+
+    /// Re-express the viewport against whatever the output currently is — the
+    /// whole frame while cropping, the crop's own size otherwise — and refit
+    /// if that changed. `ViewportState.resize` fits on an image-size change,
+    /// which is what makes leaving the crop tool land on the crop.
+    func refreshLogicalSize() {
+        guard let sourceSize else { return }
+        let target = logicalSize(forSource: sourceSize)
+        guard target != viewport.image else { return }
+        viewport.resize(viewport: viewport.viewport, image: target)
+        onViewportChanged?()
     }
 
     /// Put a higher-resolution render of the current frame on screen. The
@@ -263,14 +308,30 @@ final class Renderer: NSObject {
         var u = CanvasUniforms()
         u.viewportSize = SIMD2(Float(viewportSize.width), Float(viewportSize.height))
         guard let shown else { return u }
-        let logicalWidth = max(viewport.image.width, 1)
-        let textureScale = viewport.scale * (logicalWidth / CGFloat(shown.width))
-        u.imageSize = SIMD2(Float(shown.width), Float(shown.height))
+        // The viewport is in *output* logical pixels, so the sampling
+        // transform is now the identity on them and the shader does the rest
+        // in normalised space. That is what retires the old
+        // logical-over-texture ratio: a 5504 px detail texture and a 1600 px
+        // live one already occupy the same rectangle because they are both
+        // sampled by uv, not by pixel.
+        let output = max(viewport.image.width, 1)
+        u.imageSize = SIMD2(Float(viewport.image.width), Float(viewport.image.height))
         u.offset = SIMD2(Float(viewport.offset.x * backingScale), Float(viewport.offset.y * backingScale))
-        u.scale = Float(textureScale * backingScale)
-        u.crop = SIMD4(Float(crop.x), Float(crop.y), Float(crop.width), Float(crop.height))
-        u.showCrop = showCrop && !crop.isFull ? 1 : 0
+        u.scale = Float(viewport.scale * backingScale)
+        // Source texture pixels actually spanned by the output, so the
+        // sampler choice survives both the detail-tier swap and the crop.
+        let spanned = editingCrop ? CGFloat(shown.width) : CGFloat(shown.width) * geometry.crop.width
+        u.magnification = Float(viewport.scale * backingScale * output / max(spanned, 1))
+        u.geometry = geometry.uniform(for: CGSize(width: shown.width, height: shown.height))
+        u.editingCrop = editingCrop ? 1 : 0
         return u
+    }
+
+    /// The size the viewport should be expressed against for a given source:
+    /// the whole frame while the crop is being edited, the crop's output
+    /// otherwise. Fit and zoom then mean what they say in both states.
+    func logicalSize(forSource size: CGSize) -> CGSize {
+        editingCrop ? size : geometry.outputSize(for: size)
     }
 
     func draw(in view: MTKView) {
@@ -333,6 +394,32 @@ final class Renderer: NSObject {
         if let uniforms { layer2 = uniforms }
         encodeLayer2(cb, src: src, dst: dst)
         layer2 = saved
+        cb.commit()
+        cb.waitUntilCompleted()
+        return dst
+    }
+
+    /// Apply crop, straighten, quarter turns and flips to a texture at its
+    /// own resolution, through the same `geometryMap` the canvas draws with.
+    /// Export calls this; nothing else needs to, because the canvas applies
+    /// the geometry while sampling rather than by making a second texture.
+    func applyGeometry(_ g: Geometry, to src: MTLTexture) -> MTLTexture? {
+        guard !g.isIdentity else { return src }
+        let srcSize = CGSize(width: src.width, height: src.height)
+        let out = g.outputSize(for: srcSize)
+        let w = Int(out.width), h = Int(out.height)
+        guard w > 0, h > 0,
+              let dst = store.makeWritable(width: w, height: h),
+              let cb = queue.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return nil }
+        var u = g.uniform(for: srcSize)
+        enc.setComputePipelineState(geometryPipeline)
+        enc.setTexture(src, index: 0)
+        enc.setTexture(dst, index: 1)
+        enc.setBytes(&u, length: MemoryLayout<Geometry.Uniform>.stride, index: 0)
+        let tg = MTLSize(width: 16, height: 16, depth: 1)
+        enc.dispatchThreadgroups(MTLSize(width: (w + 15) / 16, height: (h + 15) / 16, depth: 1),
+                                 threadsPerThreadgroup: tg)
+        enc.endEncoding()
         cb.commit()
         cb.waitUntilCompleted()
         return dst

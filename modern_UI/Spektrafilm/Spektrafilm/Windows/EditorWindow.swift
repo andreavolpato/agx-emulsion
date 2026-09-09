@@ -92,6 +92,11 @@ struct CanvasArea: View {
             } else {
                 MetalCanvasView(host: session)
             }
+            // Handles, thirds grid and the straighten line. The shader does
+            // the dimming; this does the lines, which want to stay crisp.
+            if session.tool == .crop && !snapshotMode {
+                CropOverlay(session: session)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .leading) { CollapseTab(edge: .leading, collapsed: $session.leftCollapsed) }

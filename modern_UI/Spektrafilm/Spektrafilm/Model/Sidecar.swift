@@ -36,16 +36,62 @@ struct CropRect: Codable, Equatable, Sendable {
 }
 
 struct Sidecar: Codable, Equatable, Sendable {
-    var schemaVersion = 2
+    var schemaVersion = 3
     var decoder = "coreimage"
     var decode = DecodeSettings()
     var params = FilmParams.default
     var adjustments = Adjustments.default
-    var crop = CropRect.full
+    /// Crop, straighten, quarter turns and flips (`Model/Geometry.swift`).
+    var geometry = Geometry.default
     /// The solve the service returned for this frame (EV, filter neutrals),
     /// kept so the UI can show the sliders as offsets from it.
     var solvedEV: Double?
     var state: FrameState = .unprocessed
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, decoder, decode, params, adjustments, geometry, solvedEV, state
+        /// Schema 2's field. Read, never written.
+        case crop
+    }
+
+    init() {}
+
+    /// Schema 2 stored a bare `crop` and had no angle, turns or flips. It
+    /// decodes into `geometry.crop` unchanged — the two mean the same thing
+    /// at angle 0 — so an existing sidecar opens with its crop intact rather
+    /// than silently resetting to the full frame.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 2
+        self.decoder = try c.decodeIfPresent(String.self, forKey: .decoder) ?? "coreimage"
+        decode = try c.decodeIfPresent(DecodeSettings.self, forKey: .decode) ?? DecodeSettings()
+        params = try c.decodeIfPresent(FilmParams.self, forKey: .params) ?? .default
+        adjustments = try c.decodeIfPresent(Adjustments.self, forKey: .adjustments) ?? .default
+        solvedEV = try c.decodeIfPresent(Double.self, forKey: .solvedEV)
+        state = try c.decodeIfPresent(FrameState.self, forKey: .state) ?? .unprocessed
+        if let g = try c.decodeIfPresent(Geometry.self, forKey: .geometry) {
+            geometry = g
+        } else if let legacy = try c.decodeIfPresent(CropRect.self, forKey: .crop) {
+            geometry = Geometry(crop: legacy)
+        }
+        schemaVersion = 3
+    }
+
+    /// Schema 2's `crop` is deliberately not written back: one field, one
+    /// meaning. A file written here and read by an older build loses its
+    /// crop, which is the honest outcome — that build cannot honour the
+    /// angle or the turns either.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(decoder, forKey: .decoder)
+        try c.encode(decode, forKey: .decode)
+        try c.encode(params, forKey: .params)
+        try c.encode(adjustments, forKey: .adjustments)
+        try c.encode(geometry, forKey: .geometry)
+        try c.encodeIfPresent(solvedEV, forKey: .solvedEV)
+        try c.encode(state, forKey: .state)
+    }
 
     /// `<original>.spektra.json` — the **whole** file name, extension
     /// included. The first build used

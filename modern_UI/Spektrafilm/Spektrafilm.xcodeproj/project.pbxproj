@@ -6,6 +6,7 @@
 	objectVersion = 56;
 	objects = {
 		9A0C8A0EB877AFA4B59F2ED4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>"; };
+		F5450AC21C24796E4C0E3D00 /* CropOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CropOverlay.swift"; sourceTree = "<group>"; };
 		0A008A15F891024A1497154E /* MetalCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetalCanvasView.swift"; sourceTree = "<group>"; };
 		F21EE21CD8E082061F96E2E6 /* Renderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Renderer.swift"; sourceTree = "<group>"; };
 		907FA3AAA81399391CD11EE4 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = "Shaders.metal"; sourceTree = "<group>"; };
@@ -14,6 +15,7 @@
 		74A064D34CE36A1A0A478638 /* Canvas */ = {
 			isa = PBXGroup;
 			children = (
+				F5450AC21C24796E4C0E3D00 /* CropOverlay.swift */,
 				0A008A15F891024A1497154E /* MetalCanvasView.swift */,
 				F21EE21CD8E082061F96E2E6 /* Renderer.swift */,
 				907FA3AAA81399391CD11EE4 /* Shaders.metal */,
@@ -73,6 +75,7 @@
 		7BD14A759E5F78D4F5A24D89 /* Adjustments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Adjustments.swift"; sourceTree = "<group>"; };
 		5BC2DC63D88AC92EC5B434CF /* CurveMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CurveMath.swift"; sourceTree = "<group>"; };
 		A02C2D50FD6D3F5E2D3F6D21 /* Frame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Frame.swift"; sourceTree = "<group>"; };
+		6AC13A4710805FA7B0025F33 /* Geometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Geometry.swift"; sourceTree = "<group>"; };
 		C42B4DEB9289F877E08F1924 /* Params.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Params.swift"; sourceTree = "<group>"; };
 		328F3AC1847ED0CBF51741D4 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Session.swift"; sourceTree = "<group>"; };
 		34600B41B60D2DBED8CAA7E4 /* Sidecar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sidecar.swift"; sourceTree = "<group>"; };
@@ -83,6 +86,7 @@
 				7BD14A759E5F78D4F5A24D89 /* Adjustments.swift */,
 				5BC2DC63D88AC92EC5B434CF /* CurveMath.swift */,
 				A02C2D50FD6D3F5E2D3F6D21 /* Frame.swift */,
+				6AC13A4710805FA7B0025F33 /* Geometry.swift */,
 				C42B4DEB9289F877E08F1924 /* Params.swift */,
 				328F3AC1847ED0CBF51741D4 /* Session.swift */,
 				34600B41B60D2DBED8CAA7E4 /* Sidecar.swift */,
@@ -92,6 +96,7 @@
 			sourceTree = "<group>";
 		};
 		63B7834B0A92F26FD0D064CB /* CameraSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CameraSection.swift"; sourceTree = "<group>"; };
+		58D8F533F7A9422B3091769D /* CropSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CropSection.swift"; sourceTree = "<group>"; };
 		E619F6B9889FA7E5F263358B /* EnlargerSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EnlargerSection.swift"; sourceTree = "<group>"; };
 		EF3ECFC337AF7B6BB1270770 /* FeaturesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FeaturesSection.swift"; sourceTree = "<group>"; };
 		2EBF7E2C5145806F45C0DBA0 /* FilmProfileSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FilmProfileSection.swift"; sourceTree = "<group>"; };
@@ -101,6 +106,7 @@
 			isa = PBXGroup;
 			children = (
 				63B7834B0A92F26FD0D064CB /* CameraSection.swift */,
+				58D8F533F7A9422B3091769D /* CropSection.swift */,
 				E619F6B9889FA7E5F263358B /* EnlargerSection.swift */,
 				EF3ECFC337AF7B6BB1270770 /* FeaturesSection.swift */,
 				2EBF7E2C5145806F45C0DBA0 /* FilmProfileSection.swift */,
@@ -191,6 +197,7 @@
 		E6A23AED59A7DC706EEF5A37 /* CanvasViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CanvasViewTests.swift"; sourceTree = "<group>"; };
 		161DD0623DE183C7D1120EED /* CurveMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CurveMathTests.swift"; sourceTree = "<group>"; };
 		680FB4F2579B6CE01A3E641D /* FrontendPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FrontendPolicyTests.swift"; sourceTree = "<group>"; };
+		6B156718E1AE69C25B473A8F /* GeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeometryTests.swift"; sourceTree = "<group>"; };
 		0CFA312A5F866E734F736E61 /* LayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LayoutTests.swift"; sourceTree = "<group>"; };
 		D535AB20AF82118A0962C13F /* ParamsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ParamsTests.swift"; sourceTree = "<group>"; };
 		70F2B5843ED40F2BAD7DFEDD /* RendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RendererTests.swift"; sourceTree = "<group>"; };
@@ -202,6 +209,7 @@
 				E6A23AED59A7DC706EEF5A37 /* CanvasViewTests.swift */,
 				161DD0623DE183C7D1120EED /* CurveMathTests.swift */,
 				680FB4F2579B6CE01A3E641D /* FrontendPolicyTests.swift */,
+				6B156718E1AE69C25B473A8F /* GeometryTests.swift */,
 				0CFA312A5F866E734F736E61 /* LayoutTests.swift */,
 				D535AB20AF82118A0962C13F /* ParamsTests.swift */,
 				70F2B5843ED40F2BAD7DFEDD /* RendererTests.swift */,
@@ -253,6 +261,7 @@
 			);
 			sourceTree = "<group>";
 		};
+		D5A67D16F3725D935A65B955 /* CropOverlay.swift */ = {isa = PBXBuildFile; fileRef = F5450AC21C24796E4C0E3D00; };
 		92FC95FE26DAA581C99DA05B /* MetalCanvasView.swift */ = {isa = PBXBuildFile; fileRef = 0A008A15F891024A1497154E; };
 		F830EE9B70CEEB6287B29ECB /* Renderer.swift */ = {isa = PBXBuildFile; fileRef = F21EE21CD8E082061F96E2E6; };
 		E00191AC378F02CD0DCF5281 /* Shaders.metal */ = {isa = PBXBuildFile; fileRef = 907FA3AAA81399391CD11EE4; };
@@ -274,11 +283,13 @@
 		5677C40CF7D037CE694F86BD /* Adjustments.swift */ = {isa = PBXBuildFile; fileRef = 7BD14A759E5F78D4F5A24D89; };
 		70E26BB84F902C56794C3487 /* CurveMath.swift */ = {isa = PBXBuildFile; fileRef = 5BC2DC63D88AC92EC5B434CF; };
 		3D12D2AF8DB3E82F88CCCF2C /* Frame.swift */ = {isa = PBXBuildFile; fileRef = A02C2D50FD6D3F5E2D3F6D21; };
+		3503FE80EF2D0C2AC02C627A /* Geometry.swift */ = {isa = PBXBuildFile; fileRef = 6AC13A4710805FA7B0025F33; };
 		ECA3DC086D616DBFC3F992E6 /* Params.swift */ = {isa = PBXBuildFile; fileRef = C42B4DEB9289F877E08F1924; };
 		CDFE68666DE2C315E77F7236 /* Session.swift */ = {isa = PBXBuildFile; fileRef = 328F3AC1847ED0CBF51741D4; };
 		94D17D0DC2F724B8BBD0989D /* Sidecar.swift */ = {isa = PBXBuildFile; fileRef = 34600B41B60D2DBED8CAA7E4; };
 		2B8B68B4765B80AE1E204CCD /* StockCatalog.swift */ = {isa = PBXBuildFile; fileRef = 5BFA5A7A74D147A064C30C3E; };
 		B4F2A35E4CB729FF4D9924B3 /* CameraSection.swift */ = {isa = PBXBuildFile; fileRef = 63B7834B0A92F26FD0D064CB; };
+		18F2AB5F1217ADBC0840C2C5 /* CropSection.swift */ = {isa = PBXBuildFile; fileRef = 58D8F533F7A9422B3091769D; };
 		756510DF154A0C456DA3F4B2 /* EnlargerSection.swift */ = {isa = PBXBuildFile; fileRef = E619F6B9889FA7E5F263358B; };
 		316E96E3F095741CBC3AD749 /* FeaturesSection.swift */ = {isa = PBXBuildFile; fileRef = EF3ECFC337AF7B6BB1270770; };
 		25ECFF600309D4E9DB91FA8B /* FilmProfileSection.swift */ = {isa = PBXBuildFile; fileRef = 2EBF7E2C5145806F45C0DBA0; };
@@ -301,6 +312,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D5A67D16F3725D935A65B955 /* CropOverlay.swift */,
 				92FC95FE26DAA581C99DA05B /* MetalCanvasView.swift */,
 				F830EE9B70CEEB6287B29ECB /* Renderer.swift */,
 				E00191AC378F02CD0DCF5281 /* Shaders.metal */,
@@ -322,11 +334,13 @@
 				5677C40CF7D037CE694F86BD /* Adjustments.swift */,
 				70E26BB84F902C56794C3487 /* CurveMath.swift */,
 				3D12D2AF8DB3E82F88CCCF2C /* Frame.swift */,
+				3503FE80EF2D0C2AC02C627A /* Geometry.swift */,
 				ECA3DC086D616DBFC3F992E6 /* Params.swift */,
 				CDFE68666DE2C315E77F7236 /* Session.swift */,
 				94D17D0DC2F724B8BBD0989D /* Sidecar.swift */,
 				2B8B68B4765B80AE1E204CCD /* StockCatalog.swift */,
 				B4F2A35E4CB729FF4D9924B3 /* CameraSection.swift */,
+				18F2AB5F1217ADBC0840C2C5 /* CropSection.swift */,
 				756510DF154A0C456DA3F4B2 /* EnlargerSection.swift */,
 				316E96E3F095741CBC3AD749 /* FeaturesSection.swift */,
 				25ECFF600309D4E9DB91FA8B /* FilmProfileSection.swift */,
@@ -370,11 +384,13 @@
 		D8FB2239657FB932937E1A93 /* CanvasViewTests.swift */ = {isa = PBXBuildFile; fileRef = E6A23AED59A7DC706EEF5A37; };
 		03DC6FB630D7A2882C8D54DA /* CurveMathTests.swift */ = {isa = PBXBuildFile; fileRef = 161DD0623DE183C7D1120EED; };
 		36A7DE10220CF01502C836A0 /* FrontendPolicyTests.swift */ = {isa = PBXBuildFile; fileRef = 680FB4F2579B6CE01A3E641D; };
+		C6E44BB1B77BC6F7C99AECA4 /* GeometryTests.swift */ = {isa = PBXBuildFile; fileRef = 6B156718E1AE69C25B473A8F; };
 		20E9D2468C8BEF11A7FD944D /* LayoutTests.swift */ = {isa = PBXBuildFile; fileRef = 0CFA312A5F866E734F736E61; };
 		D02819FD7044EC71BA226A8D /* ParamsTests.swift */ = {isa = PBXBuildFile; fileRef = D535AB20AF82118A0962C13F; };
 		BD843F73AD6BED906A1B0660 /* RendererTests.swift */ = {isa = PBXBuildFile; fileRef = 70F2B5843ED40F2BAD7DFEDD; };
 		8A047F3C281F0D95D232F01E /* ServiceIntegrationTests.swift */ = {isa = PBXBuildFile; fileRef = 5D57229935E7AD0FCCC76129; };
 		9A9E4DB1B80C5D6660C7250D /* ViewportStateTests.swift */ = {isa = PBXBuildFile; fileRef = B30E2FCC7C48E3CDEB2823F5; };
+		26A0631C1E76517F3DE5815A /* CropOverlay.swift */ = {isa = PBXBuildFile; fileRef = F5450AC21C24796E4C0E3D00; };
 		DB38108C5F7D7BC6D49D43A8 /* MetalCanvasView.swift */ = {isa = PBXBuildFile; fileRef = 0A008A15F891024A1497154E; };
 		25606FE40D125733224105E4 /* Renderer.swift */ = {isa = PBXBuildFile; fileRef = F21EE21CD8E082061F96E2E6; };
 		03579277608141511C319541 /* Shaders.metal */ = {isa = PBXBuildFile; fileRef = 907FA3AAA81399391CD11EE4; };
@@ -396,11 +412,13 @@
 		367981EA1B206C0386746257 /* Adjustments.swift */ = {isa = PBXBuildFile; fileRef = 7BD14A759E5F78D4F5A24D89; };
 		E0C31F95F0D233ADAFB0F56E /* CurveMath.swift */ = {isa = PBXBuildFile; fileRef = 5BC2DC63D88AC92EC5B434CF; };
 		3A249CAC02A01CFDCA9A3374 /* Frame.swift */ = {isa = PBXBuildFile; fileRef = A02C2D50FD6D3F5E2D3F6D21; };
+		960B798930C7D3FA5BFDF934 /* Geometry.swift */ = {isa = PBXBuildFile; fileRef = 6AC13A4710805FA7B0025F33; };
 		A2F4CDB9C74348DFFF57B59E /* Params.swift */ = {isa = PBXBuildFile; fileRef = C42B4DEB9289F877E08F1924; };
 		2BEE54C243683BB7ECAAF127 /* Session.swift */ = {isa = PBXBuildFile; fileRef = 328F3AC1847ED0CBF51741D4; };
 		B86ED0E950C1E90BC55A4ED2 /* Sidecar.swift */ = {isa = PBXBuildFile; fileRef = 34600B41B60D2DBED8CAA7E4; };
 		8C9B1C033326DE51803ECE3C /* StockCatalog.swift */ = {isa = PBXBuildFile; fileRef = 5BFA5A7A74D147A064C30C3E; };
 		381E25C35E4A1E3F9721B268 /* CameraSection.swift */ = {isa = PBXBuildFile; fileRef = 63B7834B0A92F26FD0D064CB; };
+		62608DEF025BB45D861492E0 /* CropSection.swift */ = {isa = PBXBuildFile; fileRef = 58D8F533F7A9422B3091769D; };
 		D78E90E119FDD0C29DFE222A /* EnlargerSection.swift */ = {isa = PBXBuildFile; fileRef = E619F6B9889FA7E5F263358B; };
 		0522D51DE9C7DFBB709EFE3B /* FeaturesSection.swift */ = {isa = PBXBuildFile; fileRef = EF3ECFC337AF7B6BB1270770; };
 		64EEA3E58D16E93268B650A0 /* FilmProfileSection.swift */ = {isa = PBXBuildFile; fileRef = 2EBF7E2C5145806F45C0DBA0; };
@@ -425,11 +443,13 @@
 				D8FB2239657FB932937E1A93 /* CanvasViewTests.swift */,
 				03DC6FB630D7A2882C8D54DA /* CurveMathTests.swift */,
 				36A7DE10220CF01502C836A0 /* FrontendPolicyTests.swift */,
+				C6E44BB1B77BC6F7C99AECA4 /* GeometryTests.swift */,
 				20E9D2468C8BEF11A7FD944D /* LayoutTests.swift */,
 				D02819FD7044EC71BA226A8D /* ParamsTests.swift */,
 				BD843F73AD6BED906A1B0660 /* RendererTests.swift */,
 				8A047F3C281F0D95D232F01E /* ServiceIntegrationTests.swift */,
 				9A9E4DB1B80C5D6660C7250D /* ViewportStateTests.swift */,
+				26A0631C1E76517F3DE5815A /* CropOverlay.swift */,
 				DB38108C5F7D7BC6D49D43A8 /* MetalCanvasView.swift */,
 				25606FE40D125733224105E4 /* Renderer.swift */,
 				03579277608141511C319541 /* Shaders.metal */,
@@ -451,11 +471,13 @@
 				367981EA1B206C0386746257 /* Adjustments.swift */,
 				E0C31F95F0D233ADAFB0F56E /* CurveMath.swift */,
 				3A249CAC02A01CFDCA9A3374 /* Frame.swift */,
+				960B798930C7D3FA5BFDF934 /* Geometry.swift */,
 				A2F4CDB9C74348DFFF57B59E /* Params.swift */,
 				2BEE54C243683BB7ECAAF127 /* Session.swift */,
 				B86ED0E950C1E90BC55A4ED2 /* Sidecar.swift */,
 				8C9B1C033326DE51803ECE3C /* StockCatalog.swift */,
 				381E25C35E4A1E3F9721B268 /* CameraSection.swift */,
+				62608DEF025BB45D861492E0 /* CropSection.swift */,
 				D78E90E119FDD0C29DFE222A /* EnlargerSection.swift */,
 				0522D51DE9C7DFBB709EFE3B /* FeaturesSection.swift */,
 				64EEA3E58D16E93268B650A0 /* FilmProfileSection.swift */,

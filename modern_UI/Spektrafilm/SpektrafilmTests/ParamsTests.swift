@@ -52,7 +52,7 @@ final class ParamsTests: XCTestCase {
         var s = Sidecar()
         s.params.yFilterShift = 0.3
         s.adjustments.curves.rgb.insert(CGPoint(x: 0.4, y: 0.5))
-        s.crop = CropRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5)
+        s.geometry.crop = CropRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5)
         let data = try JSONEncoder().encode(s)
         let back = try JSONDecoder().decode(Sidecar.self, from: data)
         XCTAssertEqual(back, s)

@@ -69,6 +69,16 @@ struct EditorCommands: Commands {
             Button("Previous") { session.selectRelative(-1) }.keyboardShortcut("[")
             Button("Next") { session.selectRelative(1) }.keyboardShortcut("]")
         }
+        CommandMenu("Crop") {
+            Button("Rotate Left") { session.geometry = session.geometry.turned(by: -1) }
+                .keyboardShortcut("[", modifiers: [.command, .option])
+            Button("Rotate Right") { session.geometry = session.geometry.turned(by: 1) }
+                .keyboardShortcut("]", modifiers: [.command, .option])
+            Button("Flip Horizontally") { var g = session.geometry; g.flipH.toggle(); session.geometry = g }
+            Button("Flip Vertically") { var g = session.geometry; g.flipV.toggle(); session.geometry = g }
+            Divider()
+            Button("Reset Crop") { session.geometry = .default }
+        }
         CommandMenu("Tool") {
             Button("Select") { session.tool = .select }.keyboardShortcut("v", modifiers: [])
             Button("Hand") { session.tool = .hand }.keyboardShortcut("h", modifiers: [])
@@ -85,6 +95,11 @@ struct SnapshotRequest {
     /// Optional zoom fraction (1 = 100 %). Drives the detail-tier path so the
     /// resolution escalation can be captured without a person at the keyboard.
     var zoom: CGFloat?
+    /// `--geometry x,y,w,h,angle[,turns]` — a crop to apply before capturing,
+    /// so the geometry path has a regression capture like everything else.
+    /// Unlike the canvas itself, this one *is* visible offscreen: the
+    /// geometry is applied while sampling, and `renderOffscreen` samples.
+    var geometry: Geometry?
 
     static func parse(_ args: [String]) -> SnapshotRequest? {
         guard let i = args.firstIndex(of: "--snapshot"), args.count > i + 2 else { return nil }
@@ -94,6 +109,16 @@ struct SnapshotRequest {
         if let j = args.firstIndex(of: "--open"), args.count > j + 1 { r.open = URL(fileURLWithPath: args[j + 1]) }
         if let j = args.firstIndex(of: "--wait"), args.count > j + 1, let w = Double(args[j + 1]) { r.wait = w }
         if let j = args.firstIndex(of: "--zoom"), args.count > j + 1, let z = Double(args[j + 1]) { r.zoom = CGFloat(z) }
+        if let j = args.firstIndex(of: "--geometry"), args.count > j + 1 {
+            let f = args[j + 1].split(separator: ",").compactMap { Double($0) }
+            if f.count >= 5 {
+                var g = Geometry()
+                g.crop = CropRect(x: f[0], y: f[1], width: f[2], height: f[3])
+                g.angle = f[4]
+                if f.count > 5 { g.quarterTurns = Int(f[5]) }
+                r.geometry = g
+            }
+        }
         return r
     }
 }
@@ -179,6 +204,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     session.frameStates[sel] == .processed { break }
         }
         try? await Task.sleep(for: .milliseconds(400))
+        if let g = req.geometry {
+            session.geometry = g.fitted(in: session.sourceImageSize)
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         if let zoom = req.zoom {
             session.zoomTo(fraction: zoom)
             // Wait for the detail render the zoom asked for. The renderer's

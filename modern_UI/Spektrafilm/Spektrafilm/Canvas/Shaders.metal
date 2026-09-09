@@ -24,16 +24,63 @@ struct Layer2Uniforms {           // must match Adjustments.swift
     uint curvesActive; uint enabled; uint _pad;
 };
 
+struct GeometryUniform {           // must match Geometry.Uniform in Geometry.swift
+    float2 centre;                // crop centre, normalised to the source
+    float2 halfExtent;            // crop half-size, normalised
+    float2 cosSin;                // the straighten angle
+    float2 pixelRatio;            // (w/h, h/w) — the rotation is rigid in pixels
+    uint quarterTurns;
+    uint flips;                   // bit 0 horizontal, bit 1 vertical
+    uint active;
+    uint pad;
+};
+
 struct CanvasUniforms {           // must match Renderer.swift
     float2 viewportSize;          // in device pixels
-    float2 imageSize;             // in image pixels
-    float2 offset;                // image origin in device pixels
-    float scale;                  // device pixels per image pixel
+    float2 imageSize;             // the *output* size in logical pixels
+    float2 offset;                // output origin in device pixels
+    float scale;                  // device pixels per output logical pixel
     float surroundGray;           // encoded value of the ground
-    float4 crop;                  // normalised x, y, w, h (top-left origin)
-    uint showCrop;                // dim outside the crop
+    float magnification;          // device pixels per *source texture* pixel
+    GeometryUniform geometry;
+    uint editingCrop;             // show the whole frame, dim outside the crop
     uint checker;                 // draw a soft focus frame (unused)
 };
+
+//  Output uv → source uv. A transliteration of
+//  `Geometry.sourcePoint(forOutput:imageSize:)`; `GeometryTests` pins the
+//  pairs both must produce, because a divergence here is a picture that is
+//  subtly the wrong part of the frame and nothing says so.
+static inline float2 geometryMap(float2 uv, constant GeometryUniform &g) {
+    if (g.active == 0) return uv;
+    float2 u = uv;
+    if (g.flips & 1u) u.x = 1.0 - u.x;
+    if (g.flips & 2u) u.y = 1.0 - u.y;
+    switch (g.quarterTurns) {
+        case 1: u = float2(u.y, 1.0 - u.x); break;
+        case 2: u = float2(1.0 - u.x, 1.0 - u.y); break;
+        case 3: u = float2(1.0 - u.y, u.x); break;
+        default: break;
+    }
+    // Crop-local, in units where one unit of x and one of y are the same
+    // number of source pixels — otherwise the rotation shears on a
+    // non-square frame.
+    float px = (u.x - 0.5) * 2.0 * g.halfExtent.x;
+    float py = (u.y - 0.5) * 2.0 * g.halfExtent.y * g.pixelRatio.y;
+    float rx = px * g.cosSin.x - py * g.cosSin.y;
+    float ry = px * g.cosSin.y + py * g.cosSin.x;
+    return float2(g.centre.x + rx, g.centre.y + ry * g.pixelRatio.x);
+}
+
+/// Whether a *source* uv is inside the oriented crop. The inverse rotation of
+/// the map above, used only while the crop is being edited.
+static inline bool insideCrop(float2 suv, constant GeometryUniform &g) {
+    float dx = suv.x - g.centre.x;
+    float dy = (suv.y - g.centre.y) * g.pixelRatio.y;
+    float lx =  dx * g.cosSin.x + dy * g.cosSin.y;
+    float ly = -dx * g.cosSin.y + dy * g.cosSin.x;
+    return abs(lx) <= g.halfExtent.x && abs(ly) <= g.halfExtent.y * g.pixelRatio.y;
+}
 
 static inline float luma(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 
@@ -112,6 +159,22 @@ kernel void layer2(texture2d<float, access::read> src [[texture(0)]],
     dst.write(float4(saturate(c), 1), gid);
 }
 
+//  Export's geometry pass. Deliberately the *same* `geometryMap` the canvas
+//  uses rather than a CoreGraphics transform beside it: two implementations
+//  of a rotation are two chances to disagree about a sign, and the way that
+//  failure presents is an exported file that is subtly the wrong part of the
+//  frame, which nothing checks.
+kernel void geometryResample(texture2d<float, access::sample> src [[texture(0)]],
+                             texture2d<float, access::write> dst [[texture(1)]],
+                             constant GeometryUniform &g [[buffer(0)]],
+                             uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= dst.get_width() || gid.y >= dst.get_height()) return;
+    constexpr sampler lin(filter::linear, address::clamp_to_edge, mip_filter::none);
+    float2 ouv = (float2(gid) + 0.5) / float2(dst.get_width(), dst.get_height());
+    dst.write(float4(src.sample(lin, geometryMap(ouv, g)).rgb, 1), gid);
+}
+
 struct QuadOut { float4 position [[position]]; float2 uv; };
 
 vertex QuadOut canvasVertex(uint vid [[vertex_id]]) {
@@ -129,21 +192,29 @@ fragment float4 canvasFragment(QuadOut in [[stage_in]],
 {
     // Below 100 % the image is minified: linear. At or above 100 % every
     // image pixel covers whole device pixels: nearest, so a 400 % view shows
-    // the actual pixels (and grain) instead of a smear.
+    // the actual pixels (and grain) instead of a smear. The test is on
+    // `magnification` — device pixels per *source texture* pixel — not on
+    // `scale`, because with a crop applied those are no longer the same
+    // number and a 12 % crop would otherwise pick nearest at 40 % zoom.
     constexpr sampler lin(filter::linear, address::clamp_to_edge, mip_filter::none);
     constexpr sampler near(filter::nearest, address::clamp_to_edge, mip_filter::none);
     float2 px = in.uv * u.viewportSize;                    // device pixel, top-left origin
-    float2 ip = (px - u.offset) / u.scale;                 // image pixel
-    float2 iuv = ip / u.imageSize;
+    float2 ip = (px - u.offset) / u.scale;                 // output logical pixel
+    float2 ouv = ip / u.imageSize;                         // 0…1 across the output
     float3 ground = float3(u.surroundGray);
-    if (iuv.x < 0.0 || iuv.y < 0.0 || iuv.x > 1.0 || iuv.y > 1.0) {
+    if (ouv.x < 0.0 || ouv.y < 0.0 || ouv.x > 1.0 || ouv.y > 1.0) {
         return float4(ground, 1);
     }
-    float3 c = (u.scale >= 1.0) ? image.sample(near, iuv).rgb : image.sample(lin, iuv).rgb;
-    if (u.showCrop != 0) {
-        bool inside = iuv.x >= u.crop.x && iuv.y >= u.crop.y &&
-                      iuv.x <= u.crop.x + u.crop.z && iuv.y <= u.crop.y + u.crop.w;
-        if (!inside) c = mix(c, ground, 0.6);
+    // While the crop is being edited the canvas shows the whole frame, the
+    // way Capture One's crop tool does: you cannot judge a crop against
+    // pixels you cannot see.
+    float2 suv = (u.editingCrop != 0) ? ouv : geometryMap(ouv, u.geometry);
+    if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
+        return float4(ground, 1);
+    }
+    float3 c = (u.magnification >= 1.0) ? image.sample(near, suv).rgb : image.sample(lin, suv).rgb;
+    if (u.editingCrop != 0 && u.geometry.active != 0 && !insideCrop(suv, u.geometry)) {
+        c = mix(c, ground, 0.6);
     }
     return float4(c, 1);
 }

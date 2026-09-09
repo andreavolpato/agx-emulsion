@@ -15,6 +15,7 @@ struct LeftPanel: View {
                     FilmProfileSection(session: session)
                     PrintProfileSection(session: session)
                     CameraSection(session: session)
+                    CropSection(session: session)
                     FeaturesSection(session: session)
                     EnlargerSection(session: session)
                 }

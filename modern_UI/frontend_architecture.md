@@ -216,6 +216,34 @@ Switching frames shows that frame's last print immediately, flagged
 **preview** until the service catches up. The two neighbouring frames are
 decoded in the background so their `open` skips the RAW decode.
 
+### Crop and straighten
+
+A crop is an **oriented rectangle** — a normalised rect plus the angle it is
+rotated by about its own centre (`Model/Geometry.swift`) — not "rotate the
+image, then crop the result". The source never moves, so straightening
+resamples nothing twice and setting the angle back to zero restores the
+rectangle you had.
+
+Every mutation returns something that **fits**: `fitted(in:)` shrinks the
+rectangle about its centre until all four corners are inside the frame. That
+is why an 8° straighten costs about 20 % of the frame's width, visibly, in the
+Crop section's pixel readout — instead of exporting a picture with transparent
+triangles in the corners.
+
+The geometry is applied while *sampling*, both on the canvas
+(`canvasFragment` → `geometryMap`) and at export (the `geometryResample`
+kernel, deliberately the same function). Before this the crop was a dimmed
+overlay that only appeared while the crop tool was active and was applied at
+export with `CGImage.cropping`: the canvas showed an uncropped frame, export
+wrote a cropped one, and neither could rotate at all.
+
+While the crop tool is up the canvas shows the **whole frame** with the
+outside dimmed, and the viewport is expressed against the source; leaving the
+tool re-expresses it against the crop and refits. `Renderer.logicalSize(forSource:)`
+is the one place that decision is made. The detail tier follows the *cropped*
+long edge, so a 20 % crop of a 45 MP frame no longer escalates to a
+full-resolution render for detail the crop threw away.
+
 ### Browse and Print
 
 Two states, one window (frontend SPEC §5.1). **Browse** is a grid of the
@@ -317,7 +345,9 @@ Model/Session.swift          all state, on the main actor
 Model/Params.swift           Layer 1, mirrors service/schema.py
 Model/Adjustments.swift      Layer 2 + the shader uniform block
 Model/CurveMath.swift        monotone cubic, no view code
-Model/Sidecar.swift          <image>.spektra.json
+Model/Geometry.swift         the oriented crop, straighten, turns and flips
+Model/Sidecar.swift          <image>.spektra.json (schema 3)
+Canvas/CropOverlay.swift     handles, thirds grid, straighten line
 Model/StockCatalog.swift     Resources/StockCatalog.json
 Import/ImageDecoder.swift    Core Image RAW + flat decode, linear ProPhoto out
 Import/Library.swift         one file or one folder, no subfolders

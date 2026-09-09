@@ -2,8 +2,9 @@
 //
 //  Two routes (frontend SPEC §6):
 //    - finished: JPEG, PNG 8-bit, TIFF 16-bit — Display P3, Layer 2 baked in,
-//      cropped. The service renders the print at full resolution; the client
-//      applies Layer 2 in Metal and writes through ImageIO with a P3 tag.
+//      cropped, straightened and turned. The service renders the print at
+//      full resolution; the client applies Layer 2 and the geometry in Metal
+//      and writes through ImageIO with a P3 tag.
 //    - DI package: the negative as normalised density (16-bit TIFF) plus the
 //      print stock's `.cube` — grade the flat file in Photoshop under a Color
 //      Lookup layer, or convert the cube to an ICC for Capture One. Layer 2
@@ -57,13 +58,15 @@ enum Exporter {
         guard let raw = r.rawPath, let w = r.width, let h = r.height,
               let full = session.renderer.store.uploadRGBA16(path: raw, width: w, height: h) else { throw ExportError.noPixels }
         defer { try? FileManager.default.removeItem(atPath: raw) }
-        guard let adjusted = session.renderer.applyLayer2(to: full, uniforms: session.adjustments.uniforms),
-              var cg = adjusted.makeCGImage() else { throw ExportError.noPixels }
-        let crop = session.crop
-        if !crop.isFull {
-            let rect = CGRect(x: crop.x * Double(w), y: crop.y * Double(h), width: crop.width * Double(w), height: crop.height * Double(h)).integral
-            if let c = cg.cropping(to: rect) { cg = c }
-        }
+        guard let adjusted = session.renderer.applyLayer2(to: full, uniforms: session.adjustments.uniforms)
+            else { throw ExportError.noPixels }
+        // Crop, straighten, quarter turns and flips, through the same
+        // `geometryMap` the canvas samples with — not a CoreGraphics
+        // transform written a second time. The old path cropped with
+        // `CGImage.cropping` and could not rotate at all, so a straightened
+        // frame exported unstraightened and nothing in the app said so.
+        let framed = session.renderer.applyGeometry(session.geometry, to: adjusted) ?? adjusted
+        guard let cg = framed.makeCGImage() else { throw ExportError.noPixels }
         try write(cg, to: out, format: format)
         return Result(urls: [out], note: nil)
     }

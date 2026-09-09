@@ -53,12 +53,23 @@ final class Session: CanvasHost {
               pushUndo()
               sidecar.decode = newValue; scheduleSave(); scheduleReopen() }
     }
-    var crop: CropRect {
-        get { sidecar.crop }
-        set { guard newValue != sidecar.crop else { return }
+    /// Crop, straighten, quarter turns and flips. Every mutation goes
+    /// through `Geometry`'s own fitted-by-construction methods, so nothing
+    /// assigned here can put a corner outside the frame.
+    var geometry: Geometry {
+        get { sidecar.geometry }
+        set { guard newValue != sidecar.geometry else { return }
               pushUndo()
-              sidecar.crop = newValue; renderer.crop = newValue; renderer.needsDraw?(); scheduleSave() }
+              sidecar.geometry = newValue
+              renderer.geometry = newValue
+              scheduleSave()
+              // A crop changes how many source pixels a given zoom is
+              // showing, so it changes which tier the canvas needs.
+              updateDetailTier() }
     }
+    /// The live tier's pixel size, which is what the geometry is normalised
+    /// against. Zero before the first image lands.
+    var sourceImageSize: CGSize { renderer.sourceSize ?? .zero }
     private(set) var decoded: DecodedImage?
     /// The source's native long edge. The escalation decision is about the
     /// *file's* resolution, not the live tier's 1600 px: a 45 MP frame needs a
@@ -79,7 +90,21 @@ final class Session: CanvasHost {
     var rightCollapsed = UserDefaults.standard.bool(forKey: Session.uiKey + "rightCollapsed") { didSet { UserDefaults.standard.set(rightCollapsed, forKey: Session.uiKey + "rightCollapsed") } }
     var topCollapsed = UserDefaults.standard.bool(forKey: Session.uiKey + "topCollapsed") { didSet { UserDefaults.standard.set(topCollapsed, forKey: Session.uiKey + "topCollapsed") } }
     var filmstripCollapsed = UserDefaults.standard.bool(forKey: Session.uiKey + "filmstripCollapsed") { didSet { UserDefaults.standard.set(filmstripCollapsed, forKey: Session.uiKey + "filmstripCollapsed") } }
-    var tool: CanvasTool = .select { didSet { renderer.showCrop = tool == .crop; renderer.needsDraw?() } }
+    var tool: CanvasTool = .select {
+        didSet {
+            guard oldValue != tool else { return }
+            // Entering the crop tool shows the whole frame; leaving it fits
+            // the crop. The renderer does both from this one flag.
+            renderer.editingCrop = tool == .crop
+            renderer.needsDraw?()
+        }
+    }
+    /// An observable mirror of the renderer's viewport, so `CropOverlay` can
+    /// draw handles in view coordinates. The renderer is not `@Observable`
+    /// and should not become so — it is touched per draw.
+    private(set) var viewportSnapshot = ViewportState()
+    /// The ⌘-drag straighten line, while one is being drawn.
+    private(set) var straightenPreview: StraightenLine?
     var curvePickerActive = false
     var wbPickerActive = false
     var pickerActive: Bool { curvePickerActive || wbPickerActive }
@@ -286,7 +311,7 @@ final class Session: CanvasHost {
         sidecar = Sidecar.load(for: url) ?? Sidecar()
         renderer.layer2 = sidecar.adjustments.uniforms
         renderer.setCurves(sidecar.adjustments.curves)
-        renderer.crop = sidecar.crop
+        renderer.geometry = sidecar.geometry
         decoded = nil
         exif = EXIFReadout.read(url)
         stockWarning = nil
@@ -398,7 +423,7 @@ final class Session: CanvasHost {
         }
         canvasLog("applyRender uploaded \(w)x\(h)")
         renderer.store.setPrint(tex, for: url)
-        renderer.setLive(tex, logical: renderer.logicalImageSize == nil ? CGSize(width: w, height: h) : nil)
+        renderer.setLive(tex, logical: renderer.sourceSize == nil ? CGSize(width: w, height: h) : nil)
         previewSoft = false
         lastRenderMs = r.elapsedMs
         if let base = statusBase { status = "\(base)  ·  \(r.reprint ? "reprint" : "render") \(Int(r.elapsedMs)) ms" }
@@ -546,6 +571,7 @@ final class Session: CanvasHost {
     // MARK: - CanvasHost
 
     func viewportChanged() {
+        viewportSnapshot = renderer.viewport
         guard renderer.base != nil else { zoomPercent = 0; isFit = true; return }
         zoomPercent = renderer.viewport.zoomPercent
         isFit = renderer.viewport.isFit
@@ -555,7 +581,8 @@ final class Session: CanvasHost {
         if wbPickerActive { wbPickerActive = false; pickNeutral(at: n) }
         else if curvePickerActive { curvePickerActive = false; addCurvePoint(at: n) }
     }
-    func cropDragged(rect: CropRect) { crop = rect }
+    func geometryChanged(_ g: Geometry) { geometry = g }
+    func straightenPreview(_ line: StraightenLine?) { straightenPreview = line }
     func stepFrame(_ delta: Int) { selectRelative(delta) }
     func toggledOriginal(_ on: Bool) { renderer.showOriginal = on; showingOriginal = on }
     func hovered(normalised n: CGPoint?) {
@@ -580,7 +607,7 @@ final class Session: CanvasHost {
     @objc private func zoomHundred() { zoomTo(fraction: 1) }
     @objc private func copyMenu() { copySettings() }
     @objc private func pasteMenu() { pasteSettings() }
-    @objc private func resetCrop() { crop = .full }
+    @objc private func resetCrop() { geometry = .default }
     @objc private func exportMenu() { showExport = true }
 
     /// What the engine's auto-exposure solved for this frame. The Exp. Comp.
@@ -666,10 +693,20 @@ final class Session: CanvasHost {
     /// let the two disagree about which film they are showing.
     private var printStamp: String { Session.printStamp(scheduler.sent) }
 
+    /// The long edge of what is actually on screen, in source pixels. A 20 %
+    /// crop of a 45 MP frame has a 1651 px long edge, which the live tier
+    /// already covers — escalating it would spend a full-resolution render on
+    /// detail the crop threw away.
+    private var croppedLongEdge: CGFloat {
+        guard let live = renderer.sourceSize, max(live.width, live.height) > 0 else { return sourceLongEdge }
+        let out = renderer.geometry.outputSize(for: live)
+        return sourceLongEdge * max(out.width, out.height) / max(live.width, live.height)
+    }
+
     private func updateDetailTier() {
         guard !browsing, let url = selection, decoded != nil, sourceLongEdge > 0 else { return }
         let want = Session.wantedTier(zoomFraction: renderer.viewport.zoomFraction,
-                                      imageLongEdge: sourceLongEdge)
+                                      imageLongEdge: croppedLongEdge)
 
         if want == .live {
             guard detailTier != .live else { return }
@@ -782,7 +819,7 @@ final class Session: CanvasHost {
         sidecar = previous
         renderer.layer2 = previous.adjustments.uniforms
         renderer.setCurves(previous.adjustments.curves)
-        renderer.crop = previous.crop
+        renderer.geometry = previous.geometry
         if current.decode != previous.decode {
             previewSoft = true
             scheduleReopen()
