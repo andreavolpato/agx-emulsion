@@ -167,3 +167,4 @@ category of confusing failure).
 | date | version | change | by |
 |---|---|---|---|
 | 2026-09-09 | transport 1, schema 1 | baseline at the time this contract was written | — |
+| 2026-09-10 | transport 1 | FE now matches replies by JSON-RPC id instead of taking the next line as its reply. No behaviour change while the transport answers in order; it is the client-side prerequisite for `configure_transport`. FE stays serial until concurrency is tested here. | FE |

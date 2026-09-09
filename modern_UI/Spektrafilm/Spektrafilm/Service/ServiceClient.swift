@@ -1,10 +1,19 @@
 //  ServiceClient.swift — one long-lived `python -m spektrafilm.service`,
 //  JSON-RPC 2.0 over stdio, one request at a time.
 //
-//  An actor, so the single-flight property of the transport (numba's
-//  `workqueue` layer is not threadsafe — API-SPEC §10.5) is enforced by the
-//  compiler instead of by convention. Large data never crosses this channel:
-//  the service writes files and returns paths.
+//  An actor, so the single-flight property of the transport is enforced by
+//  the compiler instead of by convention. Large data never crosses this
+//  channel: the service writes files and returns paths.
+//
+//  Single-flight was originally a *requirement* — numba's `workqueue` layer
+//  is not threadsafe (API-SPEC §10.5). On the GPU-native core it is no longer
+//  one: the service verified concurrent entry and reports
+//  `capabilities.backend.concurrent`, with an opt-in `configure_transport`
+//  that makes replies arrive in completion order. This client stays serial
+//  until that is tested here, but it no longer *assumes* the next line is its
+//  reply — see `call`. Turning it on is a frontend decision with a real prize
+//  behind it (a full-resolution render behind a live slider drag) and a real
+//  risk in front of it, and it should not ride along with anything else.
 
 import Foundation
 
@@ -103,6 +112,10 @@ actor ServiceClient {
         }
     }
 
+    /// Just the id, so a reply can be matched before it is known what shape
+    /// its result should be.
+    private struct IDProbe: Decodable { let id: Int? }
+
     private struct Envelope<R: Decodable>: Decodable {
         let id: Int?
         let result: R?
@@ -120,10 +133,32 @@ actor ServiceClient {
         let paramsJSON = String(decoding: paramsData, as: UTF8.self)
         let line = "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"method\":\"\(method.rawValue)\",\"params\":\(paramsJSON)}\n"
         try stdin.write(contentsOf: Data(line.utf8))
-        guard let reply = await reader.readLine() else {
-            state = .failed("service closed its output")
-            throw ClientError.transport("render service closed its output")
+
+        // Match the reply by its JSON-RPC id rather than taking the next line
+        // on faith. Today the transport answers in order and this loop always
+        // matches on the first read — but "the next line is my reply" is an
+        // assumption about the *server*, and the server now has a
+        // `configure_transport` switch that makes replies arrive in
+        // completion order (contract §6, 2026-09-10). This is the client-side
+        // prerequisite for ever turning that on, and until then it costs one
+        // extra decode of a two-field struct per call.
+        //
+        // A line with a different id is logged and skipped rather than
+        // thrown on: in the in-order world it cannot happen, and if it ever
+        // does the useful behaviour is to keep looking for the answer that
+        // was asked for.
+        var reply: Data?
+        for _ in 0..<32 {
+            guard let line = await reader.readLine() else {
+                state = .failed("service closed its output")
+                throw ClientError.transport("render service closed its output")
+            }
+            let probe = try? JSONDecoder().decode(IDProbe.self, from: line)
+            if probe?.id == nil || probe?.id == id { reply = line; break }
+            FileHandle.standardError.write(Data(
+                "service: skipped a reply for id \(probe?.id ?? -1) while waiting for \(id)\n".utf8))
         }
+        guard let reply else { throw ClientError.transport("no reply for request \(id)") }
         let env: Envelope<R>
         do { env = try JSONDecoder().decode(Envelope<R>.self, from: reply) }
         catch { throw ClientError.badResponse(String(decoding: reply.prefix(400), as: UTF8.self)) }
