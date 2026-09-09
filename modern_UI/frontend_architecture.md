@@ -54,14 +54,20 @@ on every card.
   against how much of the frame you see at once, never against what you can
   inspect — zoom does that.
 - **The left card's header shares its row with the traffic lights**, the way
-  Xcode's sidebar header does. `.windowStyle(.hiddenTitleBar)` floats the three
-  window buttons over the content (measured x 10–57, y 5–26 pt), so the header
-  starts 70 pt into the card (`Theme.Metric.panelHeaderLeading`) and import and
-  export sit clear of them. This is the one place the built interface departs
-  from the drawing, which puts the import glyph at x 12; every other card keeps
-  its 12 pt. The window server draws the buttons, so no offscreen capture
-  (`Tools/snapshot.sh`) can see the collision this avoids —
-  `Tools/capture-live.sh` is the check. The header row, the top bar's empty
+  Xcode's sidebar header does — and it genuinely shares it.
+  `.windowStyle(.hiddenTitleBar)` floats the three window buttons over the
+  content at a centre 15.75 pt from the window's top, which is 13 pt above a
+  44 pt header row's centreline: the lights sat high and slightly left of a
+  glyph row that sat low and to the right, and nothing in the corner lined up
+  with anything else. `Windows/TrafficLights.swift` **places** them instead of
+  avoiding them — leading `outerX + 12`, the card's own content inset, and
+  centre `outerY + panelHeaderHeight / 2`. `panelHeaderLeading` then follows
+  from where the button row ends rather than being tuned by hand. This is the
+  one place the built interface departs from the drawing, which puts the
+  import glyph at x 12; every other card keeps its 12 pt. The window server
+  draws the buttons, so no offscreen capture (`Tools/snapshot.sh`) can see
+  this row at all — `Tools/capture-live.sh` is the check, and it measured
+  leading x 21, centre y 28.75. The header row, the top bar's empty
   middle and the Browse header are the window's drag surfaces
   (`WindowDragHandle`), since hiding the titlebar removes the usual one.
 - **The gutter is 6, not the drawing's 8.** Four gutters of ground between the
@@ -305,6 +311,7 @@ Canvas/MetalCanvasView.swift MTKView, gestures, scheduleDraw
 Canvas/Renderer.swift        Metal state, Layer 2 pass, histogram, offscreen render
 Canvas/TextureStore.swift    the buffer table
 Canvas/ViewportState.swift   zoom and pan arithmetic, no view code
+Windows/TrafficLights.swift  the window buttons, moved onto the header row
 Canvas/Shaders.metal         layer2 · canvas quad · histogram
 Model/Session.swift          all state, on the main actor
 Model/Params.swift           Layer 1, mirrors service/schema.py

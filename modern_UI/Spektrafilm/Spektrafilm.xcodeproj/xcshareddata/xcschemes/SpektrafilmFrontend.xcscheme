@@ -1,19 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  SpektrafilmFrontend — the fast suite.
-
-  Same test bundle as `SpektrafilmTests`, with `ServiceIntegrationTests`
-  skipped. That one class spawns `python -m spektrafilm.service` and renders a
-  real negative, which is the only thing in the bundle that generates pixels;
-  everything else is layout, geometry, colour math on synthetic textures, and
-  wire-name checks.
-
-  Use it for UI/layout/behaviour changes. Run `SpektrafilmTests` (the full
-  suite) whenever the change touches `Service/Methods.swift`,
-  `Model/Params.swift`'s wire names, or `src/spektrafilm/service/` — those are
-  exactly what the skipped class guards, and a frontend edit can break them
-  silently.
--->
 <Scheme
    LastUpgradeVersion = "2660"
    version = "1.7">

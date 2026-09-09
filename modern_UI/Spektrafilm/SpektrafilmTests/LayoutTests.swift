@@ -51,9 +51,23 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(1920 - m.outerX - m.rightPanelWidth, 1625, accuracy: 1)
         // Canvas column x: 690.5 / 2.
         XCTAssertEqual(m.outerX + m.leftPanelWidth + m.gutter, 345, accuracy: 4)
-        // The header's first glyph must clear the traffic lights, measured at
-        // x 10–57 pt on this machine.
-        XCTAssertGreaterThan(m.outerX + m.panelHeaderLeading, 70)
+        // The window buttons are placed on the header's centreline rather
+        // than avoided where AppKit floats them
+        // (Windows/TrafficLights.swift). Everything in that corner is
+        // derived from those two numbers, so this is the derivation, not a
+        // measurement: the buttons take the card's own 12 pt inset, and the
+        // first glyph follows the row by `trafficLightToGlyph`.
+        XCTAssertEqual(m.trafficLightLeading, m.outerX + 12)
+        XCTAssertEqual(m.trafficLightCentreY, m.outerY + m.panelHeaderHeight / 2)
+        let rowEnd = m.trafficLightLeading + TrafficLightAlignment.rowWidth
+        let glyphLeft = m.outerX + m.panelHeaderLeading + (26 - m.panelIcon) / 2
+        XCTAssertEqual(glyphLeft - rowEnd, m.trafficLightToGlyph, accuracy: 0.01)
+        // And the row still has to fit inside the card it sits in.
+        XCTAssertLessThan(rowEnd, m.outerX + m.leftPanelWidth)
+        // Captured live at leading x 21, centre y 28.75 against a 29 target
+        // (Tools/capture-live.sh — no offscreen capture can see these).
+        XCTAssertEqual(m.trafficLightLeading, 21)
+        XCTAssertEqual(m.trafficLightCentreY, 29)
     }
 
     func testMinimumWindowStillFitsBothPanels() {

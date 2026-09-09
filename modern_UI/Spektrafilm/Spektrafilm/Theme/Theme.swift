@@ -61,20 +61,40 @@ enum Theme {
         static let filmstripHeight: CGFloat = 125
         /// Well inset from the card edge (36.2 − 17.9 → 9).
         static let wellInset: CGFloat = 9
-        /// Leading inset for the left panel's header row.
+        /// Height of the left panel's header row — and, since the window
+        /// buttons are aligned to it (`Windows/TrafficLights.swift`), the
+        /// thing that decides where they sit.
+        static let panelHeaderHeight: CGFloat = 44
+        /// Centre of that row in *window* coordinates, from the top. The card
+        /// starts at `outerY`, so this is where the traffic lights go.
+        static var trafficLightCentreY: CGFloat { outerY + panelHeaderHeight / 2 }
+        /// Leading edge of the close button, in window coordinates. The card
+        /// starts at `outerX` and every card insets its content by 12, so the
+        /// buttons take that inset rather than a special one — which is what
+        /// makes the corner read as one row instead of two things that
+        /// happen to be near each other.
+        static var trafficLightLeading: CGFloat { outerX + 12 }
+        /// Gap between the zoom button and the first header glyph. Xcode's is
+        /// about this; below ~12 the glyph reads as a fourth window button.
+        static let trafficLightToGlyph: CGFloat = 16
+        /// Leading inset for the left panel's header row, measured from the
+        /// card's own leading edge.
         ///
         /// `.windowStyle(.hiddenTitleBar)` does not remove the three window
         /// buttons; it floats them over the content, the way Xcode's sit over
-        /// its navigator sidebar. Measured on this machine: x 10–57 pt,
-        /// y 5–26 pt. The card starts at x 9, so the first glyph must begin at
-        /// x ≥ 78 — 69 pt inside the card. 70 keeps a 1 pt margin and leaves a
-        /// gap about the size of Xcode's between the buttons and the first
-        /// toolbar item. This is the one place the built interface departs
-        /// from the drawing, which puts the import glyph at x 12; every other
-        /// card keeps its 12 pt. The window server draws the buttons, so no
-        /// offscreen capture (`Tools/snapshot.sh`) can see the collision this
-        /// avoids — `Tools/capture-live.sh` is the check.
-        static let panelHeaderLeading: CGFloat = 70
+        /// its navigator sidebar. They are now placed rather than avoided, so
+        /// this follows from where they are: the row ends at
+        /// `trafficLightLeading + rowWidth`, the glyph starts
+        /// `trafficLightToGlyph` after that, and the glyph is centred in a
+        /// 26 pt box. This is the one place the built interface departs from
+        /// the drawing, which puts the import glyph at x 12; every other card
+        /// keeps its 12 pt. The window server draws the buttons, so no
+        /// offscreen capture (`Tools/snapshot.sh`) can see this row at all —
+        /// `Tools/capture-live.sh` is the check.
+        static var panelHeaderLeading: CGFloat {
+            trafficLightLeading + TrafficLightAlignment.rowWidth + trafficLightToGlyph
+                - outerX - (26 - panelIcon) / 2
+        }
         /// Text inset from the well edge (label x 62 → 31, well x 18 → 13).
         static let wellPadding: CGFloat = 13
         /// Section header height and the gap wells keep from headers.

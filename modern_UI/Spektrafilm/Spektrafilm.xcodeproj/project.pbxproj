@@ -151,13 +151,15 @@
 		E7062B514044B1050E1F1CA9 /* CollapseTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CollapseTab.swift"; sourceTree = "<group>"; };
 		160FC1AA3C87A980448495BD /* EditorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EditorWindow.swift"; sourceTree = "<group>"; };
 		86F51859732FC4916476E8A1 /* TopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TopBar.swift"; sourceTree = "<group>"; };
+		3FC40DFF1C8B85BA997D1C92 /* TrafficLights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrafficLights.swift"; sourceTree = "<group>"; };
 		68EA22A34676BD77F1760903 /* Windows */ = {
 			isa = PBXGroup;
 			children = (
 				A93A35E01D7C5ADFCD2693CB /* BrowseView.swift */,
 				E7062B514044B1050E1F1CA9 /* CollapseTab.swift */,
 				160FC1AA3C87A980448495BD /* EditorWindow.swift */,
-				86F51859732FC4916476E8A1 /* TopBar.swift */
+				86F51859732FC4916476E8A1 /* TopBar.swift */,
+				3FC40DFF1C8B85BA997D1C92 /* TrafficLights.swift */
 			);
 			path = "Windows";
 			sourceTree = "<group>";
@@ -293,6 +295,7 @@
 		038D2A809E0C34970C6557CF /* CollapseTab.swift */ = {isa = PBXBuildFile; fileRef = E7062B514044B1050E1F1CA9; };
 		C6C5D6A4F0698D7B38B79FD1 /* EditorWindow.swift */ = {isa = PBXBuildFile; fileRef = 160FC1AA3C87A980448495BD; };
 		FB6BD13DF5D4CFD5676E1B8B /* TopBar.swift */ = {isa = PBXBuildFile; fileRef = 86F51859732FC4916476E8A1; };
+		1CACD6876969ED48F289275B /* TrafficLights.swift */ = {isa = PBXBuildFile; fileRef = 3FC40DFF1C8B85BA997D1C92; };
 		8D2FAA3202FF7D1008F53E59 /* SpektrafilmApp.swift */ = {isa = PBXBuildFile; fileRef = AE91E3D1136C0574EEA49D4A; };
 		AB6F1305312B9996E2538FF8 /* app-sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -340,6 +343,7 @@
 				038D2A809E0C34970C6557CF /* CollapseTab.swift */,
 				C6C5D6A4F0698D7B38B79FD1 /* EditorWindow.swift */,
 				FB6BD13DF5D4CFD5676E1B8B /* TopBar.swift */,
+				1CACD6876969ED48F289275B /* TrafficLights.swift */,
 				8D2FAA3202FF7D1008F53E59 /* SpektrafilmApp.swift */
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -413,6 +417,7 @@
 		E0F009F6B26E4FF268EF672D /* CollapseTab.swift */ = {isa = PBXBuildFile; fileRef = E7062B514044B1050E1F1CA9; };
 		13CE1087EDEB660481DAAFA6 /* EditorWindow.swift */ = {isa = PBXBuildFile; fileRef = 160FC1AA3C87A980448495BD; };
 		C63DBAB9AC90AB24F4984CC2 /* TopBar.swift */ = {isa = PBXBuildFile; fileRef = 86F51859732FC4916476E8A1; };
+		784EF7FAD35229368916B5FD /* TrafficLights.swift */ = {isa = PBXBuildFile; fileRef = 3FC40DFF1C8B85BA997D1C92; };
 		1F4D89CC2FE4F3BC028B2B29 /* test-sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -466,7 +471,8 @@
 				22AB5BD4E3D96764B438CDF8 /* BrowseView.swift */,
 				E0F009F6B26E4FF268EF672D /* CollapseTab.swift */,
 				13CE1087EDEB660481DAAFA6 /* EditorWindow.swift */,
-				C63DBAB9AC90AB24F4984CC2 /* TopBar.swift */
+				C63DBAB9AC90AB24F4984CC2 /* TopBar.swift */,
+				784EF7FAD35229368916B5FD /* TrafficLights.swift */
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

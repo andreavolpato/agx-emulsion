@@ -26,10 +26,11 @@ struct LeftPanel: View {
 
     private var header: some View {
         HStack(spacing: 0) {
-            // The leading inset clears the window's traffic lights, which
-            // `.hiddenTitleBar` floats over this corner
-            // (Theme.Metric.panelHeaderLeading). Every other card keeps the
-            // drawing's 12 pt.
+            // The window's three buttons are aligned to *this row's*
+            // centreline rather than left where AppKit floats them, which is
+            // 13 pt higher (Windows/TrafficLights.swift). The leading inset
+            // then follows from where the row ends. Every other card keeps
+            // the drawing's 12 pt.
             PanelIconButton(systemImage: "square.and.arrow.down", help: "Open a folder or image (⌘O)") { session.openPanel() }
                 .padding(.leading, Theme.Metric.panelHeaderLeading)
             PanelIconButton(systemImage: "square.and.arrow.up", help: "Export (⌘E)") { session.showExport = true }
@@ -49,10 +50,15 @@ struct LeftPanel: View {
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .padding(.trailing, 6)
         }
-        .frame(height: 44)
+        .frame(height: Theme.Metric.panelHeaderHeight)
         // The header row is the window's drag surface here, as a sidebar
         // header is in Xcode. The buttons sit above it and keep their clicks.
         .background(WindowDragHandle())
+        .background(
+            TrafficLightAlignment(centreY: Theme.Metric.trafficLightCentreY,
+                                  leading: Theme.Metric.trafficLightLeading)
+                .frame(width: 0, height: 0)
+        )
     }
 }
 
