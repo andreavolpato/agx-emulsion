@@ -99,10 +99,14 @@ struct spk_session {
     spk_engine* engine = nullptr;
     std::string session_id;
 
-    // The source frame, on the host, at its own resolution. Held because a
-    // tier is built from it lazily and a stock change re-renders from it.
-    std::vector<float> source;
-    uint32_t src_h = 0, src_w = 0, src_c = 3;
+    // The source frame at its own resolution, **on the device**. A tier is
+    // built from it lazily and a stock change re-renders from it, so it has to
+    // be kept -- but keeping it on the host meant a full-frame copy at `open`
+    // and a second upload per tier. At 24 MP that was 384 MB of each.
+    //
+    // `spk_open` is documented not to retain the caller's pointer, so exactly
+    // one copy is unavoidable; this makes that copy the upload.
+    Image source;
 
     Params params;
     std::unique_ptr<Pipeline> pipeline;
@@ -470,17 +474,42 @@ spk_session* spk_open(spk_engine* engine, const spk_image* input, const char* pa
     session->params.settings.working_precision = "float32";
     if (!digest(session->params, engine->neutral_filters, error)) { g_error = error; return nullptr; }
 
-    session->src_h = input->height;
-    session->src_w = input->width;
-    session->src_c = 3;
-    session->source.resize(size_t(input->width) * input->height * 3);
-    if (input->channels == 3) {
-        std::memcpy(session->source.data(), input->data, session->source.size() * sizeof(float));
-    } else {
-        // Alpha is dropped at the door and never read again.
-        const size_t n = size_t(input->width) * input->height;
-        for (size_t i = 0; i < n; ++i)
-            for (int c = 0; c < 3; ++c) session->source[3 * i + size_t(c)] = input->data[4 * i + size_t(c)];
+    // Uploaded as handed over, alpha and all; `spk_take_rgb` drops the fourth
+    // channel on device below. Stripping it on the host would be a full-frame
+    // CPU pass -- 543 MB of loads and stores at 45 MP.
+    {
+        engine->gpu->begin_frame();
+        Image uploaded;
+        uploaded.h = input->height;
+        uploaded.w = input->width;
+        uploaded.c = input->channels;
+        const size_t bytes = uploaded.elements() * sizeof(float);
+        std::string upload_error;
+        if (input->channels == 3) {
+            uploaded.buf = engine->gpu->upload_persistent(input->data, bytes, upload_error);
+            session->source = uploaded;
+        } else {
+            uploaded.buf = engine->gpu->upload(input->data, bytes, upload_error);
+            Image rgb;
+            rgb.h = uploaded.h;
+            rgb.w = uploaded.w;
+            rgb.c = 3;
+            if (uploaded.buf) rgb.buf = engine->gpu->alloc_persistent(rgb.bytes(), upload_error);
+            const uint32_t meta[2] = {uint32_t(uploaded.pixels()), uploaded.c};
+            if (!uploaded.buf || !rgb.buf ||
+                !engine->gpu->dispatch("spk_take_rgb",
+                                       {gpu::Arg::buf(uploaded.buf), gpu::Arg::inline_bytes(meta, 2),
+                                        gpu::Arg::buf(rgb.buf)},
+                                       uploaded.pixels(), upload_error) ||
+                !engine->gpu->flush(upload_error)) {
+                engine->gpu->end_frame();
+                g_error = upload_error;
+                return nullptr;
+            }
+            session->source = rgb;
+        }
+        engine->gpu->end_frame();
+        if (!session->source.buf) { g_error = upload_error; return nullptr; }
     }
 
     session->pipeline = std::make_unique<Pipeline>(engine->gpu, &engine->colour, &engine->blob,
@@ -528,17 +557,14 @@ bool tier_image(spk_session* session, const Tier& tier, Image& out, std::string&
     spk_session::TierState& state = session->tiers[tier.name];
     if (state.image.valid()) { out = state.image; return true; }
     gpu::Gpu* gpu = session->engine->gpu;
-    Image full;
-    full.h = session->src_h;
-    full.w = session->src_w;
-    full.c = 3;
-    full.buf = gpu->upload_persistent(session->source.data(),
-                                      session->source.size() * sizeof(float), error);
-    if (!full.buf) return false;
+    // Already on the device, three channels, from `spk_open`.
+    const Image& full = session->source;
     Image scaled;
     if (!downscale(gpu, full, tier.long_edge, scaled, error)) return false;
     if (scaled.buf.get() == full.buf.get()) {
-        state.image = full;   // the frame is already at or below the tier
+        // At or below the tier: share the source itself. It is already
+        // persistent, and another copy of a 45 MP frame is 543 MB.
+        state.image = full;
     } else {
         // The downscale ran in the frame arena; copy the result into a
         // persistent buffer, because a tier image outlives the render that

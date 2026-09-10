@@ -300,7 +300,7 @@ actor EngineClient {
             var image = spk_image(data: buffer.baseAddress,
                                   width: UInt32(frame.width),
                                   height: UInt32(frame.height),
-                                  channels: 3)
+                                  channels: UInt32(frame.channels))
             return delta.withCString { deltaPtr in
                 withUnsafePointer(to: &image) { imagePtr in
                     spk_open(engine, imagePtr, deltaPtr, &reply)
@@ -366,6 +366,7 @@ actor EngineClient {
         let pixels: [Float]
         let width: Int
         let height: Int
+        let channels: Int
     }
 
     /// Read the importer's linear ProPhoto TIFF into tightly packed float32
@@ -407,12 +408,12 @@ actor EngineClient {
                                         format: .RGBAf,
                                         colorSpace: space)
         }
-        var rgb = [Float](repeating: 0, count: width * height * 3)
-        for i in 0..<(width * height) {
-            rgb[3 * i] = rgba[4 * i]
-            rgb[3 * i + 1] = rgba[4 * i + 1]
-            rgb[3 * i + 2] = rgba[4 * i + 2]
-        }
-        return Frame(pixels: rgb, width: width, height: height)
+        // Handed over with its alpha still on. `.RGBAf` is the only float
+        // format Core Image will render, and the engine drops the fourth
+        // channel on the GPU (`spk_take_rgb`, which is the first node anyway).
+        // Stripping it here instead was a per-pixel Swift loop over the whole
+        // frame -- at -Onone, which is what a Debug build compiles, it was
+        // most of a 5.1 s `open` on a 24 MP RAW.
+        return Frame(pixels: rgba, width: width, height: height, channels: 4)
     }
 }

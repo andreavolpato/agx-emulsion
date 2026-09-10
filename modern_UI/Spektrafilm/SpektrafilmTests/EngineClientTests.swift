@@ -80,9 +80,13 @@ final class EngineClientTests: XCTestCase {
         let frame = try EngineClient.readLinearRGB(url)
         XCTAssertEqual(frame.width, width)
         XCTAssertEqual(frame.height, height)
+        // The frame is handed over with whatever channel count Core Image
+        // rendered (4 today -- the engine drops alpha on the GPU), so index by
+        // the count the frame reports rather than assuming three.
+        XCTAssertEqual(frame.pixels.count, width * height * frame.channels)
         func rowMean(_ y: Int) -> Float {
             var sum: Float = 0
-            for x in 0..<width { sum += frame.pixels[(y * width + x) * 3 + 1] }
+            for x in 0..<width { sum += frame.pixels[(y * width + x) * frame.channels + 1] }
             return sum / Float(width)
         }
         XCTAssertGreaterThan(rowMean(1), 0.5, "row 1 should be the image's bright top")

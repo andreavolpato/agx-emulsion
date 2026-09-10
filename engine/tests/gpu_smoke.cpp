@@ -45,16 +45,16 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < n; ++i) x[i] = -1.0f + 0.31f * float(i);
         const float k[3] = {1.0f, 2.0f, 0.5f};
         const uint32_t meta[1] = {uint32_t(n)};
-        gpu::Buffer* bx = g->upload(x, sizeof x, error);
-        gpu::Buffer* bk = g->upload(k, sizeof k, error);
-        gpu::Buffer* out = g->alloc(n * sizeof(float), error);
-        bool ok = bx && bk && out &&
+        gpu::BufferRef bx = g->upload(x, sizeof x, error);
+        gpu::BufferRef bk = g->upload(k, sizeof k, error);
+        gpu::BufferRef out = g->alloc(n * sizeof(float), error);
+        bool ok = bool(bx) && bool(bk) && bool(out) &&
                   g->dispatch("spk_log10_guarded",
                               {gpu::Arg::buf(bx), gpu::Arg::buf(bk), gpu::Arg::inline_bytes(meta, 1),
                                gpu::Arg::buf(out)}, n, error) &&
                   g->flush(error);
         if (ok) {
-            const float* got = static_cast<const float*>(g->contents(out));
+            const float* got = static_cast<const float*>(g->contents(out.get()));
             for (size_t i = 0; i < n && ok; ++i) {
                 const float want = std::log10(std::fmax(x[i] * k[i % 3], 0.0f) + 1e-10f);
                 ok = nearly(got[i], want, 1e-5f);
@@ -73,14 +73,14 @@ int main(int argc, char** argv) {
         // Row-vector convention: out = x @ M, so M is read column-major here.
         const float m[9] = {1, 0, 0, 0, 2, 0, 0, 0, 3};
         const uint32_t n[1] = {2};
-        gpu::Buffer* bx = g->upload(x, sizeof x, error);
-        gpu::Buffer* bm = g->upload(m, sizeof m, error);
-        gpu::Buffer* out = g->alloc(sizeof x, error);
+        gpu::BufferRef bx = g->upload(x, sizeof x, error);
+        gpu::BufferRef bm = g->upload(m, sizeof m, error);
+        gpu::BufferRef out = g->alloc(sizeof x, error);
         bool ok = g->dispatch("spk_matmul3",
                               {gpu::Arg::buf(bx), gpu::Arg::buf(bm), gpu::Arg::inline_bytes(n, 1),
                                gpu::Arg::buf(out)}, 2, error) && g->flush(error);
         if (ok) {
-            const float* got = static_cast<const float*>(g->contents(out));
+            const float* got = static_cast<const float*>(g->contents(out.get()));
             const float want[6] = {1, 4, 9, -1, 1, 12};
             for (int i = 0; i < 6 && ok; ++i) ok = nearly(got[i], want[i]);
         }
@@ -97,13 +97,13 @@ int main(int argc, char** argv) {
         x[54321] = 12345.0f;
         const uint32_t meta[1] = {uint32_t(n)};
         const size_t groups = 64;
-        gpu::Buffer* bx = g->upload(x.data(), n * sizeof(float), error);
-        gpu::Buffer* out = g->alloc(groups * sizeof(float), error);
+        gpu::BufferRef bx = g->upload(x.data(), n * sizeof(float), error);
+        gpu::BufferRef out = g->alloc(groups * sizeof(float), error);
         bool ok = g->dispatch("spk_reduce_max",
                               {gpu::Arg::buf(bx), gpu::Arg::inline_bytes(meta, 1), gpu::Arg::buf(out)},
                               groups * 256, error) && g->flush(error);
         if (ok) {
-            const float* partials = static_cast<const float*>(g->contents(out));
+            const float* partials = static_cast<const float*>(g->contents(out.get()));
             float best = partials[0];
             for (size_t i = 1; i < groups; ++i) best = std::fmax(best, partials[i]);
             ok = best == 12345.0f;
@@ -122,13 +122,13 @@ int main(int argc, char** argv) {
         std::vector<float> rgb(size_t(w) * h * 3);
         for (size_t i = 0; i < rgb.size(); ++i) rgb[i] = float(i % 17) / 16.0f;
         const uint32_t meta[3] = {w * h, w, stride};
-        gpu::Buffer* src = g->upload(rgb.data(), rgb.size() * sizeof(float), error);
-        gpu::Buffer* dst = g->alloc_zeroed(size_t(stride) * h * 4 * sizeof(uint16_t), error);
+        gpu::BufferRef src = g->upload(rgb.data(), rgb.size() * sizeof(float), error);
+        gpu::BufferRef dst = g->alloc_zeroed(size_t(stride) * h * 4 * sizeof(uint16_t), error);
         bool ok = g->dispatch("spk_to_rgba16",
                               {gpu::Arg::buf(src), gpu::Arg::inline_bytes(meta, 3), gpu::Arg::buf(dst)},
                               size_t(w) * h, error) && g->flush(error);
         if (ok) {
-            const uint16_t* got = static_cast<const uint16_t*>(g->contents(dst));
+            const uint16_t* got = static_cast<const uint16_t*>(g->contents(dst.get()));
             for (uint32_t y = 0; y < h && ok; ++y)
                 for (uint32_t x = 0; x < w && ok; ++x)
                     for (uint32_t c = 0; c < 3 && ok; ++c) {
@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
                                          ") channel " + std::to_string(c) + ": " +
                                          std::to_string(g16) + " != " + std::to_string(want);
                     }
-            if (ok) ok = g->texture(dst, w, h, stride, error) != nullptr;
+            if (ok) ok = g->texture(dst.get(), w, h, stride, error) != nullptr;
         }
         check(ok, "spk_to_rgba16 + zero-copy texture", ok ? "" : error);
         g->end_frame();
@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
         size_t first = 0;
         for (int frame = 0; frame < 3; ++frame) {
             g->begin_frame();
-            std::vector<gpu::Buffer*> buffers;
+            std::vector<gpu::BufferRef> buffers;
             for (int i = 0; i < 8; ++i) buffers.push_back(g->alloc(1 << 20, error));
             (void)buffers;
             g->end_frame();
