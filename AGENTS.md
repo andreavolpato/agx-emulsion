@@ -6,6 +6,32 @@ before touching the pipeline.
 
 ---
 
+## What this repo is, in one screen
+
+**Two programs and a pipe.** A native macOS app under `modern_UI/`, a Python
+render service under `src/`, newline-delimited JSON-RPC 2.0 between them over
+stdio with images passed as file paths. `ARCHITECTURE.md` §0 is the map; read
+it before reasoning about a symptom, because most confusion in past sessions
+came from debugging one half while the other was what had changed.
+
+**Two sessions work here concurrently**, split by
+`CONTRACT-frontend-backend.md` §4: frontend owns `modern_UI/**`, backend owns
+`src/**`, `tests/**`, `scripts/**`, `rfc/**`. `AGENTS.md`, `ARCHITECTURE.md`,
+`API-SPEC-*` and `CONTRACT-*` belong to neither — **say so before editing one**.
+§4.1 also forbids rebasing or force-pushing a branch the other side may have
+read, and `git stash` / `git clean -fdx` / `git checkout -- .` at the repo root.
+
+**There is no C++ backend.** If you have been told there is, see
+`ARCHITECTURE.md` §8.5: RFC-012's native host is unstarted, and what exists is
+a 17.5 kB verification harness under `scripts/gpu_native/native_host_spike/`
+that proved the plan is possible. Nothing spawns it. The product runs
+`python -m spektrafilm.service`.
+
+**The engine that renders is chosen by which checkout the app resolves**, not
+by a setting. See trap 14.
+
+---
+
 ## Environment
 
 The package is **not** installed system-wide. A venv lives at `.venv`:
@@ -13,6 +39,14 @@ The package is **not** installed system-wide. A venv lives at `.venv`:
 ```bash
 cd "/Users/xiaojinqiu/Documents/Summer 2026/spektrafilm"
 .venv/bin/python ...            # always use this interpreter
+```
+
+There are **two checkouts** of this repo, each with its own venv, each venv's
+editable install pinned to its own `src` (see trap 14):
+
+```
+~/Documents/Summer 2026/spektrafilm       ui/frontend-fixes    ← the app uses this one
+~/Documents/Summer 2026/spektrafilm-gpu   gpu/native-metal
 ```
 
 Recreate if needed:
@@ -41,34 +75,115 @@ Do not change these without a reason; every recorded number assumes them.
 |---|---|
 | film profile | `kodak_portra_400` |
 | print profile | `kodak_portra_endura` |
-| baseline image | `tests/baseline/_DSC2439_16mp_linear_prophoto.tif` (16.00 MP, 3264×4901, float32 linear ProPhoto) |
-| smoke image | `tests/baseline/_smoke_1mp.tif` (1 MP, for fast iteration) |
+| smoke image | `tests/Test_image/_smoke_1mp.tif` (1 MP, for fast iteration) |
+| 45 MP frame | `tests/Test_image/Nikon Z7ii/_DSC2439.NEF` (5504×8256) |
 | device precision | float32 on macOS (see Traps) |
 | grain sampler | `exact` (RFC-002); `--sampler scipy` for the old stream |
 | working precision | `float32` (the default since RFC-006; `float64` is the validation baseline) |
 
-Regenerate the baseline from the source NEF:
+> **`tests/baseline/` no longer exists.** The user deleted it and
+> `HANDOFF-GPU-WIRING.md` §3.3 says **do not restore it**. Every command this
+> section used to give — `make_baseline.py`, `run_reference.py`,
+> `tests/baseline/compare.py`, and the 16 MP linear ProPhoto TIFF that most
+> recorded numbers in this file and in `ARCHITECTURE.md` were measured against
+> — is gone with it. Those numbers stay as history; you cannot reproduce them
+> as written, and a number you cannot reproduce is not a baseline to compare
+> against. The five `tests/test_regression_baselines.py` cases that need its
+> `.npz` fixtures **skip**, with the regeneration command in the skip message.
+>
+> The smoke image survived at a new path, and the suite looks in both places
+> (`tests/test_rfc012_engine_seam.py:24`). Use `tests/Test_image/_smoke_1mp.tif`
+> for anything that needs a small frame, and the Nikon NEF above for anything
+> that needs a real one.
+
+Parity against the numba reference — this is the harness that replaced the
+above, and the one RFC-011 held every ported node to at float32 storage
+epsilon:
 
 ```bash
-.venv/bin/python tests/baseline/make_baseline.py tmp/_DSC2439.NEF \
-    tests/baseline/_DSC2439_16mp_linear_prophoto.tif
+.venv/bin/python -W ignore scripts/gpu_native/parity.py \
+    tests/Test_image/_smoke_1mp.tif                 # every implemented node
+.venv/bin/python -W ignore scripts/gpu_native/parity.py \
+    tests/Test_image/_smoke_1mp.tif --node filming.expose.upsample --end-to-end
 ```
 
-Run a render with instrumentation:
+Use the **1 MP** frame, not the 45 MP one: parity is a correctness question, a
+run takes seconds, and a check you can afford on every change is worth more
+than one you run at the end. The rest of `scripts/gpu_native/` —
+`profile_render.py`, `tier_timings.py`, `grain_moments.py`,
+`concurrency_check.py` — is the measurement kit that replaced the deleted
+`run_reference.py`.
+
+Whole-app timings, including the render, come from the frontend's own
+instrument — see "The frontend and the service" above. It is usually the right
+tool even for a backend change, because it measures what the user experiences
+rather than what a script measures.
+
+---
+
+## The frontend and the service
+
+`modern_UI/Spektrafilm/README.md` is the detailed document; `ARCHITECTURE.md`
+§7 is the summary. What you need to run it:
 
 ```bash
-.venv/bin/python -W ignore tests/baseline/run_reference.py \
-    tests/baseline/_DSC2439_16mp_linear_prophoto.tif tests/baseline/out \
-    --no-glare --backend mlx --tag my_experiment
+cd modern_UI/Spektrafilm
+python3 Tools/gen-project.py        # REGENERATE after adding/removing any Swift file
+xcodebuild -project Spektrafilm.xcodeproj -scheme Spektrafilm \
+    -configuration Debug -derivedDataPath build/DerivedData build
+xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmFrontend \
+    -configuration Debug -derivedDataPath build/DerivedData test   # ~2 s, no render
+xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmTests \
+    -configuration Debug -derivedDataPath build/DerivedData test   # + the real service
 ```
 
-Compare two renders:
+`project.pbxproj` is **generated from the filesystem** by `Tools/gen-project.py`
+(ids are path hashes, so it is byte-stable). A new `.swift` file that is not in
+the project fails the build with `cannot find X in scope`, which reads like a
+missing import. Run the generator first.
+
+**Two test schemes, and the difference matters.** `SpektrafilmFrontend` skips
+`ServiceIntegrationTests` — the only class that spawns Python and renders. Use
+it while iterating. Run `SpektrafilmTests` whenever you touch
+`Service/Methods.swift`, `Model/Params.swift`'s wire names, or anything under
+`src/spektrafilm/service/`: that skipped class is what guards the wire, and
+`ParamsTests.testWireNamesMatchTheServiceSchema` is what catches a renamed
+field before it becomes a runtime rejection.
+
+Capturing the interface:
 
 ```bash
-.venv/bin/python -W ignore tests/baseline/compare.py \
-    tests/baseline/out/reference_A.exr tests/baseline/out/reference_B.exr \
-    --tag A_vs_B
+Tools/snapshot.sh [image.NEF]        # offscreen, three window sizes
+Tools/capture-live.sh [image.NEF]    # the REAL window, via the window server
+SPEKTRAFILM_CANVAS_LOG=1 …           # one line per draw, plus the open-path timings
 ```
+
+`snapshot.sh` renders through `cacheDisplay`, which **cannot see a
+`CAMetalLayer`** and substitutes an offscreen render of the canvas. That blind
+spot hid a drawable pixel format `CAMetalLayer` rejects (the app crashed on
+launch) and a redraw that never reached the view (blank canvas, correct
+numbers). `capture-live.sh` is the only capture that proves the canvas draws,
+and it needs a live GUI session — if `CGWindowListCopyWindowInfo` reports
+almost no on-screen windows, the failure is environmental, not a regression.
+
+The app's own timing instrument, which you should not delete:
+
+```
+$ SPEKTRAFILM_CANVAS_LOG=1 …/Spektrafilm --snapshot 1600x900 /tmp/o.png \
+      --open "tests/Test_image/Nikon Z7ii/_DSC2439.NEF" --wait 180 2>&1 >/dev/null \
+  | grep "open path"
+session: open path (ms): decode 96 · preview-texture 230 · linear-tiff 12
+         · service.open 922 · solve 117 · reprint 36 · TOTAL 1415 · core=metal
+```
+
+**`core=metal` is the first thing to check.** If it says anything else, stop —
+nothing else you measure means what you think it means (trap 14). The service
+reports `elapsed_ms` for renders and the status bar shows it, so without this
+line the *only* visible number is the fastest thing in the pipeline, and a slow
+open reads as a slow render. That mistake cost a session.
+
+Snapshot flags for canvas features a test cannot see: `--zoom`, `--geometry`,
+`--mask`, `--compare`.
 
 ---
 
@@ -86,9 +201,13 @@ larger than most differences you will be trying to measure.
 branch) and `grain_sampler='exact'` derives every chunk's stream from a fixed
 `SeedSequence`, so grain reproduces run to run and across worker counts.
 
-**Any per-pixel comparison must still disable both.** `run_reference.py
---no-glare` plus omitting `--grain` does this. With both off the pipeline is
-bit-exact (`np.array_equal` True) run to run.
+**Any per-pixel comparison must still disable both.** Set
+`print_render.glare.active = False` and `film_render.grain.active = False` — or
+`debug.deactivate_stochastic_effects = True`, which does both. With both off
+the pipeline is bit-exact (`np.array_equal` True) run to run.
+`scripts/gpu_native/parity.py` disables them by default and only enables them
+under `--allow-stochastic`, where it reports timing and no dE. (The old
+`run_reference.py --no-glare` flag is gone with `tests/baseline/`.)
 
 This cost an hour of chasing a phantom port bug. Before concluding a change
 broke something, run the same config twice and check it reproduces.
@@ -239,6 +358,90 @@ camera LUT can beat spectral reconstruction on those hues — it never builds a
 spectrum. Pinned by `tests/test_spectral_roundtrip_hue.py`; do not raise those
 bounds without looking at colours.
 
+### 14. The engine that renders is whichever checkout the app resolved
+
+There are two checkouts and two venvs, and `spektrafilm` is installed
+**editable** in each. An editable install pins a `.pth` to *one* `src`
+directory — whichever `pip install -e` was run from — and it keeps pointing
+there regardless of the current working directory, the branch, or which
+worktree you are standing in.
+
+Consequences, all of which have already happened here:
+
+- **A third worktree has no venv, so it borrows one, so it runs that venv's
+  source.** A `git worktree add` + `cd` + measure A/B therefore executes the
+  *same* code in both arms. The arms agree, and the agreement reads as "no
+  effect" — which is exactly how a correct result was nearly retracted on
+  2026-09-10. Under `pytest` it is the same: **a worktree test run does not
+  necessarily test that worktree.** Set `PYTHONPATH=<worktree>/src`, and check
+  `spektrafilm.__file__` before believing any A/B.
+- **The app is immune, and only by construction.**
+  `ServiceClient.childEnvironment(repo:)` sets `PYTHONPATH=<repo>/src` from the
+  bundle-resolved repo, and `PYTHONPATH` takes precedence over the `.pth`. That
+  line looks redundant next to an editable install and it is the only thing
+  guaranteeing the app renders with the engine sitting next to the binary you
+  launched. **Do not delete it as a simplification** — contract §5, and
+  `ServiceLaunchEnvironmentTests` fails if two checkouts ever resolve to one
+  engine.
+- **The original version of this bug cost a whole session.** The GPU core lived
+  on a branch the app's checkout did not have, so every render ran on numba and
+  the only symptom was that things felt slow. `Capabilities` did not decode
+  `backend`, so nothing could report it. See `HANDOFF-GPU-WIRING.md` §0 — and
+  check `core=metal` before believing any measurement.
+
+### 15. A refactor that only moves code can still move the wire
+
+The wire is assembled from *both* halves: the Python `capabilities` dict and
+the Swift `Capabilities` type that decodes it. A change entirely inside
+`src/` can therefore break the contract while its commit message truthfully
+says "no wire change" — this happened on 2026-09-10, when an engine/service
+split dropped `transport_version` and `schema_version` from `capabilities`.
+Neither field is optional on the Swift side, so the result would have been a
+refusal to start (contract §2), not a warning.
+
+Before landing anything that touches `_m_capabilities` or a response shape,
+print the block and diff it against what the Swift type requires. The full key
+set is pinned by a test on each side.
+
+### 16. A check that exists on paper, in a configuration where it can never fire
+
+Three instances of the same failure landed within one day, which is why it is
+its own trap rather than three footnotes:
+
+- `deactivate_spatial_effects` never zeroed `grain.micro_structure[0]`, a
+  Gaussian blur radius. Invisible because the only test exercising the flag
+  went through `lut_mode`, which *also* switches grain off — so the one test
+  covering the check ran it where the bug could not be reached.
+- `Session.warmUp` called `capabilities` with `try?`. Contract §2's "refuse an
+  unknown transport with a visible error" was written down and never built, and
+  a block the client could not decode was indistinguishable from a service that
+  had not started.
+- `test_a_reprint_does_not_touch_colour_science` asserted `not pandas` above an
+  `xfail` for `colour` — but pandas-loaded is *entailed by* colour-loaded
+  wherever pandas is installed. It passed only on a venv without pandas, i.e.
+  not the one the product uses.
+
+The shape to look for: a guard whose only exercise is in a configuration that
+disables the thing it guards. Ask what the *inputs* to a passing test have in
+common — the same question trap 11 asks about colour.
+
+### 17. This machine is not a benchmark
+
+Timings here are contaminated routinely and by large factors. On 2026-09-10 a
+warm `service.open` read 1.86–2.81 s against 922 ms measured hours earlier;
+the cause was **Civilization VI holding the GPU at 125 % CPU**, load average
+6.2. The same unchanged commit has measured 23.3 s and 18.9 s hours apart.
+
+- Check `ps -Ao %cpu,comm -r | head` and `uptime` before trusting a number,
+  and say so in any message that quotes one.
+- Measure **interleaved**, never sequentially: alternate arms within one
+  session using `_FORCE_REFERENCE_*` or stash/pop.
+- Prefer CPU time over wall clock when the question is about imports or
+  allocation rather than the GPU.
+- `core=metal` and correctness results are not timing-dependent; report those
+  separately from speed, which is what makes a contaminated session still
+  useful.
+
 ---
 
 ## Conventions
@@ -353,6 +556,20 @@ bounds without looking at colours.
 - **Measure interleaved, never sequentially.** This machine drifts: the same
   unchanged commit measured 23.3 s and 18.9 s hours apart. Stash/pop or use the
   `_FORCE_REFERENCE_*` switches and alternate arms within one session.
+- **RFC-011 landed: the render core is Metal.** `settings.gpu_backend='metal'`
+  runs the whole topology on `backends/metal/` (45 MP, 14.15 s → 1.03 s), held
+  to float32 storage epsilon against numba. **numba is the reference and stays
+  forever** — it stopped being the runtime, not the truth. Every ported node
+  has a `scripts/gpu_native/parity.py` row. 20 of the 21 default nodes are on
+  Metal; `preprocess.crop_rescale` has no Metal body (ARCHITECTURE §8.2).
+- **RFC-012 landed steps 1, 3 and 4.** The engine is split from the wire
+  (`service/engine.py` vs `service/service.py`, "the engine returns pixels, the
+  service turns pixels into paths", guarded by an AST check in
+  `tests/test_rfc012_engine_seam.py`); the colour constants are baked
+  (`model/colour_baked.py`, 21.9 KiB for ~148 MB of dependencies); and a C++
+  gate proved MLX kernels are byte-identical from `libmlx.dylib`. **Step 5, the
+  native host, is unstarted.** Do not put rendering logic in an RPC handler —
+  that seam is what makes option D a deletion rather than a rewrite.
 - Anything claiming a speed or memory win must come with a measurement in the
   same message. `tracemalloc` for allocation, `resource.getrusage` for RSS.
 - Quality claims need a ΔE number from `compare.py`, not an eyeball.
@@ -360,6 +577,12 @@ bounds without looking at colours.
 ## Do not
 
 - Do not commit or push unless asked.
+- Do not edit `AGENTS.md`, `ARCHITECTURE.md`, `API-SPEC-*` or `CONTRACT-*`
+  without telling the other session — contract §4 makes them shared, and a
+  unilateral edit makes the other side's context wrong.
+- Do not restore `tests/baseline/`. See "Fixed experimental setup".
+- Do not delete `PYTHONPATH` from `ServiceClient.childEnvironment` (trap 14) or
+  `Session.LoadClock` (the open-path instrument).
 - Do not add GPL-incompatible dependencies. The code is GPL-3.0-or-later; the
   profiles under `data/profiles/` are CC BY-SA 4.0 with separate attribution
   obligations.
