@@ -264,8 +264,35 @@ Stated plainly, because the failure modes here are the expensive kind.
 
 Each step is independently valuable and independently abandonable.
 
-1. **Spike MLX from a non-Python host** (§4.3). One kernel, one array, byte
-   comparison. This is a gate, not a task: everything below assumes it passes.
+1. ~~**Spike MLX from a non-Python host**~~ (§4.3) — **done 2026-09-10, it
+   passes.** `scripts/gpu_native/native_host_spike/` records what the shipping
+   `backends/metal` kernels hand to `mx.fast.metal_kernel` — name, MSL source
+   and header as strings, every input buffer, grid and threadgroup — and
+   replays them through `mlx::core::fast::metal_kernel` from a C++ binary that
+   links `libmlx.dylib` and has no Python in its image (`otool -L`). Four
+   kernels, chosen for the paths that would diverge:
+
+   | kernel | what it exercises | result |
+   |---|---|---|
+   | `spk_log10_guarded` | `log10`, the `max(·,0)+1e-10` guard, denormals, negatives | byte-identical |
+   | `spk_boost` | `exp` on a highlight ramp, early-out branch | byte-identical |
+   | `spk_curves` | binary search over a repeated knot and a non-monotonic toe, `interp_channel` | byte-identical |
+   | `spk_matmul3` | fma contraction in the 3×3 | byte-identical |
+
+   **The gate is a real one:** re-running the same source under
+   `MathMode::Fast` moves `spk_boost` and `spk_matmul3` off byte-identical by
+   up to 1.1e-5 absolute, so the comparison detects compile-level differences
+   rather than passing vacuously. Two consequences:
+
+   - **C is available.** The one assumption both C and D rest on holds.
+   - **The native host must keep `CompileOptions{MathMode::Safe}`** — MLX's
+     default. Built with relaxed or fast math it drifts past RFC-011's float32
+     storage epsilon silently, which is exactly §4.1's failure mode.
+
+   Coverage is total for this pipeline: `template_args`, `init_value`,
+   `atomic_outputs` and `ensure_row_contiguous` appear nowhere in
+   `backends/metal/`, so every dispatch in the engine is source + header + the
+   row-contiguous default + a 1-D grid.
 2. ~~**Finish the GPU resize**~~ — **done** (RFC-011 §11, merged `d8c4881`).
    `open` 2.6 s → 278 ms in the engine, 1.4 s end to end in the app. Held to
    float32 storage epsilon against skimage (max abs 1.2e-7); the edge mode was
@@ -274,9 +301,32 @@ Each step is independently valuable and independently abandonable.
 3. **Bake the colour-science constants** (§2.2), with the re-derivation test.
    Removes 148 MB and the last per-render third-party call. Valuable even if
    this RFC goes no further.
-4. **Split the service in two**: the wire and session handling on one side,
-   the render on the other, behind a narrow interface. This is the seam C and
-   D both attach to and it costs nothing to have.
+4. ~~**Split the service in two**~~ — **done 2026-09-10.** `service/engine.py`
+   holds `RenderEngine`: typed arguments in, in-memory results out. It has no
+   workspace, parses no JSON, and writes no file. `service/service.py` keeps
+   the nine wire methods and is now only three things — validate the request
+   shape, call **one** engine method, materialise the result to a path.
+
+   The rule, stated so it can be checked: **the engine returns pixels, the
+   service turns pixels into paths.** `tests/test_rfc012_engine_seam.py`
+   asserts it — including an AST guard that fails if `engine.py` grows a
+   `save_image_oiio` / `tofile` / `write_text` — and renders a frame through
+   `RenderEngine` alone, with no service and no temp directory, which is the
+   option-D rehearsal.
+
+   What this buys D: `_write_rgba16` and the JSON layer are now in one file
+   and nothing depends on them, so removing the process is a deletion. What it
+   cost: nothing at runtime — the same 757 tests pass, and the wire is
+   unchanged (no new method, no renamed field, no version bump).
+
+   One thing the split found on its own: `RenderSession.workspace` was stored
+   and never read. The session never had file business; only the service did.
+
+   A caution from doing it. The first cut dropped `transport_version` and
+   `schema_version` from `capabilities`, which contract §2 makes a
+   *launch* failure on FE, not a warning — a split that "only moves code"
+   still moves the wire if the wire is assembled from both halves. The
+   capability key set is now pinned by a test.
 5. **C — the native host behind the same wire.** Contract unchanged, so the
    frontend does not move and every existing test applies. Both services
    runnable side by side; ship whichever passes parity.
