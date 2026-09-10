@@ -14,6 +14,7 @@
 #include "curves.hpp"
 #include "hanatos.hpp"
 #include "params.hpp"
+#include "printing.hpp"
 #include "profile.hpp"
 #include "colour.hpp"
 #include "dump.hpp"
@@ -238,6 +239,35 @@ int main(int argc, char** argv) {
             double row[9];
             m.to_row_major(row);
             d.add(p + "tc_b_matrix", row, 9);
+
+            // The enlarger's per-render constants. Every one of these was
+            // computed privately inside the pipeline once, and one of them was
+            // wrong by an amount that looked like a grading choice.
+            PrintConstants pc;
+            if (!print_constants(colour, blob, params, lut, side, pc, err)) die(err);
+            const std::string pp = std::string("print/") + pair[0] + "|" + pair[1] + "/";
+            d.add(pp + "illuminant", pc.print_illuminant);
+            d.add(pp + "paper_sensitivity", pc.paper_sensitivity);
+            d.add(pp + "chd", pc.spectral.channel_density);
+            d.add(pp + "base", pc.spectral.base_density);
+            d.add(pp + "ixs", pc.spectral.illum_x_sens);
+            d.add(pp + "density_spectral_midgray", pc.density_spectral_midgray);
+            d.add(pp + "gain", pc.gain, 3);
+            d.add(pp + "offset", pc.offset, 3);
+            d.add(pp + "log_raw_black", pc.log_raw_black, 3);
+            d.add(pp + "log_raw_white", pc.log_raw_white, 3);
+
+            // And with a filter shift and a preflash on, because both are
+            // live-mutable and neither is exercised at the defaults.
+            Params shifted = params;
+            shifted.enlarger.m_filter_shift = 0.4;
+            shifted.enlarger.y_filter_shift = -0.3;
+            shifted.enlarger.preflash_exposure = 0.35;
+            PrintConstants pc2;
+            if (!print_constants(colour, blob, shifted, lut, side, pc2, err)) die(err);
+            d.add(pp + "shifted_gain", pc2.gain, 3);
+            d.add(pp + "shifted_offset", pc2.offset, 3);
+            d.add(pp + "shifted_illuminant", pc2.print_illuminant);
 
             // The spectral integral's constants, for the scanner side.
             Vec illum;

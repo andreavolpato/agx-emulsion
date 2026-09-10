@@ -85,6 +85,12 @@ typedef struct {
     void*           texture;
     uint32_t        width;
     uint32_t        height;
+    /* Row pitch of `rgba16`, in pixels, which is `width` rounded up to the
+     * device's linear-texture alignment. It is reported rather than left for
+     * the caller to re-derive: the alignment is queried from the device
+     * (`minimumLinearTextureAlignmentForPixelFormat`), not a constant, and a
+     * caller that assumed 256 bytes read past the end of the buffer. */
+    uint32_t        row_stride_px;
     double          elapsed_ms;
     int32_t         reprint;              /* 1 if the negative was reused   */
     int32_t         negative_was_cached;

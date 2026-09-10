@@ -158,12 +158,27 @@ struct GeometryParams {
     }
 };
 
+// One struct for both specs, but *not* one set of defaults: the input side is
+// `InputGamutCompressSpec(active=True, algorithm="xy")` and the output side is
+// `OutputGamutCompressSpec(algorithm="cam16ucs", lightness_compression=
+// (0.7, 1.0, 2.2))`. Sharing the struct and forgetting that cost a build that
+// refused every default configuration with "output gamut compression 'xy' is
+// not implemented" -- so the two are constructed by name below.
 struct GamutCompressSpec {
     bool active = true;
     std::string algorithm = "xy";              // input: "xy"; output: "cam16ucs" | "off"
     double knee[3] = {0.0, 1.0, 6.0};
     bool lightness_compression_active = false;
     double lightness_compression[3] = {0.7, 1.0, 2.2};
+
+    static GamutCompressSpec input_default() { return GamutCompressSpec{}; }
+    static GamutCompressSpec output_default() {
+        GamutCompressSpec s;
+        s.active = true;
+        s.algorithm = "cam16ucs";
+        s.lightness_compression_active = true;
+        return s;
+    }
 };
 
 struct IOParams {
@@ -171,8 +186,8 @@ struct IOParams {
     bool input_cctf_decoding = false;
     std::string output_color_space = "sRGB";
     bool output_cctf_encoding = true;
-    GamutCompressSpec input_gamut_compress;    // active, "xy"
-    GamutCompressSpec output_gamut_compress;   // "cam16ucs", lightness on
+    GamutCompressSpec input_gamut_compress = GamutCompressSpec::input_default();
+    GamutCompressSpec output_gamut_compress = GamutCompressSpec::output_default();
     bool crop = false;
     double crop_center[2] = {0.5, 0.5};
     double crop_size[2] = {0.1, 0.1};

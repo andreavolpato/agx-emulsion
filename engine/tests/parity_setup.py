@@ -60,6 +60,7 @@ TOLERANCES: dict[str, tuple[float, str]] = {
     "enlarger/": (1e-13, "summation order upstream in the illuminant"),
     "tc_lut/": (5e-12, "81-term dot product summed in a different order"),
     "spectral_constants/": (1e-13, "summation order upstream in the illuminant"),
+    "print/": (1e-11, "an 81-term dot product and a geometric mean over it"),
     "cmax/": (1e-9, "the bisection's own iteration count and the C_max solve"),
 }
 
@@ -236,6 +237,55 @@ def reference() -> dict[str, np.ndarray]:
         ref[p + "tc_b_matrix"] = tc_b_matrix(
             params.io.input_color_space,
             _illuminant_to_xy(params.film.info.reference_illuminant)).ravel()
+
+        # --- the enlarger's per-render constants ---------------------------
+        from spektrafilm.runtime.pipeline import SimulationPipeline
+        from spektrafilm.utils.spectral_dispatch import get_constants
+
+        def print_constants_reference(par):
+            """`PrintingStage`'s setup half, driven through the real stage
+            objects so this is the reference and not a second port of it."""
+            pipe = SimulationPipeline(par)
+            ps = pipe._printing_stage
+            sens = np.nan_to_num(10 ** np.asarray(par.print.data.log_sensitivity))
+            light = standard_illuminant(par.enlarger.illuminant)
+            print_illuminant = ps._enlarger_service.enlarger_filtered_illuminant(light)
+            chd, base, ixs = get_constants(par.film.data.channel_density,
+                                           par.film.data.base_density, print_illuminant, sens)
+            gain = np.asarray(ps._compute_exposure_factor_midgray(sens, print_illuminant)).reshape(-1)
+            offset = np.asarray(ps._compute_raw_preflash(light, sens)).reshape(-1)
+            gain3 = np.broadcast_to(gain, (3,))
+            offset3 = np.broadcast_to(offset, (3,))
+            midgray = np.asarray(ps._enlarger_service.density_spectral_midgray).ravel()
+
+            def log_raw(cmy):
+                acc = np.einsum("l,lm->m", np.exp2(-(np.asarray(chd) @ np.asarray(cmy)
+                                                     + np.asarray(base)) * 3.321928094887362),
+                                np.asarray(ixs))
+                return np.log10(np.fmax(acc * gain3 + offset3, 0.0) + 1e-10)
+
+            film_black = -np.asarray(par.film_render.grain.density_min, dtype=float)
+            film_white = np.nanmax(np.asarray(par.film.data.density_curves), axis=0)
+            return dict(illuminant=np.asarray(print_illuminant, dtype=float).ravel(),
+                        paper_sensitivity=sens.ravel(), chd=np.asarray(chd).ravel(),
+                        base=np.asarray(base).ravel(), ixs=np.asarray(ixs).ravel(),
+                        density_spectral_midgray=midgray, gain=gain3.copy(), offset=offset3.copy(),
+                        log_raw_black=log_raw(film_black), log_raw_white=log_raw(film_white))
+
+        pp = f"print/{film_stock}|{print_stock}/"
+        base_ref = print_constants_reference(
+            digest_params(init_params(film_profile=film_stock, print_profile=print_stock)))
+        for key, value in base_ref.items():
+            ref[pp + key] = value
+
+        shifted = digest_params(init_params(film_profile=film_stock, print_profile=print_stock))
+        shifted.enlarger.m_filter_shift = 0.4
+        shifted.enlarger.y_filter_shift = -0.3
+        shifted.enlarger.preflash_exposure = 0.35
+        shifted_ref = print_constants_reference(shifted)
+        ref[pp + "shifted_gain"] = shifted_ref["gain"]
+        ref[pp + "shifted_offset"] = shifted_ref["offset"]
+        ref[pp + "shifted_illuminant"] = shifted_ref["illuminant"]
 
         illum = standard_illuminant(params.print.info.viewing_illuminant)
         cmfs = np.asarray(STANDARD_OBSERVER_CMFS[:])
