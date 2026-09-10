@@ -25,12 +25,32 @@ struct SpektrafilmApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1920, height: 1080)
         .commands { EditorCommands(session: session) }
+
+        // Not decoration: two of the three licences the bundle carries
+        // require something visible, and CC BY-SA 4.0 names an About screen
+        // by example as a place the attribution has to survive. See
+        // `AboutWindow`.
+        Window("About Spektrafilm", id: "about") {
+            AboutWindow()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 }
 
 struct EditorCommands: Commands {
     let session: Session
+    /// `openWindow` reaches the "about" scene declared above. A `Commands`
+    /// struct can read the environment; a plain `Button` action cannot open a
+    /// scene any other way.
+    @Environment(\.openWindow) private var openWindow
+
+    private func openAbout() { openWindow(id: "about") }
+
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About Spektrafilm") { openAbout() }
+        }
         CommandGroup(replacing: .newItem) {
             Button("Open…") { session.openPanel() }.keyboardShortcut("o")
             Button("Export…") { session.showExport = true }.keyboardShortcut("e").disabled(session.selection == nil)
@@ -243,7 +263,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         session.topCollapsed = false
         session.filmstripCollapsed = false
         try? await Task.sleep(for: .milliseconds(300))
-        if let open = req.open { session.open(urls: [open]) }
+        if let open = req.open {
+            session.open(urls: [open])
+            // A capture is of the *print*. The app itself opens onto the
+            // decode and waits for a person to ask for the develop, and a
+            // snapshot has nobody at the keyboard — so it asks here.
+            session.requestPrint()
+        }
         let deadline = Date().addingTimeInterval(req.wait)
         while Date() < deadline {
             try? await Task.sleep(for: .milliseconds(200))

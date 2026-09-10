@@ -4,11 +4,18 @@
 //  the renderer, the service client and the scheduler, and it is the only
 //  thing views bind to. The flows worth knowing:
 //
-//    select(frame)  →  decode (Core Image, off main)  →  preview on canvas
-//                   →  linear TIFF in the cache        →  service.open
+//    select(frame)  →  decode (Core Image, off main)  →  the decode on canvas
+//
+//  Opening stops at the decode. The develop is the slow half of the path —
+//  the 364 MB linear TIFF and the `open` that reads it back — and it happens
+//  when someone asks for the print, not when they ask to look at the frame:
+//
+//    Solve          →  linear TIFF in the cache        →  engine open
 //                   →  solve(exposure)                 →  the Exp. Comp. baseline
+//                   →  solve(both)                     →  the enlarger filter pack
 //                   →  reprint(live)                   →  print on canvas
-//    params edit    →  scheduler.request               →  reprint/preview_render
+//    params edit    →  the develop if the engine does not hold the frame yet,
+//                      else scheduler.request         →  reprint/preview_render
 //    adjustments    →  renderer.layer2 (no service)    →  redraw
 //    decode edit    →  re-decode → new TIFF → reopen
 //    zoom ≥ 100 %   →  reprint(preview/full)           →  detail texture swapped in
@@ -35,7 +42,7 @@ final class Session: CanvasHost {
         get { sidecar.params }
         set { guard newValue != sidecar.params else { return }
               pushUndo()
-              sidecar.params = newValue; scheduler.request(newValue); markStale(); scheduleSave() }
+              sidecar.params = newValue; requestPrint(); markStale(); scheduleSave() }
     }
     var adjustments: Adjustments {
         get { sidecar.adjustments }
@@ -330,6 +337,34 @@ final class Session: CanvasHost {
     var stockWarning: String?
     var showExport = false
 
+    // MARK: - the fast stock flip
+
+    /// Print stocks with a shipped preview LUT, and what each was baked
+    /// against. Read from the engine once the wire is agreed; empty when
+    /// none are bundled, which is what hides the feature rather than letting
+    /// it fail when pressed.
+    private(set) var printLUTStocks: [String: PrintLUTEntry] = [:]
+
+    /// Show the baked print LUT the instant a paper is picked, and let the
+    /// real reprint replace it.
+    ///
+    /// **Off by default, and not out of caution.** The table bakes the whole
+    /// print+scan chain at the *bake's* settings, so the user's print
+    /// exposure, filter pack and preflash do not reach it, and neither does
+    /// glare. On an ungraded frame that is a free look at the paper; on a
+    /// graded one it is a flash of somebody else's grade before the real
+    /// render lands. Which of those a given user wants is theirs to say, so
+    /// it is a switch with the caveat written next to it.
+    var fastStockPreview: Bool = UserDefaults.standard.bool(forKey: "fastStockPreview") {
+        didSet { UserDefaults.standard.set(fastStockPreview, forKey: "fastStockPreview") }
+    }
+
+    /// Bumped by every render that reaches the canvas. A stock preview that
+    /// resolves *after* the real print has landed must not overwrite it, and
+    /// comparing this before and after the await is how that is known —
+    /// `serviceGeneration` does not move for a print-layer edit.
+    private var rendersLanded = 0
+
     /// The app lands in Browse when a *folder* or several files are opened:
     /// the grid is the confirmation step and nothing is rendered until a
     /// frame is chosen (frontend SPEC §5.1, HANDOFF-FRONTEND-POLISH §2).
@@ -385,6 +420,30 @@ final class Session: CanvasHost {
     private var serviceSessionID: String?
     var serviceSessionIDForExport: String? { serviceSessionID }
     private var serviceGeneration = 0
+
+    // MARK: the develop, on request
+    //
+    // A frame opens onto its *decode*. It is what the user asked to look at,
+    // it lands in a few hundred milliseconds, and it is the picture the frame
+    // actually is — where the develop is a 364 MB TIFF and an `open` that
+    // reads it back (~2 s on a 24 MP RAW, HANDOFF-DISTRIBUTION §1). So the
+    // develop happens when someone asks for the *print*: Solve, an edit, an
+    // export, a capture. `wantsDevelop` is that request, and it survives a
+    // re-decode because a white-balance change is also a request to see the
+    // result.
+
+    /// Whether this frame's develop has been asked for.
+    private var wantsDevelop = false
+    /// The develop in flight, if any. Anything that needs the engine to hold
+    /// the frame awaits it rather than starting a second one — which is what
+    /// Solve pressed while the decode is still landing turns into.
+    private var developTask: Task<String?, Never>?
+    /// The decode settings the image on the canvas was decoded with. The linear
+    /// TIFF is *written* from those pixels and *cached* under those settings, so
+    /// a develop that read today's settings and wrote yesterday's pixels would
+    /// poison the entry for both.
+    private var decodedSettings = DecodeSettings()
+
     private var loadTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var reopenTask: Task<Void, Never>?
@@ -403,7 +462,14 @@ final class Session: CanvasHost {
         client = EngineClient(device: renderer.device)
         scheduler = RenderScheduler(client: client)
         scheduler.onResult = { [weak self] r, gen in self?.applyRender(r, generation: gen) }
-        scheduler.onError = { [weak self] e in self?.lastError = e; self?.status = e }
+        scheduler.onError = { [weak self] error in
+            // Both, deliberately: the status line gets something a user can
+            // act on, the canvas trace keeps the engine's own words.
+            let message = EngineMessage.userFacing(error)
+            canvasLog("render failed: \(EngineMessage.technical(error))")
+            self?.lastError = message
+            self?.status = message
+        }
         scheduler.onBusy = { [weak self] b in
             guard let self else { return }
             self.busy = b
@@ -563,6 +629,10 @@ final class Session: CanvasHost {
         backend = caps.backend
         serviceReady = true
         if let why = caps.schemaMismatch { stockWarning = why }
+        Task { [client] in
+            let catalog = (try? await client.printLUTCatalog()) ?? [:]
+            await MainActor.run { self.printLUTStocks = catalog }
+        }
     }
 
     /// A decoding failure against `capabilities` is a wire problem, and the
@@ -611,6 +681,8 @@ final class Session: CanvasHost {
         browsing = true
         selection = nil
         decoded = nil
+        wantsDevelop = false
+        developTask?.cancel(); developTask = nil
         sourceLongEdge = 0
         exif = nil
         stockWarning = nil
@@ -677,6 +749,10 @@ final class Session: CanvasHost {
         detailTier = .live
         detailPending = false
         detailTask?.cancel(); detailTask = nil
+        // A new frame has asked for nothing yet: it opens onto its decode, and
+        // the develop waits for Solve or an edit (see `wantsDevelop`).
+        wantsDevelop = false
+        developTask?.cancel(); developTask = nil
         renderer.dropDetail()
         sidecar = Sidecar.load(for: url) ?? Sidecar()
         renderer.layer2 = sidecar.adjustments.uniforms
@@ -736,9 +812,9 @@ final class Session: CanvasHost {
         let settings = sidecar.decode
         let device = renderer.device
         let liveEdge = Session.liveEdge
-        // Decode and preview only. The 363 MB linear TIFF is written *after*
-        // the cancellation guard below, so a superseded white-balance value
-        // never leaves a file behind (HANDOFF §3.1.2).
+        // Decode and preview, and then the frame is *on the canvas* — that is
+        // the whole of an open. The develop is `develop(_:_:clock:)`, below,
+        // and it runs only if it has been asked for (`wantsDevelop`).
         let decodedImage: DecodedImage? = await Task.detached(priority: .userInitiated) {
             try? ImageDecoder.decode(url, settings: settings)
         }.value
@@ -758,23 +834,90 @@ final class Session: CanvasHost {
         }
         guard !Task.isCancelled, selection == url else { return }
         decoded = d
+        decodedSettings = settings
         sourceLongEdge = max(d.pixelSize.width, d.pixelSize.height)
         if sidecar.decode.whiteBalance == .asShot, let t = d.asShotTemperature, let tn = d.asShotTint,
            (sidecar.decode.temperature != t || sidecar.decode.tint != tn) {
             sidecar.decode.temperature = t; sidecar.decode.tint = tn
         }
+        guard wantsDevelop else {
+            clock.lap("decode-only")
+            canvasLog(clock.summary()
+                      + "  ·  \(url.lastPathComponent) on the canvas as the decode"
+                      + " — no develop until it is asked for")
+            // A frame whose print is still resident comes back showing it —
+            // that cache is what makes switching frames instant — and calling
+            // that "decoded" would be describing a picture the user is not
+            // looking at.
+            status = renderer.store.print(for: url) == nil
+                ? "\(url.lastPathComponent)  ·  decoded — press Solve to develop it."
+                : "\(url.lastPathComponent)  ·  showing its last print."
+            return
+        }
+        await ensureDeveloped()
+    }
+
+    /// The develop: the linear TIFF in the cache, the engine's session for the
+    /// frame, and the print that replaces the decode on the canvas.
+    ///
+    /// This is the slow half of the open path and it is deliberately not on
+    /// it. The TIFF is written after the cancellation guards, so a superseded
+    /// white-balance value never leaves a file behind (HANDOFF §3.1.2).
+    @discardableResult
+    private func develop(_ url: URL, _ d: DecodedImage, clock: LoadClock) async -> String? {
+        var clock = clock
+        let settings = decodedSettings
         let tiff: URL? = await Task.detached(priority: .userInitiated) {
             try? Session.linearTIFF(for: d, settings: settings)
         }.value
         clock.lap("linear-tiff")
         guard !Task.isCancelled, selection == url, let tiff else {
-            status = "Could not decode \(url.lastPathComponent)."; return
+            status = "Could not decode \(url.lastPathComponent)."; return nil
         }
-        await openInService(tiff: tiff, for: url, clock: &clock)
+        return await openInService(tiff: tiff, for: url, clock: clock)
     }
 
-    private func openInService(tiff: URL, for url: URL, clock: inout LoadClock) async {
-        var clock = clock          // `inout` cannot be held across an await
+    /// The develop, as something every caller can await.
+    ///
+    /// Two callers must not develop the same frame twice, and the second one is
+    /// not rare — Solve pressed while the decode is still landing, an export
+    /// started the moment a frame was picked. So this waits for a decode that
+    /// has not landed yet and joins a develop already in flight, rather than
+    /// starting another. Returns the engine's session id, or nil if the frame
+    /// did not land.
+    @discardableResult
+    func ensureDeveloped() async -> String? {
+        // `load` is what produces a decodable frame, so waiting for it is what
+        // makes Solve during an open mean the same thing as Solve a moment
+        // later. It is a no-op once the frame is on the canvas, and `load`'s
+        // own tail comes back through here with the decode already in hand, so
+        // the two cannot wait on each other.
+        if decoded == nil, let load = loadTask { await load.value }
+        if let sid = serviceSessionID { return sid }
+        if let task = developTask { return await task.value }
+        guard let url = selection, let d = decoded else { return nil }
+        let task = Task { [weak self] in await self?.develop(url, d, clock: LoadClock()) }
+        developTask = task
+        let sid = await task.value
+        developTask = nil
+        return sid
+    }
+
+    /// Ask for the print of the frame on screen.
+    ///
+    /// Two cases, and the difference between them is the shape of the open
+    /// path: the engine already holds the frame, so the delta goes to the
+    /// scheduler; or it does not, and this *is* the request to develop.
+    /// Everything that wants a picture rather than a decode comes through
+    /// here — a parameter edit, an undo, a paste, an export, a capture.
+    func requestPrint() {
+        wantsDevelop = true
+        guard serviceSessionID == nil else { scheduler.request(params); return }
+        Task { await ensureDeveloped() }
+    }
+
+    private func openInService(tiff: URL, for url: URL, clock: LoadClock) async -> String? {
+        var clock = clock
         // The gate, not a race (RFC-013 §2.2). Costs nothing once boot has
         // been paid, and on the path that matters — a frame restored at launch
         // submitting `open` before `capabilities` has landed — it is the
@@ -785,11 +928,15 @@ final class Session: CanvasHost {
             bootTask = nil
             clock.lap("warm-up")
         }
-        if serviceBlocked != nil { status = serviceBlocked!; return }
+        if serviceBlocked != nil { status = serviceBlocked!; return nil }
         status = "Developing…"
+        // Preserved rather than cleared: Solve sets it around the develop *and*
+        // the solve that follows, and clearing it here would open a window in
+        // which the button looks ready while the engine is still working.
+        let wasBusy = busy
         busy = true
         startClock()
-        defer { busy = false }
+        defer { busy = wasBusy }
         do {
             let req = OpenRequest(imagePath: tiff.path, paramsDelta: sidecar.params.fullDelta)
             let r: OpenResponse = try await client.call(.open, req)
@@ -798,18 +945,18 @@ final class Session: CanvasHost {
             // a service can be restarted under a running app.
             if let caps = r.capabilities {
                 accept(caps)
-                if let why = serviceBlocked { status = why; return }
+                if let why = serviceBlocked { status = why; return nil }
             }
-            guard selection == url, !Task.isCancelled else { return }
+            guard selection == url, !Task.isCancelled else { return nil }
             serviceReady = true
             serviceSessionID = r.sessionID
             serviceGeneration = scheduler.reset(sessionID: r.sessionID, params: sidecar.params)
             // What the engine's own auto-exposure chose for this frame. The
             // Exp. Comp. slider is an offset from it, so the UI has to know
             // the baseline to show it (HANDOFF §4). `solve(target:"exposure")`
-            // is read-only — the filter-pack half of `solve` writes neutrals
-            // onto the session and is deliberately not called, because `open`
-            // already applied the database neutrals.
+            // measures and reports without touching the session, so it belongs
+            // here; the filter pack is `solveNow`'s half, because it is what
+            // the Solve pill means.
             if let solved = try? await client.call(.solve, SolveRequest(sessionID: r.sessionID, target: "exposure"), as: SolveResponse.self),
                let ev = solved.solvedParams["exposure_compensation_ev"] {
                 sidecar.solvedEV = ev
@@ -822,7 +969,7 @@ final class Session: CanvasHost {
                       + (warmUpMs.map { "  ·  warm_up \(Int($0)) ms" } ?? "")
                       + "  ·  core=\(renderCore ?? "?")"
                       + (backend?.sessionCache.map { "  ·  \($0.summary)" } ?? ""))
-            guard selection == url else { return }
+            guard selection == url else { return nil }
             applyRender(rr, generation: serviceGeneration)
             statusBase = "\(url.lastPathComponent)  ·  \(r.meta.width)×\(r.meta.height)  ·  \(r.detectedInput.inputColorSpace)"
             if let b = backend, b.isSlowPath {
@@ -833,14 +980,17 @@ final class Session: CanvasHost {
             status = "\(statusBase!)  ·  \(rr.response.reprint ? "reprint" : "render") \(Int(rr.response.elapsedMs)) ms"
             // The user may have moved a slider while the film side was running.
             scheduler.request(sidecar.params)
+            return r.sessionID
         } catch {
-            lastError = "\(error)"
+            lastError = EngineMessage.userFacing(error)
             status = "\(error)"
             if case EngineClient.ClientError.noResources = error { serviceReady = false }
+            return nil
         }
     }
 
     private func applyRender(_ outcome: RenderOutcome, generation: Int) {
+        rendersLanded += 1
         let r = outcome.response
         guard generation == serviceGeneration else {
             canvasLog("applyRender dropped: generation \(generation) != \(serviceGeneration)"); return
@@ -950,6 +1100,11 @@ final class Session: CanvasHost {
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled, let url = selection else { return }
             loadTask?.cancel()
+            // A develop of the *previous* decode is not the develop of this
+            // one: it would open the engine on a TIFF that is already
+            // superseded. `wantsDevelop` is left alone, so a frame that was
+            // never developed is re-decoded and nothing more.
+            developTask?.cancel(); developTask = nil
             renderer.store.invalidatePrint(for: url)
             previewSoft = true
             loadTask = Task { await load(url) }
@@ -1019,6 +1174,43 @@ final class Session: CanvasHost {
         m.components[i].color = SIMD3<Double>(Double(rgb.x), Double(rgb.y), Double(rgb.z))
         selectedMask = m
     }
+    /// Pick a paper. The one place print stock is chosen, so the fast flip
+    /// has one place to hook into.
+    ///
+    /// The preview is started **before** the parameter is set, and that
+    /// ordering is the whole of why it is fast: `EngineClient` is an actor,
+    /// so a table lookup queued behind the reprint the setter schedules
+    /// would arrive after the thing it was meant to precede.
+    func selectPrintStock(_ stock: String) {
+        if fastStockPreview, printLUTStocks[stock] != nil { startStockPreview(stock) }
+        var p = params
+        p.printStock = stock
+        p.scanFilm = false
+        params = p
+    }
+
+    private func startStockPreview(_ stock: String) {
+        guard let url = selection, serviceSessionID != nil else { return }
+        let landed = rendersLanded
+        Task { [weak self, client] in
+            guard let outcome = try? await client.previewStockLUT(stock, tier: "live"),
+                  let texture = outcome.texture else { return }
+            await MainActor.run {
+                guard let self, self.selection == url, self.rendersLanded == landed,
+                      self.params.printStock == stock, !self.params.scanFilm else { return }
+                // Not `store.setPrint`: this is not the print, and caching it
+                // as one would hand it back on the next frame switch as
+                // though the pipeline had produced it. It goes on the canvas
+                // and is replaced by the render that is already on its way.
+                self.renderer.setLive(texture)
+                self.previewSoft = true
+                let ms = String(format: "%.1f", outcome.meta.applyMs)
+                self.status = "\(stock) from the baked print LUT in \(ms) ms — "
+                            + "no glare, and not your print grade; the real print is rendering."
+            }
+        }
+    }
+
     func geometryChanged(_ g: Geometry) { geometry = g }
     func straightenPreview(_ line: StraightenLine?) { straightenPreview = line }
     func stepFrame(_ delta: Int) { selectRelative(delta) }
@@ -1249,7 +1441,7 @@ final class Session: CanvasHost {
             canvasLog("detail \(tier.rawValue) \(w)x\(h) landed in \(Int(r.elapsedMs)) ms")
             if let base = statusBase { status = base }
         } catch {
-            lastError = "\(error)"
+            lastError = EngineMessage.userFacing(error)
         }
     }
 
@@ -1283,7 +1475,7 @@ final class Session: CanvasHost {
             previewSoft = true
             scheduleReopen()
         } else {
-            scheduler.request(previous.params)
+            requestPrint()
         }
         markStale()
         scheduleSave()
@@ -1308,7 +1500,7 @@ final class Session: CanvasHost {
         sidecar.adjustments = clip.adjustments
         renderer.layer2 = clip.adjustments.uniforms
         renderer.setCurves(clip.adjustments.curves)
-        scheduler.request(clip.params)
+        requestPrint()
         markStale()
         scheduleSave()
         status = "Pasted settings — each frame keeps its own exposure solve."
@@ -1316,60 +1508,81 @@ final class Session: CanvasHost {
 
     // MARK: - solve, and looking at the original
 
-    var canSolve: Bool { serviceReady && serviceSessionID != nil && !busy }
+    /// Solve needs the engine, a frame, and nothing already in flight. It does
+    /// **not** need the frame to be in the engine yet: on a frame that is
+    /// still only decoded, pressing it *is* the develop, and the solve lands
+    /// on top of the session that develop made.
+    var canSolve: Bool {
+        serviceReady && serviceBlocked == nil && selection != nil && decoded != nil && !busy
+    }
 
     /// Ask the engine to solve this frame: auto-exposure **and** the enlarger
     /// filter pack for the paper that is selected.
     ///
-    /// The load path already calls `solve(target: "exposure")`, which is
-    /// read-only — it reports the baseline the Exp. Comp. slider offsets from
-    /// and writes nothing. This is the other half, `target: "both"`, which
-    /// *does* write neutrals onto the session, and it is a button rather than
-    /// something that happens on open for exactly that reason: it changes the
-    /// picture, so the user asks for it.
+    /// The develop already ran `solve(target: "exposure")`, which measures and
+    /// reports the baseline the Exp. Comp. slider is an offset from. This is
+    /// `target: "both"` — the same measurement plus the filter pack — and it is
+    /// a button rather than something that happens on open because it is the
+    /// user saying "print this frame".
     ///
     /// The Y/M filter shifts are offsets from the solved neutrals, so they go
     /// back to zero here — leaving a shift on top of a freshly solved pack
     /// means "solve" would visibly not solve.
     func solveNow() {
-        guard let sid = serviceSessionID, serviceReady else {
+        guard serviceReady, selection != nil, decoded != nil else {
             status = "The render service is not running."; return
         }
+        guard !busy else { return }
+        wantsDevelop = true
         busy = true
         startClock()
         status = "Solving…"
         Task {
             defer { busy = false }
             do {
-                _ = try await client.call(.solve, SolveRequest(sessionID: sid, target: "both"),
-                                          as: SolveResponse.self)
+                // On a frame that is still only decoded, Solve is also the
+                // develop — and the session it returns is the one to solve.
+                guard let sid = await ensureDeveloped(), serviceSessionID == sid else { return }
+                try await solveFilterPack(sessionID: sid)
                 guard serviceSessionID == sid else { return }
-                var p = params
-                p.yFilterShift = 0
-                p.mFilterShift = 0
-                // The scheduler's `sent` no longer describes the session: the
-                // engine wrote neutrals underneath it. Re-open the generation
-                // so the next request is a full delta rather than one
-                // computed against parameters the engine has moved.
-                params = p
-                scheduler.invalidate()
-                serviceGeneration = scheduler.reset(sessionID: sid, params: p)
                 let rr = try await client.render(.reprint, RenderRequest(sessionID: sid))
                 guard serviceSessionID == sid else { return }
                 applyRender(rr, generation: serviceGeneration)
                 status = "Solved  ·  reprint \(Int(rr.response.elapsedMs)) ms"
                 scheduleSave()
             } catch {
-                lastError = "\(error)"
+                lastError = EngineMessage.userFacing(error)
                 status = "\(error)"
             }
         }
+    }
+
+    /// `solve(target: "both")`: the auto-exposure the develop already reported
+    /// plus the enlarger filter pack for the paper on the session.
+    ///
+    /// Zeroing the Y/M shifts is part of it — they are offsets from the solved
+    /// neutrals, and a shift left on top of a freshly solved pack means Solve
+    /// visibly did not solve. The scheduler's `sent` no longer describes the
+    /// session once the pack has been re-solved, so its generation is reopened
+    /// rather than trusted.
+    private func solveFilterPack(sessionID sid: String) async throws {
+        _ = try await client.call(.solve, SolveRequest(sessionID: sid, target: "both"),
+                                  as: SolveResponse.self)
+        guard serviceSessionID == sid else { return }
+        var p = params
+        p.yFilterShift = 0
+        p.mFilterShift = 0
+        params = p
+        scheduler.invalidate()
+        serviceGeneration = scheduler.reset(sessionID: sid, params: p)
     }
 
     /// The Python process can die; `ServiceClient.start()` is idempotent, so a
     /// restart is a stop and a reload from the sidecar (HANDOFF §5).
     func restartService() {
         loadTask?.cancel()
+        // A develop in flight belongs to the engine that is being stopped.
+        developTask?.cancel(); developTask = nil
         Task {
             await client.stop()
             serviceReady = false
@@ -1446,6 +1659,8 @@ struct EXIFReadout: Sendable {
 }
 
 extension Session {
-    /// The service session id once the current frame is open there, else nil.
-    func currentServiceSession() async -> String? { serviceSessionIDForExport }
+    /// The service session id an export needs, developing the frame first if
+    /// it is still only decoded. An export is a request for the picture, so it
+    /// is also a request for the develop.
+    func currentServiceSession() async -> String? { await ensureDeveloped() }
 }

@@ -28,11 +28,8 @@ struct PrintProfileSection: View {
                             ForEach(group.papers) { paper in
                                 row(paper.name,
                                     selected: !session.params.scanFilm && paper.id == session.params.printStock,
-                                    help: "") {
-                                    var p = session.params
-                                    p.printStock = paper.id
-                                    p.scanFilm = false
-                                    session.params = p
+                                    help: helpFor(paper.id)) {
+                                    session.selectPrintStock(paper.id)
                                 }
                             }
                         }
@@ -48,6 +45,13 @@ struct PrintProfileSection: View {
                 actions
             }
         }
+    }
+
+    /// Only says something when there is something to say: which film the
+    /// paper's baked LUT was paired with, and only while the fast flip is on.
+    private func helpFor(_ stock: String) -> String {
+        guard session.fastStockPreview, let entry = session.printLUTStocks[stock] else { return "" }
+        return "Fast flip available — baked against \(entry.pairedFilm)."
     }
 
     private func groupHeader(_ title: String) -> some View {
@@ -90,6 +94,12 @@ struct PrintProfileSection: View {
                 session.toggledOriginal(!session.showingOriginal)
             }
         }
+        // The wells above are inset by `wellInset`, and a pill that is not
+        // runs to the card's own edge. A pill's fill *is* the ground colour,
+        // so at the edge it merges with the window around the card and the
+        // row reads as a bar spilling out of the panel — which is what it
+        // looked like. Same inset as the well, so the two line up.
+        .padding(.horizontal, Theme.Metric.wellInset)
     }
 
     private func pill(_ title: String, help: String, active: Bool, enabled: Bool,
@@ -118,6 +128,14 @@ struct PrintProfileSection: View {
             }
             Button("Solve exposure and filter pack") { session.solveNow() }
                 .disabled(!session.canSolve)
+            Divider()
+            // The caveat is in the label because it is the whole decision.
+            // A toggle called "Fast preview" with the explanation somewhere
+            // else is a toggle whose behaviour is a surprise.
+            Toggle("Fast flip (baked LUT, no glare, ignores your print grade)",
+                   isOn: Binding(get: { session.fastStockPreview },
+                                 set: { session.fastStockPreview = $0 }))
+                .disabled(session.printLUTStocks.isEmpty)
         }
     }
 }

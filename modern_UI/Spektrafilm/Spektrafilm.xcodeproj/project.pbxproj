@@ -144,6 +144,7 @@
 		};
 		3CCEC3F26705D6819C65A60B /* Resources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources; sourceTree = "<group>"; };
 		BAC307A47D6F76302B897A1E /* EngineClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineClient.swift"; sourceTree = "<group>"; };
+		287A369DB545560B06FEA36F /* EngineMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineMessage.swift"; sourceTree = "<group>"; };
 		CC2B2BC90455A9EA24E3E716 /* Methods.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Methods.swift"; sourceTree = "<group>"; };
 		DE976148AF21CF886D599656 /* RenderScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RenderScheduler.swift"; sourceTree = "<group>"; };
 		0AFE98D44DD0FE2BF0D87E95 /* Spektrafilm-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Spektrafilm-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -151,6 +152,7 @@
 			isa = PBXGroup;
 			children = (
 				BAC307A47D6F76302B897A1E /* EngineClient.swift */,
+				287A369DB545560B06FEA36F /* EngineMessage.swift */,
 				CC2B2BC90455A9EA24E3E716 /* Methods.swift */,
 				DE976148AF21CF886D599656 /* RenderScheduler.swift */,
 				0AFE98D44DD0FE2BF0D87E95 /* Spektrafilm-Bridging-Header.h */
@@ -167,6 +169,7 @@
 			path = "Theme";
 			sourceTree = "<group>";
 		};
+		CD79BF6910B43EE919610663 /* AboutWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AboutWindow.swift"; sourceTree = "<group>"; };
 		644C3C5C6B6D920DEE18AEB1 /* BootWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BootWindow.swift"; sourceTree = "<group>"; };
 		A93A35E01D7C5ADFCD2693CB /* BrowseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrowseView.swift"; sourceTree = "<group>"; };
 		E7062B514044B1050E1F1CA9 /* CollapseTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CollapseTab.swift"; sourceTree = "<group>"; };
@@ -176,6 +179,7 @@
 		68EA22A34676BD77F1760903 /* Windows */ = {
 			isa = PBXGroup;
 			children = (
+				CD79BF6910B43EE919610663 /* AboutWindow.swift */,
 				644C3C5C6B6D920DEE18AEB1 /* BootWindow.swift */,
 				A93A35E01D7C5ADFCD2693CB /* BrowseView.swift */,
 				E7062B514044B1050E1F1CA9 /* CollapseTab.swift */,
@@ -218,8 +222,11 @@
 		B8057DF6F7586C513DC4C6D8 /* GeometryContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeometryContractTests.swift"; sourceTree = "<group>"; };
 		6B156718E1AE69C25B473A8F /* GeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeometryTests.swift"; sourceTree = "<group>"; };
 		0CFA312A5F866E734F736E61 /* LayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LayoutTests.swift"; sourceTree = "<group>"; };
+		2084498AEFCCEF72CEFCAAD6 /* LicensingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LicensingTests.swift"; sourceTree = "<group>"; };
 		332D14B32AAD81387A7DD138 /* MaskTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MaskTests.swift"; sourceTree = "<group>"; };
+		D94AC75E929B1FB6061C71D4 /* OpenPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenPathTests.swift"; sourceTree = "<group>"; };
 		D535AB20AF82118A0962C13F /* ParamsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ParamsTests.swift"; sourceTree = "<group>"; };
+		0E647BE2467515A353CD0BAE /* PrintLUTTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PrintLUTTests.swift"; sourceTree = "<group>"; };
 		70F2B5843ED40F2BAD7DFEDD /* RendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RendererTests.swift"; sourceTree = "<group>"; };
 		0A69EAE576B15BF34E5745A9 /* TIFFHandoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TIFFHandoffTests.swift"; sourceTree = "<group>"; };
 		B30E2FCC7C48E3CDEB2823F5 /* ViewportStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ViewportStateTests.swift"; sourceTree = "<group>"; };
@@ -234,8 +241,11 @@
 				B8057DF6F7586C513DC4C6D8 /* GeometryContractTests.swift */,
 				6B156718E1AE69C25B473A8F /* GeometryTests.swift */,
 				0CFA312A5F866E734F736E61 /* LayoutTests.swift */,
+				2084498AEFCCEF72CEFCAAD6 /* LicensingTests.swift */,
 				332D14B32AAD81387A7DD138 /* MaskTests.swift */,
+				D94AC75E929B1FB6061C71D4 /* OpenPathTests.swift */,
 				D535AB20AF82118A0962C13F /* ParamsTests.swift */,
+				0E647BE2467515A353CD0BAE /* PrintLUTTests.swift */,
 				70F2B5843ED40F2BAD7DFEDD /* RendererTests.swift */,
 				0A69EAE576B15BF34E5745A9 /* TIFFHandoffTests.swift */,
 				B30E2FCC7C48E3CDEB2823F5 /* ViewportStateTests.swift */
@@ -243,24 +253,28 @@
 			path = "SpektrafilmTests";
 			sourceTree = "<group>";
 		};
+		EC4AE25E9F4A2D5EB8EEFDF3 /* bundle-licenses.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "bundle-licenses.sh"; sourceTree = "<group>"; };
 		3A46B823EB154761A6BF7A40 /* capture-live.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-live.sh"; sourceTree = "<group>"; };
-		871C92CEB47259580798BCA0 /* check-engine-resources.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "check-engine-resources.sh"; sourceTree = "<group>"; };
+		1B2E44CA1DD9CFD804E6BB09 /* check-bundle-resources.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "check-bundle-resources.sh"; sourceTree = "<group>"; };
 		40B93B861DD78BF8A17094C9 /* compare-layout.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "compare-layout.py"; sourceTree = "<group>"; };
 		907F64D7CA2A857F64DF3134 /* gen-catalog.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "gen-catalog.py"; sourceTree = "<group>"; };
 		D657F6587F062BF4541C2DCE /* gen-project.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "gen-project.py"; sourceTree = "<group>"; };
 		0623FFEA4399ED7F0B3F5E04 /* live-window.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "live-window.swift"; sourceTree = "<group>"; };
 		F5DFA6BBBFD96A83DFEAE91D /* make-smoke.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "make-smoke.py"; sourceTree = "<group>"; };
+		0D77537AA79679996F528A6D /* package.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "package.sh"; sourceTree = "<group>"; };
 		87314BD67C9F03FF90F10BE7 /* snapshot.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "snapshot.sh"; sourceTree = "<group>"; };
 		B15C2DB998636C9DEE424DF8 /* Tools */ = {
 			isa = PBXGroup;
 			children = (
+				EC4AE25E9F4A2D5EB8EEFDF3 /* bundle-licenses.sh */,
 				3A46B823EB154761A6BF7A40 /* capture-live.sh */,
-				871C92CEB47259580798BCA0 /* check-engine-resources.sh */,
+				1B2E44CA1DD9CFD804E6BB09 /* check-bundle-resources.sh */,
 				40B93B861DD78BF8A17094C9 /* compare-layout.py */,
 				907F64D7CA2A857F64DF3134 /* gen-catalog.py */,
 				D657F6587F062BF4541C2DCE /* gen-project.py */,
 				0623FFEA4399ED7F0B3F5E04 /* live-window.swift */,
 				F5DFA6BBBFD96A83DFEAE91D /* make-smoke.py */,
+				0D77537AA79679996F528A6D /* package.sh */,
 				87314BD67C9F03FF90F10BE7 /* snapshot.sh */
 			);
 			path = "Tools";
@@ -274,6 +288,7 @@
 		8EE65348773C45B1D968F31C /* json.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "json.cpp"; path = "../../engine/src/core/json.cpp"; sourceTree = SOURCE_ROOT; };
 		31570D5FF5811B6726E46061 /* numeric.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "numeric.cpp"; path = "../../engine/src/core/numeric.cpp"; sourceTree = SOURCE_ROOT; };
 		D54583B8F05D0A2875FE11AA /* params.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "params.cpp"; path = "../../engine/src/core/params.cpp"; sourceTree = SOURCE_ROOT; };
+		8A85D91B564749CCBC8CD5BD /* print_lut.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "print_lut.cpp"; path = "../../engine/src/core/print_lut.cpp"; sourceTree = SOURCE_ROOT; };
 		96B09847B1308EB125672DC2 /* printing.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "printing.cpp"; path = "../../engine/src/core/printing.cpp"; sourceTree = SOURCE_ROOT; };
 		34FC33B09373B76FB63801AA /* profile.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "profile.cpp"; path = "../../engine/src/core/profile.cpp"; sourceTree = SOURCE_ROOT; };
 		CCB6D1377A4D858EF1B005F3 /* setup_cache.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "setup_cache.cpp"; path = "../../engine/src/core/setup_cache.cpp"; sourceTree = SOURCE_ROOT; };
@@ -294,6 +309,7 @@
 				8EE65348773C45B1D968F31C /* json.cpp */,
 				31570D5FF5811B6726E46061 /* numeric.cpp */,
 				D54583B8F05D0A2875FE11AA /* params.cpp */,
+				8A85D91B564749CCBC8CD5BD /* print_lut.cpp */,
 				96B09847B1308EB125672DC2 /* printing.cpp */,
 				34FC33B09373B76FB63801AA /* profile.cpp */,
 				CCB6D1377A4D858EF1B005F3 /* setup_cache.cpp */,
@@ -373,9 +389,11 @@
 		C62F760A04289FB4B908B23E /* LeftPanel.swift */ = {isa = PBXBuildFile; fileRef = D47835E8B05FDFA33E235A3E; };
 		3CCC10816711855EF8A483AB /* RightPanel.swift */ = {isa = PBXBuildFile; fileRef = C72C2D38653D03EEAE2393C1; };
 		E3B3644C25235A6C28182ECF /* EngineClient.swift */ = {isa = PBXBuildFile; fileRef = BAC307A47D6F76302B897A1E; };
+		2AE1FD5EFFA458757CD99B2B /* EngineMessage.swift */ = {isa = PBXBuildFile; fileRef = 287A369DB545560B06FEA36F; };
 		A394D2865ED231DC4E689EF6 /* Methods.swift */ = {isa = PBXBuildFile; fileRef = CC2B2BC90455A9EA24E3E716; };
 		6625CDBA42276F9AC87D1C3D /* RenderScheduler.swift */ = {isa = PBXBuildFile; fileRef = DE976148AF21CF886D599656; };
 		8676E7DDCD7C4091B33A2290 /* Theme.swift */ = {isa = PBXBuildFile; fileRef = 99DD52B5777F1B47C013FE24; };
+		0A579B8CA86B8CB7CE52406C /* AboutWindow.swift */ = {isa = PBXBuildFile; fileRef = CD79BF6910B43EE919610663; };
 		083D2FD0AFE185C84AA1E5A1 /* BootWindow.swift */ = {isa = PBXBuildFile; fileRef = 644C3C5C6B6D920DEE18AEB1; };
 		C2DAF32A79E3A15DBEA4D0AF /* BrowseView.swift */ = {isa = PBXBuildFile; fileRef = A93A35E01D7C5ADFCD2693CB; };
 		038D2A809E0C34970C6557CF /* CollapseTab.swift */ = {isa = PBXBuildFile; fileRef = E7062B514044B1050E1F1CA9; };
@@ -391,6 +409,7 @@
 		4A5B0F600DA303ED8ED143F4 /* json.cpp */ = {isa = PBXBuildFile; fileRef = 8EE65348773C45B1D968F31C; };
 		2B5593C39C860F89E32C2749 /* numeric.cpp */ = {isa = PBXBuildFile; fileRef = 31570D5FF5811B6726E46061; };
 		5DE511A4B8870F758DB9A582 /* params.cpp */ = {isa = PBXBuildFile; fileRef = D54583B8F05D0A2875FE11AA; };
+		107D768A495B3B73CD54248B /* print_lut.cpp */ = {isa = PBXBuildFile; fileRef = 8A85D91B564749CCBC8CD5BD; };
 		7D3754AD3F906286852EE680 /* printing.cpp */ = {isa = PBXBuildFile; fileRef = 96B09847B1308EB125672DC2; };
 		C632EC0A195196589DE46E9C /* profile.cpp */ = {isa = PBXBuildFile; fileRef = 34FC33B09373B76FB63801AA; };
 		3BB7C7FC9D160C01359654A8 /* setup_cache.cpp */ = {isa = PBXBuildFile; fileRef = CCB6D1377A4D858EF1B005F3; };
@@ -448,9 +467,11 @@
 				C62F760A04289FB4B908B23E /* LeftPanel.swift */,
 				3CCC10816711855EF8A483AB /* RightPanel.swift */,
 				E3B3644C25235A6C28182ECF /* EngineClient.swift */,
+				2AE1FD5EFFA458757CD99B2B /* EngineMessage.swift */,
 				A394D2865ED231DC4E689EF6 /* Methods.swift */,
 				6625CDBA42276F9AC87D1C3D /* RenderScheduler.swift */,
 				8676E7DDCD7C4091B33A2290 /* Theme.swift */,
+				0A579B8CA86B8CB7CE52406C /* AboutWindow.swift */,
 				083D2FD0AFE185C84AA1E5A1 /* BootWindow.swift */,
 				C2DAF32A79E3A15DBEA4D0AF /* BrowseView.swift */,
 				038D2A809E0C34970C6557CF /* CollapseTab.swift */,
@@ -466,6 +487,7 @@
 				4A5B0F600DA303ED8ED143F4 /* json.cpp */,
 				2B5593C39C860F89E32C2749 /* numeric.cpp */,
 				5DE511A4B8870F758DB9A582 /* params.cpp */,
+				107D768A495B3B73CD54248B /* print_lut.cpp */,
 				7D3754AD3F906286852EE680 /* printing.cpp */,
 				C632EC0A195196589DE46E9C /* profile.cpp */,
 				3BB7C7FC9D160C01359654A8 /* setup_cache.cpp */,
@@ -505,8 +527,11 @@
 		8F5D59F58B953480EE4A5E9A /* GeometryContractTests.swift */ = {isa = PBXBuildFile; fileRef = B8057DF6F7586C513DC4C6D8; };
 		C6E44BB1B77BC6F7C99AECA4 /* GeometryTests.swift */ = {isa = PBXBuildFile; fileRef = 6B156718E1AE69C25B473A8F; };
 		20E9D2468C8BEF11A7FD944D /* LayoutTests.swift */ = {isa = PBXBuildFile; fileRef = 0CFA312A5F866E734F736E61; };
+		1B5D4287C9D0738D702DBEC2 /* LicensingTests.swift */ = {isa = PBXBuildFile; fileRef = 2084498AEFCCEF72CEFCAAD6; };
 		D34DD393F97F62DE05BB57E4 /* MaskTests.swift */ = {isa = PBXBuildFile; fileRef = 332D14B32AAD81387A7DD138; };
+		99064ED8F40C6C35F20DB0F1 /* OpenPathTests.swift */ = {isa = PBXBuildFile; fileRef = D94AC75E929B1FB6061C71D4; };
 		D02819FD7044EC71BA226A8D /* ParamsTests.swift */ = {isa = PBXBuildFile; fileRef = D535AB20AF82118A0962C13F; };
+		1591AABE4FEFA653BF9B5F54 /* PrintLUTTests.swift */ = {isa = PBXBuildFile; fileRef = 0E647BE2467515A353CD0BAE; };
 		BD843F73AD6BED906A1B0660 /* RendererTests.swift */ = {isa = PBXBuildFile; fileRef = 70F2B5843ED40F2BAD7DFEDD; };
 		9DB35A897A64B6FBCCF1E787 /* TIFFHandoffTests.swift */ = {isa = PBXBuildFile; fileRef = 0A69EAE576B15BF34E5745A9; };
 		9A9E4DB1B80C5D6660C7250D /* ViewportStateTests.swift */ = {isa = PBXBuildFile; fileRef = B30E2FCC7C48E3CDEB2823F5; };
@@ -554,9 +579,11 @@
 		668EBFF29E4DC2F2AA0B69B0 /* LeftPanel.swift */ = {isa = PBXBuildFile; fileRef = D47835E8B05FDFA33E235A3E; };
 		14C3A0FE16B3F5E980DC8CB1 /* RightPanel.swift */ = {isa = PBXBuildFile; fileRef = C72C2D38653D03EEAE2393C1; };
 		F5E6C679281876F1A53869FC /* EngineClient.swift */ = {isa = PBXBuildFile; fileRef = BAC307A47D6F76302B897A1E; };
+		11B31702B5759B5F4BA4FEF5 /* EngineMessage.swift */ = {isa = PBXBuildFile; fileRef = 287A369DB545560B06FEA36F; };
 		511A709B370A0526666BC97B /* Methods.swift */ = {isa = PBXBuildFile; fileRef = CC2B2BC90455A9EA24E3E716; };
 		868D5027B4E75FDD040F4DA9 /* RenderScheduler.swift */ = {isa = PBXBuildFile; fileRef = DE976148AF21CF886D599656; };
 		A6C60B2349A122BF051689F1 /* Theme.swift */ = {isa = PBXBuildFile; fileRef = 99DD52B5777F1B47C013FE24; };
+		F4EE10415B70EEE81E1AB85A /* AboutWindow.swift */ = {isa = PBXBuildFile; fileRef = CD79BF6910B43EE919610663; };
 		329CF6910C3616D355AABEAB /* BootWindow.swift */ = {isa = PBXBuildFile; fileRef = 644C3C5C6B6D920DEE18AEB1; };
 		22AB5BD4E3D96764B438CDF8 /* BrowseView.swift */ = {isa = PBXBuildFile; fileRef = A93A35E01D7C5ADFCD2693CB; };
 		E0F009F6B26E4FF268EF672D /* CollapseTab.swift */ = {isa = PBXBuildFile; fileRef = E7062B514044B1050E1F1CA9; };
@@ -571,6 +598,7 @@
 		5C6CF34A54531FB09CB9FF36 /* json.cpp */ = {isa = PBXBuildFile; fileRef = 8EE65348773C45B1D968F31C; };
 		839E6B8226A99724C62FB35A /* numeric.cpp */ = {isa = PBXBuildFile; fileRef = 31570D5FF5811B6726E46061; };
 		2F079AF0AE9D0F3D0098ABCD /* params.cpp */ = {isa = PBXBuildFile; fileRef = D54583B8F05D0A2875FE11AA; };
+		589436953ECDBED877C1E4AE /* print_lut.cpp */ = {isa = PBXBuildFile; fileRef = 8A85D91B564749CCBC8CD5BD; };
 		20610CD8F3E63F22CDFFDC05 /* printing.cpp */ = {isa = PBXBuildFile; fileRef = 96B09847B1308EB125672DC2; };
 		F317D86BB02452DD7E1F3A77 /* profile.cpp */ = {isa = PBXBuildFile; fileRef = 34FC33B09373B76FB63801AA; };
 		4D6448CC356589E43823A388 /* setup_cache.cpp */ = {isa = PBXBuildFile; fileRef = CCB6D1377A4D858EF1B005F3; };
@@ -592,8 +620,11 @@
 				8F5D59F58B953480EE4A5E9A /* GeometryContractTests.swift */,
 				C6E44BB1B77BC6F7C99AECA4 /* GeometryTests.swift */,
 				20E9D2468C8BEF11A7FD944D /* LayoutTests.swift */,
+				1B5D4287C9D0738D702DBEC2 /* LicensingTests.swift */,
 				D34DD393F97F62DE05BB57E4 /* MaskTests.swift */,
+				99064ED8F40C6C35F20DB0F1 /* OpenPathTests.swift */,
 				D02819FD7044EC71BA226A8D /* ParamsTests.swift */,
+				1591AABE4FEFA653BF9B5F54 /* PrintLUTTests.swift */,
 				BD843F73AD6BED906A1B0660 /* RendererTests.swift */,
 				9DB35A897A64B6FBCCF1E787 /* TIFFHandoffTests.swift */,
 				9A9E4DB1B80C5D6660C7250D /* ViewportStateTests.swift */,
@@ -641,9 +672,11 @@
 				668EBFF29E4DC2F2AA0B69B0 /* LeftPanel.swift */,
 				14C3A0FE16B3F5E980DC8CB1 /* RightPanel.swift */,
 				F5E6C679281876F1A53869FC /* EngineClient.swift */,
+				11B31702B5759B5F4BA4FEF5 /* EngineMessage.swift */,
 				511A709B370A0526666BC97B /* Methods.swift */,
 				868D5027B4E75FDD040F4DA9 /* RenderScheduler.swift */,
 				A6C60B2349A122BF051689F1 /* Theme.swift */,
+				F4EE10415B70EEE81E1AB85A /* AboutWindow.swift */,
 				329CF6910C3616D355AABEAB /* BootWindow.swift */,
 				22AB5BD4E3D96764B438CDF8 /* BrowseView.swift */,
 				E0F009F6B26E4FF268EF672D /* CollapseTab.swift */,
@@ -658,6 +691,7 @@
 				5C6CF34A54531FB09CB9FF36 /* json.cpp */,
 				839E6B8226A99724C62FB35A /* numeric.cpp */,
 				2F079AF0AE9D0F3D0098ABCD /* params.cpp */,
+				589436953ECDBED877C1E4AE /* print_lut.cpp */,
 				20610CD8F3E63F22CDFFDC05 /* printing.cpp */,
 				F317D86BB02452DD7E1F3A77 /* profile.cpp */,
 				4D6448CC356589E43823A388 /* setup_cache.cpp */,
@@ -689,19 +723,19 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		20A1F637DF0C8F92FA52C1DD /* Check engine resources */ = {
+		20A1F637DF0C8F92FA52C1DD /* Check bundled resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			inputPaths = (
 			);
-			name = "Check engine resources";
+			name = "Check bundled resources";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"$SRCROOT/Tools/check-engine-resources.sh\"\n";
+			shellScript = "\"$SRCROOT/Tools/check-bundle-resources.sh\"\n";
 		};
 		11809352A555BC659DD7F622 = {
 			isa = PBXContainerItemProxy;
@@ -729,9 +763,10 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
-				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = c11;
@@ -746,6 +781,7 @@
 				INFOPLIST_FILE = Spektrafilm/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.3;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -776,9 +812,10 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
-				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GCC_C_LANGUAGE_STANDARD = c11;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -791,6 +828,7 @@
 				INFOPLIST_FILE = Spektrafilm/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.3;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -847,9 +885,10 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
-				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = c11;
 				GCC_OPTIMIZATION_LEVEL = 0;
@@ -862,6 +901,7 @@
 				);
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.3;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -891,9 +931,10 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
-				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GCC_C_LANGUAGE_STANDARD = c11;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
@@ -904,6 +945,7 @@
 				);
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.3;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
