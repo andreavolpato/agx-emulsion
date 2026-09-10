@@ -342,19 +342,32 @@ Each step is independently valuable and independently abandonable.
 
    ### A measurement trap, recorded because it invalidated real conclusions
 
-   `spektrafilm` is installed **editable**, and the `.pth` pins it to
-   `<spektrafilm-gpu>/src` regardless of the current directory. So
-   `git worktree add` + `cd` + run — the obvious way to compare against an
-   older commit, and the way this RFC's first A/B was done — silently runs the
-   *current* source in both arms. Both arms agree, and the agreement reads as
-   "no effect".
+   `spektrafilm` is installed **editable**, and each standing checkout's venv
+   pins its own source — `spektrafilm/.venv` → `spektrafilm/src`,
+   `spektrafilm-gpu/.venv` → `spektrafilm-gpu/src`. Both are correct, and both
+   have been testing themselves all along.
 
-   It is worse under `pytest`, which does the same thing, so a worktree test
-   run does not test the worktree.
+   The trap is the **third** checkout. A throwaway `git worktree add` has no
+   venv, so it borrows one — and then runs whichever source *that* venv pins,
+   not the worktree's. Both arms of an A/B silently execute the same code, the
+   arms agree, and the agreement reads as "my change had no effect". That is
+   how this RFC's first import-time A/B produced a wrong answer that was
+   reported as fact and then retracted. `pytest` behaves identically, so a
+   throwaway-worktree test run does not test the worktree.
 
-   The fix is `PYTHONPATH=<worktree>/src`, and to check
-   `spektrafilm.__file__` before trusting any A/B. Any comparison in this repo
-   that used a bare worktree checkout should be treated as unproven.
+   `PYTHONPATH` takes precedence over the editable `.pth` (verified), so the
+   fix is `PYTHONPATH=<worktree>/src` — and check `spektrafilm.__file__`
+   before trusting a number.
+
+   **The app is immune to this, and the immunity is load-bearing.**
+   `Service/ServiceClient.swift:71` sets
+   `env["PYTHONPATH"] = repo.appending(path: "src").path`, where `repo` is
+   resolved by walking up from the bundle, so the app always runs the source
+   next to the binary it launched. With an editable install in the picture
+   that line *looks* redundant — it is not. Removing it as a simplification
+   would hand the app exactly this bug: a build from one checkout silently
+   rendering with another checkout's engine, which is
+   `HANDOFF-GPU-WIRING` §0 all over again. Noted to FE in contract §5.
 
    Four traps, each found by the re-derivation test rather than by reading:
    - colour's Planck uses CODATA `c1` and **ITS-90** `c2` with a `1/pi`; the
