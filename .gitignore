@@ -261,3 +261,11 @@ sample_frontend.png
 # Profiling output and Finder noise.
 *.profraw
 .DS_Store
+
+# --- RFC-014 C++ engine ---------------------------------------------------
+# Build products.
+engine/build/
+# Baked resources: `engine/tools/bake_resources.py` regenerates every byte of
+# this from `src/spektrafilm/data`, and it is 11.8 MB of copies. The generator
+# is checked in; its output is not.
+engine/resources/
