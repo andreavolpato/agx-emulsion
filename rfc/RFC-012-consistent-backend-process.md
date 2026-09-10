@@ -325,11 +325,36 @@ Each step is independently valuable and independently abandonable.
    acceptance test carries this as an `xfail` naming the three sites, so it
    turns green on its own when they are done.
 
-   **What did not change:** import time. A back-to-back A/B against HEAD was
-   inconclusive (1.28–2.06 s on both arms; machine noise dominates), so the
-   ~1.9 s warm-up in §1.2 should still be treated as unimproved. The win here
-   is bundle size and the removal of a dependency the native host would
-   otherwise have to reproduce — not speed.
+   **Import time: −0.18 s where pandas is absent, −0.49 s (−28 %) on the venv
+   the app actually launches.** Measured as CPU time (user+sys), five rounds,
+   PYTHONPATH-isolated:
+
+   | venv | before | after |
+   |---|---|---|
+   | no pandas | 1.39 s | 1.21 s |
+   | pandas 3.0.5 (the app's) | 1.76 s | 1.27 s |
+
+   The size of the win is environment-dependent because colour-science imports
+   pandas opportunistically when it is installed, so the venv that pays the
+   most is the one the product uses. **A first attempt at this A/B reported no
+   effect and that was wrong** — the measurement was broken, not the result;
+   see the note below.
+
+   ### A measurement trap, recorded because it invalidated real conclusions
+
+   `spektrafilm` is installed **editable**, and the `.pth` pins it to
+   `<spektrafilm-gpu>/src` regardless of the current directory. So
+   `git worktree add` + `cd` + run — the obvious way to compare against an
+   older commit, and the way this RFC's first A/B was done — silently runs the
+   *current* source in both arms. Both arms agree, and the agreement reads as
+   "no effect".
+
+   It is worse under `pytest`, which does the same thing, so a worktree test
+   run does not test the worktree.
+
+   The fix is `PYTHONPATH=<worktree>/src`, and to check
+   `spektrafilm.__file__` before trusting any A/B. Any comparison in this repo
+   that used a bare worktree checkout should be treated as unproven.
 
    Four traps, each found by the re-derivation test rather than by reading:
    - colour's Planck uses CODATA `c1` and **ITS-90** `c2` with a `1/pi`; the
