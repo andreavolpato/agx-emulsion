@@ -266,7 +266,10 @@ enum Method: String, Sendable {
     case capabilities, paramsSchema = "params_schema", open, getParams = "get_params"
     case setParams = "set_params", solve, previewRender = "preview_render", reprint, export
     case previewStockLUT = "preview_stock_lut", progress, cancel, exportDI = "export_di"
-    case warmUp = "warm_up", close
+    /// `close` is deliberately absent: the engine has a `close()` but it is
+    /// not dispatchable over the wire, and a `Method` case for it would be a
+    /// call that always fails.
+    case warmUp = "warm_up"
 }
 
 /// `warm_up` — pay the first frame's fixed setup before the user is looking

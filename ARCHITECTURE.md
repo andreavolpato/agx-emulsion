@@ -475,13 +475,31 @@ about. A refactor that only moves code still moves the wire if the wire is
 assembled from both halves — this has already happened once, caught before it
 landed.
 
-### 8.5 The native host: **not built**
+### 8.5 The native host: a transparent proxy, not option C
 
 RFC-012 picks **option C** (a native binary speaking the same wire) on the way
 to **option D** (linking the engine in and deleting the process). Steps 1, 3
-and 4 have landed. **Step 5 — the host — is unstarted.**
+and 4 have landed.
 
-What exists is a **gate**, not a beginning. Step 1's job was to make it safe to
+`native/spektrafilm-native-host` exists and works: it speaks the wire, reports
+`backend.host: "native"`, and the frontend opts into it with
+`SPEKTRAFILM_NATIVE_HOST=<path>`. **Read what it does before counting it as
+option C.** It is a *proxy*: it `exec`s `<repo>/.venv/bin/python -m
+spektrafilm.service` with `PYTHONPATH=<repo>/src` and forwards
+newline-delimited JSON-RPC between the app and that process.
+
+So it does not remove the Python dependency — it still requires the same
+checkout and the same built `.venv` that RFC-012 §2 says is why the app cannot
+be given to anyone. It adds a process in front of the one that was already
+there. Its own `native/README.md` is straight about this ("the transport/process
+half of option C, not the final direct C++ render engine… expected to have
+essentially the same startup and RSS as the Python service, plus a small proxy
+process"), and that is the framing to keep: **it is a seam that proves the wire
+is host-transparent, not progress on shipping.** The distribution problem is
+untouched until the engine itself stops being Python — RFC-012's option D.
+
+The step-1 gate below is separate, and is what established that option C is
+possible at all. It is a **gate**, not a beginning. Step 1's job was to make it safe to
 commit to the plan by answering one question that options C and D both rest on:
 is `mx.fast.metal_kernel` reachable from MLX's C++ API, and identical there? It
 is. That answer is the entire deliverable; the code that produced it is test
@@ -500,9 +518,10 @@ scripts/gpu_native/native_host_spike/     7 tracked files, 17.5 kB total
     build.sh / run.sh
 ```
 
-**Nothing spawns it. The product runs `python -m spektrafilm.service`.** If you
-have arrived looking for "the C++ backend", this is what that phrase refers to
-and it is a few hundred lines of test scaffolding.
+**Nothing spawns the spike.** It is test scaffolding, and it is a different
+thing from `native/` above. If you have arrived looking for "the C++ backend",
+those two are what the phrase refers to: a verification harness, and a proxy
+that launches Python.
 
 What the spike established, and what it constrains:
 

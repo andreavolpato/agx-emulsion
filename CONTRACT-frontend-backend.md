@@ -28,11 +28,17 @@ long as the bytes it lands at `raw_path` are the same little-endian
 `rgba16` (row 0 = top) that `TextureStore.uploadRGBA16` maps today, FE does
 not change and does not need to be told.
 
-### 1.1 The nine methods, frozen for this cycle
+### 1.1 The methods, frozen for this cycle
 
 `capabilities` · `params_schema` · `open` · `get_params` · `set_params` ·
 `solve` · `preview_render` · `reprint` · `export` · `export_di` ·
-`preview_stock_lut` · `progress` · `cancel`.
+`preview_stock_lut` · `progress` · `cancel` · `configure_transport` ·
+`warm_up`.
+
+> The heading used to read "the nine methods" while listing thirteen. Nobody
+> was counting; the frozen set is the list, not the number, so the number is
+> gone. `warm_up` (RFC-013 §3) is the most recent addition and was added under
+> the "additive is always allowed" rule below.
 
 BE **may not** rename, remove, or change the meaning of any of these, or of
 any field FE currently reads (`Service/Methods.swift` is the definitive list
@@ -179,3 +185,4 @@ category of confusing failure).
 | 2026-09-10 | — | **Neither wire nor behaviour.** RFC-012 §5 step 3: the colour-science constants are baked (`data/baked/colour_constants.npz`, 21.9 KiB) and a reprint no longer loads colour-science or pandas. No method, field, tier name, version or `rgba16` layout changed, and rendered output is unchanged — every baked value is re-derived from colour-science and asserted equal in `tests/test_rfc012_baked_colour.py`. Recorded here only because it removes a runtime dependency the native host would otherwise have to reproduce. See `HANDOFF-NATIVE-HOST.md` for what FE does when the host lands: **nothing**, plus one additive `capabilities.backend.host` field. | BE |
 | 2026-09-10 | — | **Neither wire nor behaviour — structure only, recorded because FE should know where the engine now lives.** RFC-012 §5 step 4: the service is split into `service/engine.py` (`RenderEngine` — typed args, in-memory results, no workspace, no JSON, writes no file) and `service/service.py` (the nine wire methods, request validation, and the file handoff). No method, field, tier name, version or `rgba16` layout changed; the same bytes land at `raw_path` and FE needs no change. The split is the seam RFC-012's option D detaches at, so that removing the process later deletes the transport and nothing else. | BE |
 | 2026-09-10 | — | **Behaviour, not wire.** The tier downscale runs on the Metal core (RFC-011 §11): skimage's parameters exactly, 1.2e-7 max abs against it, 55 ms instead of 1.6–2.4 s per tier on the 45 MP frame. `open` 2.6 s → 278 ms warm on an uncompressed 4-channel half TIFF like the client's; a compressed TIFF (LZW/ZIP) costs 1.1–1.6 s to read on this frame, uncompressed 0.1 s — keep writing it uncompressed (HANDOFF-GPU-WIRING §2.2). Tier images are RGB (alpha dropped at the downscale; nothing read it). The frontend session's lazy tier build (699a7c8) is kept as merged. | BE |
+| 2026-09-10 | — | **Additive, no version bump (allowed by §1.1).** RFC-013: a tenth-and-more method `warm_up` — build the profile pair and its pipeline before the first `open`, so the boot window covers work the app has to do anyway. Every request field optional; a client that never calls it behaves exactly as before. `capabilities.backend` also gains `session_cache` (the engine's LRU over whole sessions) and `host` (`"python"` \| `"native"`, which binary answered). FE calls `warm_up` at launch and gates the first `open` on it. **Not written by either the FE or BE session** — landed in the working tree from a third author; verified by FE before use: a cache hit is byte-identical to a cold open with grain and glare off, and re-open costs 0.59 ms against a full open. | — |

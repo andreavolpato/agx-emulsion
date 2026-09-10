@@ -21,11 +21,14 @@ came from debugging one half while the other was what had changed.
 §4.1 also forbids rebasing or force-pushing a branch the other side may have
 read, and `git stash` / `git clean -fdx` / `git checkout -- .` at the repo root.
 
-**There is no C++ backend.** If you have been told there is, see
-`ARCHITECTURE.md` §8.5: RFC-012's native host is unstarted, and what exists is
-a 17.5 kB verification harness under `scripts/gpu_native/native_host_spike/`
-that proved the plan is possible. Nothing spawns it. The product runs
-`python -m spektrafilm.service`.
+**The C++ pieces do not do what their name suggests.** There are two, and
+neither is a native render engine — see `ARCHITECTURE.md` §8.5.
+`native/spektrafilm-native-host` works and speaks the wire, but it is a
+*proxy*: it launches `<repo>/.venv/bin/python -m spektrafilm.service` and
+forwards JSON-RPC, so the Python dependency and the bundling problem are
+exactly where they were. `scripts/gpu_native/native_host_spike/` is a 17.5 kB
+verification harness that proved MLX kernels are byte-identical from C++;
+nothing spawns it. **Rendering is Python + Metal in both cases.**
 
 **The engine that renders is chosen by which checkout the app resolves**, not
 by a setting. See trap 14.

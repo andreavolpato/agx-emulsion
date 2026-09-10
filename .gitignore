@@ -28,6 +28,7 @@ wheels/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
+native/spektrafilm-native-host
 *.egg
 MANIFEST
 
