@@ -174,6 +174,7 @@ struct SnapshotRequest {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var session: Session? { SpektrafilmApp.session }
     var snapshot: SnapshotRequest?
+    private let boot = BootWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -183,6 +184,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // view's onAppear.
         guard let snapshot = SnapshotRequest.parse(CommandLine.arguments) else {
             openCommandLineArguments()
+            // Not in snapshot mode: `Tools/snapshot.sh` builds its own window
+            // and must not have a second one taking key, and a capture that
+            // photographed a splash screen would be worthless.
+            if let session { boot.present(session: session) }
             return
         }
         self.snapshot = snapshot

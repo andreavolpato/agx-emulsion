@@ -1,4 +1,4 @@
-//  ServiceClient.swift — one long-lived `python -m spektrafilm.service`,
+//  ServiceClient.swift — one long-lived render service over stdio.
 //  JSON-RPC 2.0 over stdio, one request at a time.
 //
 //  An actor, so the single-flight property of the transport is enforced by
@@ -87,15 +87,22 @@ actor ServiceClient {
     func start() throws {
         guard state != .running, state != .starting else { return }
         state = .starting
+        let env = ProcessInfo.processInfo.environment
+        let nativeHost = env["SPEKTRAFILM_NATIVE_HOST"].flatMap { value in
+            value.isEmpty ? nil : URL(fileURLWithPath: value)
+        }
         let python = repo.appending(path: ".venv/bin/python")
-        guard FileManager.default.isExecutableFile(atPath: python.path) else {
-            state = .failed("no interpreter at \(python.path)")
-            throw ClientError.noInterpreter(python.path)
+        let executable = nativeHost ?? python
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            state = .failed("no service executable at \(executable.path)")
+            throw ClientError.noServiceExecutable(executable.path)
         }
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         let p = Process()
-        p.executableURL = python
-        p.arguments = ["-W", "ignore", "-m", "spektrafilm.service", "--workspace", workspace.path]
+        p.executableURL = executable
+        p.arguments = nativeHost == nil
+            ? ["-W", "ignore", "-m", "spektrafilm.service", "--workspace", workspace.path]
+            : ["--repo", repo.path, "--workspace", workspace.path]
         p.currentDirectoryURL = repo
         p.environment = ServiceClient.childEnvironment(repo: repo)
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
@@ -128,10 +135,10 @@ actor ServiceClient {
     }
 
     enum ClientError: Error, CustomStringConvertible {
-        case noInterpreter(String), notRunning, badResponse(String), rpc(ServiceError), transport(String)
+        case noServiceExecutable(String), notRunning, badResponse(String), rpc(ServiceError), transport(String)
         var description: String {
             switch self {
-            case .noInterpreter(let p): "no Python interpreter at \(p)"
+            case .noServiceExecutable(let p): "no service executable at \(p)"
             case .notRunning: "render service is not running"
             case .badResponse(let s): "bad response: \(s)"
             case .rpc(let e): e.description

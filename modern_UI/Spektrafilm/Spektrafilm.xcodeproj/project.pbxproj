@@ -165,6 +165,7 @@
 			path = "Theme";
 			sourceTree = "<group>";
 		};
+		644C3C5C6B6D920DEE18AEB1 /* BootWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BootWindow.swift"; sourceTree = "<group>"; };
 		A93A35E01D7C5ADFCD2693CB /* BrowseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrowseView.swift"; sourceTree = "<group>"; };
 		E7062B514044B1050E1F1CA9 /* CollapseTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CollapseTab.swift"; sourceTree = "<group>"; };
 		160FC1AA3C87A980448495BD /* EditorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EditorWindow.swift"; sourceTree = "<group>"; };
@@ -173,6 +174,7 @@
 		68EA22A34676BD77F1760903 /* Windows */ = {
 			isa = PBXGroup;
 			children = (
+				644C3C5C6B6D920DEE18AEB1 /* BootWindow.swift */,
 				A93A35E01D7C5ADFCD2693CB /* BrowseView.swift */,
 				E7062B514044B1050E1F1CA9 /* CollapseTab.swift */,
 				160FC1AA3C87A980448495BD /* EditorWindow.swift */,
@@ -328,6 +330,7 @@
 		6625CDBA42276F9AC87D1C3D /* RenderScheduler.swift */ = {isa = PBXBuildFile; fileRef = DE976148AF21CF886D599656; };
 		1DACD9BCCC20D4A41E7593C3 /* ServiceClient.swift */ = {isa = PBXBuildFile; fileRef = C4680480FDDCE4FB76DC8BCC; };
 		8676E7DDCD7C4091B33A2290 /* Theme.swift */ = {isa = PBXBuildFile; fileRef = 99DD52B5777F1B47C013FE24; };
+		083D2FD0AFE185C84AA1E5A1 /* BootWindow.swift */ = {isa = PBXBuildFile; fileRef = 644C3C5C6B6D920DEE18AEB1; };
 		C2DAF32A79E3A15DBEA4D0AF /* BrowseView.swift */ = {isa = PBXBuildFile; fileRef = A93A35E01D7C5ADFCD2693CB; };
 		038D2A809E0C34970C6557CF /* CollapseTab.swift */ = {isa = PBXBuildFile; fileRef = E7062B514044B1050E1F1CA9; };
 		C6C5D6A4F0698D7B38B79FD1 /* EditorWindow.swift */ = {isa = PBXBuildFile; fileRef = 160FC1AA3C87A980448495BD; };
@@ -385,6 +388,7 @@
 				6625CDBA42276F9AC87D1C3D /* RenderScheduler.swift */,
 				1DACD9BCCC20D4A41E7593C3 /* ServiceClient.swift */,
 				8676E7DDCD7C4091B33A2290 /* Theme.swift */,
+				083D2FD0AFE185C84AA1E5A1 /* BootWindow.swift */,
 				C2DAF32A79E3A15DBEA4D0AF /* BrowseView.swift */,
 				038D2A809E0C34970C6557CF /* CollapseTab.swift */,
 				C6C5D6A4F0698D7B38B79FD1 /* EditorWindow.swift */,
@@ -473,6 +477,7 @@
 		868D5027B4E75FDD040F4DA9 /* RenderScheduler.swift */ = {isa = PBXBuildFile; fileRef = DE976148AF21CF886D599656; };
 		8F98F268D7F64ED1FA27E6EB /* ServiceClient.swift */ = {isa = PBXBuildFile; fileRef = C4680480FDDCE4FB76DC8BCC; };
 		A6C60B2349A122BF051689F1 /* Theme.swift */ = {isa = PBXBuildFile; fileRef = 99DD52B5777F1B47C013FE24; };
+		329CF6910C3616D355AABEAB /* BootWindow.swift */ = {isa = PBXBuildFile; fileRef = 644C3C5C6B6D920DEE18AEB1; };
 		22AB5BD4E3D96764B438CDF8 /* BrowseView.swift */ = {isa = PBXBuildFile; fileRef = A93A35E01D7C5ADFCD2693CB; };
 		E0F009F6B26E4FF268EF672D /* CollapseTab.swift */ = {isa = PBXBuildFile; fileRef = E7062B514044B1050E1F1CA9; };
 		13CE1087EDEB660481DAAFA6 /* EditorWindow.swift */ = {isa = PBXBuildFile; fileRef = 160FC1AA3C87A980448495BD; };
@@ -542,6 +547,7 @@
 				868D5027B4E75FDD040F4DA9 /* RenderScheduler.swift */,
 				8F98F268D7F64ED1FA27E6EB /* ServiceClient.swift */,
 				A6C60B2349A122BF051689F1 /* Theme.swift */,
+				329CF6910C3616D355AABEAB /* BootWindow.swift */,
 				22AB5BD4E3D96764B438CDF8 /* BrowseView.swift */,
 				E0F009F6B26E4FF268EF672D /* CollapseTab.swift */,
 				13CE1087EDEB660481DAAFA6 /* EditorWindow.swift */,

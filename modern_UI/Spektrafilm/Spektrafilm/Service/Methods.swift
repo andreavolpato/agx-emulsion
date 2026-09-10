@@ -69,13 +69,31 @@ struct Capabilities: Decodable, Sendable {
         let gpu: String?
         let gpuAvailable: Bool?
         let workingPrecision: String?
+        let host: String?
         /// Whether concurrent requests are safe. The client stays serial
         /// regardless until `configure_transport` is opted into.
         let concurrent: Bool?
+        /// The engine's LRU over whole sessions (RFC-013 §2). Worth having on
+        /// screen next to `render_core`: it is the difference between
+        /// "switching frames is slow" and "the cache evicts on every switch".
+        let sessionCache: SessionCache?
+        struct SessionCache: Decodable, Sendable {
+            let entries: Int?, maxEntries: Int?
+            let hits: Int?, misses: Int?, evictions: Int?
+            let bytes: Int?, enabled: Bool?
+            enum CodingKeys: String, CodingKey {
+                case entries, hits, misses, evictions, bytes, enabled
+                case maxEntries = "max_entries"
+            }
+            var summary: String {
+                "cache \(entries ?? 0)/\(maxEntries ?? 0) · \(hits ?? 0) hit / \(misses ?? 0) miss"
+                + ((evictions ?? 0) > 0 ? " · \(evictions!) evicted" : "")
+            }
+        }
         enum CodingKeys: String, CodingKey {
-            case gpu, concurrent
+            case gpu, concurrent, host
             case renderCore = "render_core", gpuAvailable = "gpu_available"
-            case workingPrecision = "working_precision"
+            case workingPrecision = "working_precision", sessionCache = "session_cache"
         }
         /// What the status bar shows. `nil` from a service too old to report
         /// one is not the same as "cpu", and saying so is the point.
@@ -248,4 +266,35 @@ enum Method: String, Sendable {
     case capabilities, paramsSchema = "params_schema", open, getParams = "get_params"
     case setParams = "set_params", solve, previewRender = "preview_render", reprint, export
     case previewStockLUT = "preview_stock_lut", progress, cancel, exportDI = "export_di"
+    case warmUp = "warm_up", close
+}
+
+/// `warm_up` — pay the first frame's fixed setup before the user is looking
+/// (RFC-013 §3). Every field is optional on the wire, but pass the stocks the
+/// frame will actually open with: the engine builds a pipeline for the pair it
+/// is given, and warming a pair the first `open` will not use is pure waste.
+struct WarmUpRequest: Encodable, Sendable {
+    var filmStock: String?
+    var printStock: String?
+    enum CodingKeys: String, CodingKey { case filmStock = "film_stock", printStock = "print_stock" }
+}
+
+struct WarmUpResponse: Decodable, Sendable {
+    let alreadyWarm: Bool?
+    let renderCore: String?
+    let totalMs: Double?
+    let steps: [Step]?
+    /// A step that failed is **not** fatal: the work is simply paid again
+    /// inside `open`. Log it and carry on (handoff §3.1).
+    struct Step: Decodable, Sendable {
+        let name: String
+        let ok: Bool?
+        let ms: Double?
+    }
+    enum CodingKeys: String, CodingKey {
+        case steps
+        case alreadyWarm = "already_warm", renderCore = "render_core", totalMs = "total_ms"
+    }
+    /// The names of the steps the engine reported as failed.
+    var failedSteps: [String] { (steps ?? []).filter { $0.ok == false }.map(\.name) }
 }

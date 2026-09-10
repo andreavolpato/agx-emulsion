@@ -416,7 +416,7 @@ final class Session: CanvasHost {
         Task { await client.set(onTermination: { [weak self] reason in
             Task { @MainActor in self?.serviceReady = false; self?.status = reason; self?.lastError = reason }
         }) }
-        warmUp()
+        bootTask = warmUp()
     }
 
     /// Start the service and pay for its imports before anyone asks it to do
@@ -434,7 +434,14 @@ final class Session: CanvasHost {
     /// and the Metal device, and it is how the client learns which executor
     /// it got — so the status bar can say "Metal" before a frame is open
     /// rather than after the first render.
-    private func warmUp() {
+    /// Awaited by the first `open` (see `bootTask`), so warm-up is a *gate*
+    /// rather than a race. `ServiceClient` is an actor and serialises calls in
+    /// submission order, so `capabilities` normally landed first anyway — but
+    /// "normally" is not a guarantee: a frame restored at launch can submit
+    /// `open` first, and then the first `open` carries the whole interpreter
+    /// start on its back, which is the bug this method exists to prevent.
+    @discardableResult
+    private func warmUp() -> Task<Void, Never> {
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -449,9 +456,93 @@ final class Session: CanvasHost {
                 // several seconds later, somewhere else.
                 canvasLog("warm-up failed: \(error)")
                 self.serviceBlocked = Session.capabilitiesFailure(error)
+                // The boot window must not trap the user in it. A service we
+                // cannot talk to is a thing to say in the editor, where the
+                // blocking panel and its restart button already live.
+                self.bootPhase = .failed(Session.capabilitiesFailure(error))
+                return
+            }
+            self.bootPhase = .warming
+            await self.payFirstFrameSetup()
+            self.bootPhase = .ready
+        }
+    }
+
+    /// `warm_up` (RFC-013 §3): build the profile pair and its pipeline before
+    /// the first `open` asks for them.
+    ///
+    /// This is not the same saving as `capabilities`. That one pays the
+    /// interpreter start and the imports; this one pays the *pipeline
+    /// construction* for a stock pair — the filming `tc_lut`, the enlarger and
+    /// scanner LUTs, the fused kernel constants. Measured by the backend at
+    /// ~130 ms, removing 124 ms from a 1 MP first open and 169–502 ms from a
+    /// 45 MP one.
+    ///
+    /// It is warmed with the **sidecar's** stocks, not the defaults: the engine
+    /// builds a pipeline for the pair it is handed, so warming
+    /// `portra_400 / supra_endura` when the restored frame wants
+    /// `provia_100f / 2383` pays the cost twice and saves nothing.
+    ///
+    /// A failed step is not fatal — the work is simply paid again inside
+    /// `open` — so this logs and returns rather than blocking the app.
+    private func payFirstFrameSetup() async {
+        let p = sidecar.params
+        do {
+            let r: WarmUpResponse = try await client.call(
+                .warmUp, WarmUpRequest(filmStock: p.filmStock, printStock: p.printStock),
+                as: WarmUpResponse.self)
+            warmUpMs = r.totalMs
+            let failed = r.failedSteps
+            canvasLog("warm_up: \(Int(r.totalMs ?? 0)) ms · core=\(r.renderCore ?? "?")"
+                      + (r.alreadyWarm == true ? " · already warm" : "")
+                      + (failed.isEmpty ? "" : " · FAILED: \(failed.joined(separator: ", "))"))
+        } catch {
+            // Older services do not have the method at all, which is fine:
+            // the wire addition is optional and a client that skips it behaves
+            // exactly as it did before (handoff §"Wire").
+            canvasLog("warm_up unavailable or failed: \(error)")
+        }
+    }
+
+    /// Awaited before the first `open`. Nil once boot has been paid.
+    private var bootTask: Task<Void, Never>?
+    /// What `warm_up` cost, for the open-path log.
+    private var warmUpMs: Double?
+
+    // MARK: - boot
+    //
+    // RFC-012 §6 and RFC-013 §3: the app has a fixed amount of setup to do
+    // before it can render anything, and it should do it while the user is
+    // looking at something that says so — the way Photoshop and Capture One
+    // start with a small window before their main one.
+    //
+    // The rule that keeps this from being a slow app with a logo: **the boot
+    // window must cover work the app has to do anyway.** Nothing here sleeps,
+    // nothing is padded, and if the engine is already warm the window is on
+    // screen for a few frames and gone. What it buys is not time — it is that
+    // the ~1.3 s of interpreter start and pipeline construction happens
+    // somewhere the user can see a reason for it, instead of inside their
+    // first photograph.
+
+    enum BootPhase: Equatable, Sendable {
+        case starting            // spawning the process, paying imports
+        case warming             // building the pipeline for the sidecar's stocks
+        case ready
+        case failed(String)
+
+        var label: String {
+            switch self {
+            case .starting: "Starting the render engine…"
+            case .warming: "Preparing the film pipeline…"
+            case .ready: "Ready"
+            case .failed(let why): why
             }
         }
     }
+
+    private(set) var bootPhase: BootPhase = .starting
+    /// True once the app is fit to show its main window.
+    var booted: Bool { if case .ready = bootPhase { true } else { false } }
 
     /// Why the app will not render, or nil. Contract §2: "FE refuses to start
     /// against a transport version it does not know, with a visible error
@@ -681,6 +772,17 @@ final class Session: CanvasHost {
 
     private func openInService(tiff: URL, for url: URL, clock: inout LoadClock) async {
         var clock = clock          // `inout` cannot be held across an await
+        // The gate, not a race (RFC-013 §2.2). Costs nothing once boot has
+        // been paid, and on the path that matters — a frame restored at launch
+        // submitting `open` before `capabilities` has landed — it is the
+        // difference between the user's first frame paying the interpreter
+        // start and it having been paid already.
+        if let boot = bootTask {
+            await boot.value
+            bootTask = nil
+            clock.lap("warm-up")
+        }
+        if serviceBlocked != nil { status = serviceBlocked!; return }
         status = "Developing…"
         busy = true
         startClock()
@@ -713,7 +815,10 @@ final class Session: CanvasHost {
             clock.lap("solve")
             let rr: RenderResponse = try await client.call(.reprint, RenderRequest(sessionID: r.sessionID))
             clock.lap("reprint")
-            canvasLog(clock.summary() + "  ·  core=\(renderCore ?? "?")")
+            canvasLog(clock.summary()
+                      + (warmUpMs.map { "  ·  warm_up \(Int($0)) ms" } ?? "")
+                      + "  ·  core=\(renderCore ?? "?")"
+                      + (backend?.sessionCache.map { "  ·  \($0.summary)" } ?? ""))
             guard selection == url else { return }
             applyRender(rr, generation: serviceGeneration)
             statusBase = "\(url.lastPathComponent)  ·  \(r.meta.width)×\(r.meta.height)  ·  \(r.detectedInput.inputColorSpace)"
@@ -728,7 +833,7 @@ final class Session: CanvasHost {
         } catch {
             lastError = "\(error)"
             status = "\(error)"
-            if case ServiceClient.ClientError.noInterpreter = error { serviceReady = false }
+            if case ServiceClient.ClientError.noServiceExecutable = error { serviceReady = false }
         }
     }
 
