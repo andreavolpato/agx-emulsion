@@ -9,14 +9,37 @@ this twice produces a byte-identical file. Every Swift/Metal file under
 `Spektrafilm/` joins the app target; everything under `SpektrafilmTests/` joins
 the unit-test target. `Resources/` is added as a folder reference so anything
 dropped in it ships in the bundle without touching this script.
+
+**The C++ render engine** (RFC-014) joins the app target too, as sources
+rather than as a prebuilt library: `ENGINE_SOURCES` below lists every
+translation unit under `engine/src/`, referenced relative to this project, and
+they compile as C++20 alongside the Swift. One target, not two, because the
+only thing a separate static-library target would add here is a second place
+for the include paths to drift.
+
+Two things about the engine that are *not* handled here, on purpose:
+
+  * its Metal kernels are compiled by `engine/build.sh`, not by Xcode. The app
+    target sets `MTL_FAST_MATH = YES` for its own canvas shader, and letting
+    the engine's kernels inherit that is RFC-014 §5.1 trap 1 -- a silent
+    1.1e-5 drift in `exp` and fma contraction, past the float32 bar. The
+    engine refuses to start if it detects it.
+  * its baked constants and profiles are synced into `Spektrafilm/Resources/
+    engine/` by `engine/build.sh bundle`, and ride along in the folder
+    reference above.
+
+So: `engine/build.sh bundle` before an Xcode build, and the pre-build script
+phase below says so if it was not.
 """
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+ENGINE = ROOT.parents[1] / "engine"
 APP = "Spektrafilm"
 TESTS = "SpektrafilmTests"
 BUNDLE_ID = "com.hanze.spektrafilm"
@@ -27,8 +50,24 @@ def uid(key: str) -> str:
     return hashlib.sha1(key.encode()).hexdigest()[:24].upper()
 
 
+def engine_sources() -> list[Path]:
+    """Every engine translation unit, in a stable order."""
+    return sorted((ENGINE / "src").rglob("*.cpp"))
+
+
+def relative_to_project(path: Path) -> str:
+    """A path spelled relative to the .xcodeproj's directory.
+
+    The engine lives outside this project's tree, so its file references use
+    `sourceTree = SOURCE_ROOT` and a `../..` path. Absolute paths would work
+    on exactly one machine.
+    """
+    return os.path.relpath(path, ROOT)
+
+
 def file_type(p: Path) -> str:
     return {".swift": "sourcecode.swift", ".metal": "sourcecode.metal",
+            ".cpp": "sourcecode.cpp.cpp", ".h": "sourcecode.c.h", ".hpp": "sourcecode.cpp.h",
             ".plist": "text.plist.xml", ".entitlements": "text.plist.entitlements",
             ".xcassets": "folder.assetcatalog", ".md": "net.daringfireball.markdown",
             ".py": "text.script.python", ".sh": "text.script.sh"}.get(p.suffix, "folder")
@@ -78,6 +117,21 @@ def build() -> str:
     tools_files: list[tuple[str, Path]] = []
     tools_group = p.group(ROOT / "Tools", tools_files)
 
+    # The engine's translation units, as references outside the project tree.
+    engine_files: list[tuple[str, Path]] = []
+    engine_children = []
+    for src in engine_sources():
+        fid = uid("file:engine:" + str(src))
+        p.add(fid, f"{{isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; "
+                   f"name = \"{src.name}\"; path = \"{relative_to_project(src)}\"; "
+                   f"sourceTree = SOURCE_ROOT; }}", src.name)
+        engine_children.append((fid, src.name))
+        engine_files.append((fid, src))
+    engine_group = uid("group:engine")
+    kids = ",\n".join(f"\t\t\t\t{cid} /* {cname} */" for cid, cname in engine_children)
+    p.add(engine_group, f"{{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n{kids}\n\t\t\t);"
+                        f"\n\t\t\tname = Engine;\n\t\t\tsourceTree = \"<group>\";\n\t\t}}", "Engine")
+
     app_product = uid("product:app")
     test_product = uid("product:tests")
     p.add(app_product, f"{{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = {APP}.app; sourceTree = BUILT_PRODUCTS_DIR; }}", f"{APP}.app")
@@ -85,7 +139,7 @@ def build() -> str:
     products = uid("group:products")
     p.add(products, f"{{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t{app_product},\n\t\t\t\t{test_product}\n\t\t\t);\n\t\t\tname = Products;\n\t\t\tsourceTree = \"<group>\";\n\t\t}}", "Products")
     main_group = uid("group:main")
-    p.add(main_group, f"{{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t{app_group},\n\t\t\t\t{test_group},\n\t\t\t\t{tools_group},\n\t\t\t\t{products}\n\t\t\t);\n\t\t\tsourceTree = \"<group>\";\n\t\t}}")
+    p.add(main_group, f"{{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t{app_group},\n\t\t\t\t{engine_group},\n\t\t\t\t{test_group},\n\t\t\t\t{tools_group},\n\t\t\t\t{products}\n\t\t\t);\n\t\t\tsourceTree = \"<group>\";\n\t\t}}")
 
     def phase(kind: str, files: list[tuple[str, Path]], pred, tag: str) -> str:
         ids = []
@@ -98,21 +152,45 @@ def build() -> str:
         p.add(pid, f"{{\n\t\t\tisa = {kind};\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = (\n" + ",\n".join(ids) + "\n\t\t\t);\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t}", tag)
         return pid
 
-    is_src = lambda q: q.suffix in (".swift", ".metal")
+    is_src = lambda q: q.suffix in (".swift", ".metal", ".cpp")
     is_res = lambda q: q.suffix == ".xcassets" or q.name == "Resources"
-    app_sources = phase("PBXSourcesBuildPhase", app_files, is_src, "app-sources")
+    app_sources = phase("PBXSourcesBuildPhase", app_files + engine_files, is_src, "app-sources")
     app_resources = phase("PBXResourcesBuildPhase", app_files, is_res, "app-resources")
     app_frameworks = phase("PBXFrameworksBuildPhase", [], lambda q: False, "app-frameworks")
     # The test bundle is standalone (no TEST_HOST): it compiles every app
     # source except the @main file, so the tests run without launching the
     # app and without the test-host injection that crashed SwiftUI's
     # environment root on macOS 26.
-    shared = [(fid, path) for fid, path in app_files if is_src(path) and path.name != "SpektrafilmApp.swift"]
+    shared = [(fid, path) for fid, path in app_files + engine_files
+              if is_src(path) and path.name != "SpektrafilmApp.swift"]
     test_sources = phase("PBXSourcesBuildPhase", test_files + shared, is_src, "test-sources")
     test_resources = phase("PBXResourcesBuildPhase", test_files + [(fid, path) for fid, path in app_files if is_res(path)], is_res, "test-resources")
     test_frameworks = phase("PBXFrameworksBuildPhase", [], lambda q: False, "test-frameworks")
 
+    # The engine's build settings. `MTL_FAST_MATH` stays YES for the app's own
+    # canvas shader; the engine's kernels never go through Xcode's metal
+    # compiler, so it cannot reach them.
+    engine_cfg = {
+        "CLANG_CXX_LANGUAGE_STANDARD": '"c++20"',
+        "CLANG_CXX_LIBRARY": '"libc++"',
+        "GCC_C_LANGUAGE_STANDARD": "c11",
+        # A parenthesised list, not a run of quoted strings: pbxproj accepts
+        # `( "a", "b" )` or one quoted string, and a bare sequence makes the
+        # whole project unreadable with a message that names line 1.
+        "HEADER_SEARCH_PATHS": "(\n" + "".join(
+            f'\t\t\t\t\t"$(SRCROOT)/../../engine/{sub}",\n'
+            for sub in ("include", "src", "src/core", "third_party/metal-cpp")
+        ) + "\t\t\t\t)",
+        "SWIFT_OBJC_BRIDGING_HEADER": f'"{APP}/Service/{APP}-Bridging-Header.h"',
+        "OTHER_LDFLAGS": '"-framework Metal -framework QuartzCore"',
+        # metal-cpp's headers use `objc_msgSend` directly and manage their own
+        # retain/release; ARC must not be applied to them. The Swift side is
+        # unaffected -- Swift's memory management is not this setting.
+        "CLANG_ENABLE_OBJC_ARC": "NO",
+    }
+
     common = {
+        **engine_cfg,
         "SWIFT_VERSION": "6.0",
         "SWIFT_STRICT_CONCURRENCY": "complete",
         "MACOSX_DEPLOYMENT_TARGET": MACOS,
@@ -169,6 +247,20 @@ def build() -> str:
         p.add(lid, f"{{\n\t\t\tisa = XCConfigurationList;\n\t\t\tbuildConfigurations = (\n\t\t\t\t{d} /* Debug */,\n\t\t\t\t{r} /* Release */\n\t\t\t);\n\t\t\tdefaultConfigurationIsVisible = 0;\n\t\t\tdefaultConfigurationName = Release;\n\t\t}}", tag)
         return lid
 
+    # A pre-build check, not a build step -- see Tools/check-engine-resources.sh
+    # for why it only reports rather than bakes. Kept as a script *file* so the
+    # pbxproj carries one line rather than an escaped shell program, and so the
+    # check can be run on its own.
+    check_script = uid("phase:app:check-resources")
+    p.add(check_script,
+          "{\n\t\t\tisa = PBXShellScriptBuildPhase;\n\t\t\tbuildActionMask = 2147483647;"
+          "\n\t\t\tfiles = (\n\t\t\t);\n\t\t\tinputPaths = (\n\t\t\t);"
+          "\n\t\t\tname = \"Check engine resources\";\n\t\t\toutputPaths = (\n\t\t\t);"
+          "\n\t\t\trunOnlyForDeploymentPostprocessing = 0;"
+          "\n\t\t\tshellPath = /bin/sh;"
+          "\n\t\t\tshellScript = \"\\\"$SRCROOT/Tools/check-engine-resources.sh\\\"\\n\";"
+          "\n\t\t}", "Check engine resources")
+
     app_target = uid("target:app")
     test_target = uid("target:tests")
     dep = uid("dep:tests->app")
@@ -177,7 +269,7 @@ def build() -> str:
     p.add(proxy, f"{{\n\t\t\tisa = PBXContainerItemProxy;\n\t\t\tcontainerPortal = {project};\n\t\t\tproxyType = 1;\n\t\t\tremoteGlobalIDString = {app_target};\n\t\t\tremoteInfo = {APP};\n\t\t}}")
     p.add(dep, f"{{\n\t\t\tisa = PBXTargetDependency;\n\t\t\ttarget = {app_target};\n\t\t\ttargetProxy = {proxy};\n\t\t}}")
 
-    p.add(app_target, f"{{\n\t\t\tisa = PBXNativeTarget;\n\t\t\tbuildConfigurationList = {cfg_list('app', app_cfg)};\n\t\t\tbuildPhases = (\n\t\t\t\t{app_sources},\n\t\t\t\t{app_frameworks},\n\t\t\t\t{app_resources}\n\t\t\t);\n\t\t\tbuildRules = (\n\t\t\t);\n\t\t\tdependencies = (\n\t\t\t);\n\t\t\tname = {APP};\n\t\t\tproductName = {APP};\n\t\t\tproductReference = {app_product};\n\t\t\tproductType = \"com.apple.product-type.application\";\n\t\t}}", APP)
+    p.add(app_target, f"{{\n\t\t\tisa = PBXNativeTarget;\n\t\t\tbuildConfigurationList = {cfg_list('app', app_cfg)};\n\t\t\tbuildPhases = (\n\t\t\t\t{check_script},\n\t\t\t\t{app_sources},\n\t\t\t\t{app_frameworks},\n\t\t\t\t{app_resources}\n\t\t\t);\n\t\t\tbuildRules = (\n\t\t\t);\n\t\t\tdependencies = (\n\t\t\t);\n\t\t\tname = {APP};\n\t\t\tproductName = {APP};\n\t\t\tproductReference = {app_product};\n\t\t\tproductType = \"com.apple.product-type.application\";\n\t\t}}", APP)
     p.add(test_target, f"{{\n\t\t\tisa = PBXNativeTarget;\n\t\t\tbuildConfigurationList = {cfg_list('tests', test_cfg)};\n\t\t\tbuildPhases = (\n\t\t\t\t{test_sources},\n\t\t\t\t{test_frameworks},\n\t\t\t\t{test_resources}\n\t\t\t);\n\t\t\tbuildRules = (\n\t\t\t);\n\t\t\tdependencies = (\n\t\t\t);\n\t\t\tname = {TESTS};\n\t\t\tproductName = {TESTS};\n\t\t\tproductReference = {test_product};\n\t\t\tproductType = \"com.apple.product-type.bundle.unit-test\";\n\t\t}}", TESTS)
 
     proj_cfg = cfg_list("project", {"SWIFT_VERSION": "6.0", "MACOSX_DEPLOYMENT_TARGET": MACOS,

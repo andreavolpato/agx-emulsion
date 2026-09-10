@@ -105,10 +105,20 @@ public:
     virtual bool flush(std::string& error) = 0;
 
     // A texture over `b`'s memory, RGBA16Unorm, `width` x `height`, rows
-    // `row_stride_px` pixels apart. Zero copy; the texture is owned by the
-    // frame arena and must not outlive `end_frame`.
+    // `row_stride_px` pixels apart. Zero copy, and returned **+1: the caller
+    // owns it**.
+    //
+    // It is not arena-owned, and that is deliberate rather than an oversight
+    // corrected: a render's result outlives the render, because the frontend
+    // caches it. A Metal texture over a buffer retains that buffer, so
+    // handing over the only reference is also what keeps the pixels alive
+    // exactly as long as someone is looking at them.
     virtual void* texture(Buffer* b, uint32_t width, uint32_t height,
                           uint32_t row_stride_px, std::string& error) = 0;
+    virtual void release_texture(void* texture) = 0;
+    // `spk_result_free` gets a result, not an engine, and a texture handed out
+    // +1 must be releasable without one.
+    static void release_texture_static(void* texture);
     // The row alignment `texture` requires, in pixels of RGBA16.
     virtual uint32_t texture_row_alignment_px() const = 0;
 };

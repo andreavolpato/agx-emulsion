@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Proposed. Decision taken 2026-09-10; not started |
+| **Status** | **Implemented 2026-09-10**, steps 1-5. The app renders with `.venv` renamed away. Step 6 partly done; §8 records what is left |
 | **Decides** | RFC-012's option D, in C++ rather than Swift, and without MLX |
 | **Supersedes** | RFC-012 §3's options A/B/C as the shipping answer. RFC-012's *analysis* stands; its conclusion moves |
 | **Depends on** | RFC-011 (the Metal kernels), RFC-012 §5 steps 1/3/4 (the gate, the baked constants, the engine seam) |
@@ -314,6 +314,19 @@ Swift. A boundary that works for one node works for twenty-one.
 Step 5 is the one that answers the question this document exists for, and it
 has a one-line test: **rename `.venv`, launch the app, open a frame.**
 
+**Run 2026-09-10, and it passes.** With `<repo>/.venv` renamed away:
+
+```
+session: service warm · core=native-metal · engine spektrafilm.native
+session: warm_up: 296 ms · core=native-metal
+session: open path (ms): decode 35 · preview-texture 6 · linear-tiff 39 ·
+         service.open 440 · solve 3 · reprint 46 · TOTAL 572
+snapshot 1600x900 → /tmp/rfc014-final.png
+```
+
+572 ms from a file to a developed photograph on the canvas, with no Python
+process, no `.venv`, and no file between the render and the texture.
+
 ---
 
 ## 7. What this costs, stated plainly
@@ -331,3 +344,157 @@ process boundary that costs half of every render.
 The argument for doing it *now* is that the two hardest questions are already
 answered: the kernels are ours and transfer unchanged, and the colour science is
 already baked to 21.9 KiB of constants.
+
+
+---
+
+## 8. What was built, what it measures, and what is left
+
+Written after the fact, so the map above can be read against the territory.
+
+### 8.1 Where the code is
+
+```
+engine/include/spektrafilm/spk_engine.h    the whole C ABI (§2.1)
+engine/src/core/                           the setup maths -- no GPU, no pixels
+engine/src/shaders/                        the kernels, MSL, transferred verbatim
+engine/src/gpu/                            the GPU interface + its Metal backend
+engine/src/pipeline/                       the 21-node graph, the session, the ABI
+engine/tools/bake_resources.py             every run-time constant, baked
+engine/tests/                              five harnesses, described below
+engine/build.sh                            lib / dylib / metallib / bundle / tests
+```
+
+The Swift side is `modern_UI/Spektrafilm/Spektrafilm/Service/EngineClient.swift`.
+`ServiceClient.swift` is deleted, and with it the subprocess, the JSON-RPC
+framing, the workspace directory and the `PYTHONPATH` invariant.
+
+### 8.2 The decision §6 step 1 was waiting for
+
+**MSL-only**, with the kernels behind a narrow `Gpu` interface (five verbs;
+nothing above it names Metal) so a Vulkan backend can be added beside them.
+Authoring in HLSL → SPIR-V → SPIRV-Cross would put two build tools and a
+cross-compiler between ~600 lines of already-measured MSL and float32 parity,
+and Windows is not scheduled. §4's sequencing warning is answered rather than
+ignored: the kernels were *not* retyped, and the abstraction is where the
+rewrite would attach.
+
+### 8.3 What parity actually measures
+
+| harness | what it holds | result |
+|---|---|---|
+| `parity_setup.py` | 227 setup quantities against colour-science, scipy, numpy | 0 failed, 86 bit-exact |
+| `parity_schema.py` | the wire schema and digested params, 6 stock pairs | identical |
+| `parity_render.py` | the picture, 27 configurations, 1 MP frame, vs numba | 0 failed, max 2.3e-5 |
+| `parity_grain.py` | grain's mean/std/skew at 9 densities | 0 failed |
+| `gpu_smoke` + `check_math_guard.sh` | the boundary, and that the trap-1 guard can fire | 0 failed |
+
+The render bar is **measured, not asserted**. RFC-011 held each *node* to
+float32 storage epsilon; end to end through 21 nodes the accumulated error is
+larger, and it is the GPU's rather than the port's -- on the same frame against
+the same reference, the already-validated Python Metal core reaches 1.9e-5 and
+this engine reaches 2.3e-5. So the bar is 3e-5 absolute, paired with a
+count-level bar (essentially every value within one 16-bit count) so a
+systematic shift cannot hide under the absolute one. The print-balance bug
+below was 2e-4 over 93 % of the frame and failed both.
+
+### 8.4 The traps, revisited
+
+Every trap in §5.1 was real. What each cost:
+
+1. **Fast math.** Confirmed by measurement, not by reading: `MTLCompileOptions`
+   defaults to `MathModeFast` on Xcode 26.6 (`mathMode` reads 2), and the
+   offline compiler defaults to fast math too. `build.sh` sets
+   `-fmetal-math-mode=safe -fmetal-math-fp32-functions=precise`, and because a
+   build flag is exactly the kind of guard that stops being read,
+   `spk_math_probe` computes `a*b - a*b` -- exactly 0 under fast math, the fma
+   error term under safe -- and `spk_engine_create` refuses to start if it comes
+   back zero. `check_math_guard.sh` builds a fast-math library and asserts the
+   refusal, so the guard is known to be able to fire.
+2. **`preprocess.crop_rescale` has no Metal body.** Ported. At the shipped
+   defaults its only job is the film's pixel pitch, and that is now a *per-run*
+   value -- see 8.5.
+3. **`preprocess.geometry` is pruned at default params.** Covered by three
+   parity cases (`crop`, `crop_rotated`, `quarter_turn`, `flips`), all at
+   1 count.
+4. **Grain must reproduce.** It does, distributionally: `parity_grain.py`.
+   Nothing tiles, so the blur seam the trap warns about cannot arise.
+5. **NaN in the measured profiles is load-bearing.** Neutralised once, outside
+   the loop, in `prepare_spectral_constants`; no in-kernel branch.
+6. **The engine must say what it is.** `capabilities.backend.render_core` is
+   `"native-metal"`, and it reports what was *loaded* -- the device it got and
+   the math mode the probe measured -- not what the process could reach.
+
+### 8.5 Two bugs found in the *reference*, not in the port
+
+Both are reproduced deliberately or diverged from deliberately, and the
+render-parity harness asserts the divergence so the port cannot quietly
+inherit either.
+
+- **`camera.lens_blur_um` does nothing on the Python engine.**
+  `_build_topology` derives its sigma from `pixel_size_um`, which is `None`
+  until the first render, so `is_identity` is always true and the node is
+  pruned unconditionally. Measured: `max |out(0) - out(50 um)| == 0.0` exactly.
+  The C++ engine computes every blur sigma per run, so the parameter works.
+  The harness fails if the two ever agree there.
+- **The print balance evaluates its grey in sRGB.**
+  `FilmingStage._simple_rgb_to_density_spectral` calls `_rgb_to_film_raw(rgb)`
+  with no `color_space`, so it takes that method's default -- `"sRGB"`, not
+  `io.input_color_space`. Reproduced and named
+  (`kMidgrayProbeColourSpace`); using the input space instead moved the midgray
+  spectral density by 7.6e-5 and every rendered print by 2 counts over 93 % of
+  the frame.
+
+And one about the model rather than either engine: above
+`dir_couplers_amount` ≈ 1.736 (bisected, kodak_portra_400) the coupler
+inverse's own exposure axis stops being monotonic, and `np.interp` requires an
+increasing `xp`. Past that the reference's output is a product of numpy's
+internal search. **The wire allows the parameter up to 4.0**, so the schema's
+range is wider than the maths supports.
+
+### 8.6 Size and speed
+
+| | |
+|---|---|
+| app bundle | **20 MB**, of which 11 MB is baked resources |
+| against | 7.6 MB + a 2.2 GB venv + a repo checkout |
+| open a 1 MP frame, cold | 572 ms total (`warm_up` 296 ms, `open` 440 ms, reprint 46 ms) |
+| warm render at 1.9 MP | 62 ms full, 53 ms reprint |
+| the deleted file | 364 MB per `open`, each way, plus 10 ms of every 30.6 ms reprint |
+
+The 20 MB is above §1's ~15 MB estimate, and the difference is all data: 6.0 MB
+of baked colour constants (the Hanatos irradiance spectra are 5.97 MB of that,
+kept float16 exactly as the reference stores them) and 5.8 MB of film profiles
+for all 28 stocks. Both are trimmable and neither is code.
+
+### 8.7 What is left
+
+Three methods on the wire are **not** ported, and the engine refuses them by
+name rather than returning something plausible:
+
+- `export` — writes a file; the render exists, the writer does not.
+- `export_di` — the DI package: three files plus the shipped print-preview
+  LUTs.
+- `preview_stock_lut` — needs the `.cube` machinery.
+
+None is on the path from opening a frame to seeing it; each is a subsystem
+rather than a node. `Exporter.swift` still calls them and will surface the
+refusal.
+
+Also open:
+
+- **Per-node timings are off by default.** Dispatches batch into one command
+  buffer, so a timer around a node body measured *encode* time -- 0.003 ms for
+  a full-frame matmul. `node_times` is empty unless
+  `SPEKTRAFILM_NODE_TIMINGS=1`, which flushes per node and gives up the
+  batching. An empty field is honest; a plausible wrong number is not.
+- **The session LRU is gone, deliberately.** A session is a pointer the caller
+  holds, so the caller's retention *is* the cache and
+  `spk_session_release` is when it ends. `capabilities.session_cache` reports
+  the sessions currently open. RFC-013's numbers were about a cache the wire
+  needed; this boundary does not.
+- **`native/`** (the stdio proxy host) and RFC-012's options A-C are now dead
+  and should be removed -- §6 step 6.
+- **The Python engine stays**, as the reference and the test oracle (§3). It is
+  a development dependency that never ships, and every harness above depends
+  on it.

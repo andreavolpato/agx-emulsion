@@ -110,8 +110,6 @@ struct spk_session {
         Image image;      // the source at this tier
         Image negative;   // Tap.CMY_FILM
         bool has_negative = false;
-        gpu::Buffer* rgba16 = nullptr;
-        uint32_t out_w = 0, out_h = 0, row_stride_px = 0;
     };
     std::unordered_map<std::string, TierState> tiers;
 
@@ -522,37 +520,43 @@ bool negative_for(spk_session* session, const Tier& tier, Progress* progress, Im
     return true;
 }
 
-// The rgba16 result, in a persistent buffer with texture-aligned rows so the
-// canvas draws it in place. This is RFC-014 §2.2's zero copy and the deletion
-// of `_write_rgba16`.
-bool materialise(spk_session* session, const Tier& tier, const Image& rgb, spk_result* out,
-                 std::string& error) {
+// The rgba16 result: a fresh buffer with texture-aligned rows, a texture over
+// it, and the only reference handed to the caller. RFC-014 §2.2's zero copy,
+// and the deletion of `_write_rgba16` -- 10 ms of a 30.6 ms reprint, and a
+// 364 MB file at the full tier.
+//
+// A *fresh* buffer, not a pooled one, and not one kept per tier. The frontend
+// keeps the last eight frames' live textures resident so switching frames is
+// instant; a buffer the engine reused on the next render of the same tier
+// would turn those cached textures into a different photograph without
+// anything changing hands. So each render allocates, and the texture's own
+// reference to the buffer is what keeps the pixels alive for exactly as long
+// as the caller is looking at them.
+bool materialise(spk_session* session, const Image& rgb, spk_result* out, std::string& error) {
     gpu::Gpu* gpu = session->engine->gpu;
-    spk_session::TierState& state = session->tiers[tier.name];
     const uint32_t align = gpu->texture_row_alignment_px();
     const uint32_t stride = ((rgb.w + align - 1) / align) * align;
     const size_t bytes = size_t(stride) * rgb.h * 4 * sizeof(uint16_t);
-    if (!state.rgba16 || gpu->size_bytes(state.rgba16) < bytes ||
-        state.out_w != rgb.w || state.out_h != rgb.h) {
-        gpu->release_persistent(state.rgba16);
-        state.rgba16 = gpu->alloc_persistent(bytes, error);
-        if (!state.rgba16) return false;
-        state.out_w = rgb.w;
-        state.out_h = rgb.h;
-        state.row_stride_px = stride;
+    gpu::Buffer* buffer = gpu->alloc_persistent(bytes, error);
+    if (!buffer) return false;
+
+    const uint32_t meta[3] = {uint32_t(rgb.pixels()), rgb.w, stride};
+    bool ok = gpu->dispatch("spk_to_rgba16",
+                            {gpu::Arg::buf(rgb.buf), gpu::Arg::inline_bytes(meta, 3),
+                             gpu::Arg::buf(buffer)},
+                            rgb.pixels(), error) && gpu->flush(error);
+    if (ok) {
+        out->rgba16 = static_cast<const uint16_t*>(gpu->contents(buffer));
+        out->width = rgb.w;
+        out->height = rgb.h;
+        out->row_stride_px = stride;
+        out->texture = gpu->texture(buffer, rgb.w, rgb.h, stride, error);
+        ok = out->texture != nullptr;
     }
-    const uint32_t meta[3] = {uint32_t(rgb.pixels()), rgb.w, state.row_stride_px};
-    if (!gpu->dispatch("spk_to_rgba16",
-                       {gpu::Arg::buf(rgb.buf), gpu::Arg::inline_bytes(meta, 3),
-                        gpu::Arg::buf(state.rgba16)},
-                       rgb.pixels(), error)) return false;
-    if (!gpu->flush(error)) return false;
-    out->rgba16 = static_cast<const uint16_t*>(gpu->contents(state.rgba16));
-    out->width = rgb.w;
-    out->height = rgb.h;
-    out->row_stride_px = state.row_stride_px;
-    out->texture = gpu->texture(state.rgba16, rgb.w, rgb.h, state.row_stride_px, error);
-    return true;
+    // Drop the engine's reference either way. On success the texture still
+    // holds one, so the buffer lives; on failure it dies here.
+    gpu->release_persistent(buffer);
+    return ok;
 }
 
 spk_status render_tier(spk_session* session, const char* tier_name, bool use_reprint,
@@ -581,7 +585,7 @@ spk_status render_tier(spk_session* session, const char* tier_name, bool use_rep
     Image negative, rgb;
     bool ok = negative_for(session, *tier, &session->progress, negative, error);
     if (ok) ok = session->pipeline->run_print(negative, rgb, &session->progress, error);
-    if (ok) ok = materialise(session, *tier, rgb, out, error);
+    if (ok) ok = materialise(session, rgb, out, error);
     gpu->end_frame();
 
     if (!ok) {
@@ -765,15 +769,13 @@ spk_status spk_progress(spk_session* session, const char* progress_id, char** ou
     return SPK_OK;
 }
 
-void spk_result_release(spk_session* session) {
-    if (!session) return;
-    std::lock_guard<std::mutex> guard(session->lock);
-    for (auto& kv : session->tiers) {
-        if (kv.second.rgba16) {
-            session->engine->gpu->release_persistent(kv.second.rgba16);
-            kv.second.rgba16 = nullptr;
-        }
-    }
+void spk_result_free(spk_result* result) {
+    if (!result || !result->texture) return;
+    // The engine kept no reference to hand back, so this is the caller's own
+    // +1 going away -- and with it the buffer `rgba16` pointed into.
+    gpu::Gpu::release_texture_static(result->texture);
+    result->texture = nullptr;
+    result->rgba16 = nullptr;
 }
 
 void spk_session_release(spk_session* session) {
@@ -790,7 +792,6 @@ void spk_session_release(spk_session* session) {
     for (auto& kv : session->tiers) {
         if (kv.second.image.buf) engine->gpu->release_persistent(kv.second.image.buf);
         if (kv.second.negative.buf) engine->gpu->release_persistent(kv.second.negative.buf);
-        if (kv.second.rgba16) engine->gpu->release_persistent(kv.second.rgba16);
     }
     delete session;
 }

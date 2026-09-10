@@ -46,7 +46,6 @@ public:
         for (Buffer* b : pool_) { if (b->mtl) b->mtl->release(); delete b; }
         for (Buffer* b : persistent_) { if (b->mtl) b->mtl->release(); delete b; }
         for (auto& kv : pipelines_) kv.second->release();
-        for (MTL::Texture* t : textures_) t->release();
         if (command_buffer_) command_buffer_->release();
         if (queue_) queue_->release();
         if (library_) library_->release();
@@ -114,8 +113,6 @@ public:
     }
 
     void end_frame() override {
-        for (MTL::Texture* t : textures_) t->release();
-        textures_.clear();
         for (Buffer* b : pool_) b->in_use = false;
         live_.clear();
         // The pool itself is kept. Trimming it here would hand every 540 MB
@@ -263,8 +260,13 @@ public:
         MTL::Texture* tex = b->mtl->newTexture(desc, 0, size_t(row_stride_px) * 8);
         desc->release();
         if (!tex) { error = "could not create a texture over the result buffer"; return nullptr; }
-        textures_.push_back(tex);
+        // `newTexture` is already +1 and the texture retains `b->mtl`, so the
+        // caller now holds the only reference it needs. Not tracked here.
         return tex;
+    }
+
+    void release_texture(void* texture) override {
+        if (texture) static_cast<MTL::Texture*>(texture)->release();
     }
 
     uint32_t texture_row_alignment_px() const override {
@@ -323,10 +325,13 @@ private:
     std::vector<Buffer*> pool_;
     std::vector<Buffer*> live_;
     std::vector<Buffer*> persistent_;
-    std::vector<MTL::Texture*> textures_;
 };
 
 }  // namespace
+
+void Gpu::release_texture_static(void* texture) {
+    if (texture) static_cast<MTL::Texture*>(texture)->release();
+}
 
 Gpu* Gpu::create_metal(void* device_handle, const std::string& metallib_path, std::string& error) {
     MTL::Device* device = static_cast<MTL::Device*>(device_handle);

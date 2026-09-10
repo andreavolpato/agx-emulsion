@@ -14,17 +14,17 @@ import Foundation
 
 @MainActor
 final class RenderScheduler {
-    private let client: ServiceClient
+    private let client: EngineClient
     private(set) var sent = FilmParams.default
     private var wanted = FilmParams.default
     private var loop: Task<Void, Never>?
     private var generation = 0
     private var sessionID: String?
-    var onResult: (@MainActor (RenderResponse, Int) -> Void)?
+    var onResult: (@MainActor (RenderOutcome, Int) -> Void)?
     var onError: (@MainActor (String) -> Void)?
     var onBusy: (@MainActor (Bool) -> Void)?
 
-    init(client: ServiceClient) { self.client = client }
+    init(client: EngineClient) { self.client = client }
 
     /// True while an edit has been requested but not yet accepted by the
     /// service. The detail renderer checks this before spending the transport
@@ -70,12 +70,12 @@ final class RenderScheduler {
             onBusy?(true)
             do {
                 var req = RenderRequest(sessionID: sid, paramsDelta: d2)
-                let r: RenderResponse
+                let r: RenderOutcome
                 if l2.contains(.shoot) {
                     req.layer = "shoot"
-                    r = try await client.call(.previewRender, req, as: RenderResponse.self)
+                    r = try await client.render(.previewRender, req)
                 } else {
-                    r = try await client.call(.reprint, req, as: RenderResponse.self)
+                    r = try await client.render(.reprint, req)
                 }
                 if gen == generation {
                     sent = target

@@ -108,11 +108,35 @@ build_tests() {
   done
 }
 
+# Sync the baked resources into the app's own Resources folder, which
+# `Tools/gen-project.py` already ships as a folder reference -- so the engine's
+# constants, profiles and metallib end up in the bundle without the project
+# generator having to know about any of them.
+#
+# The metallib is copied rather than compiled by Xcode on purpose. The app
+# target sets `MTL_FAST_MATH = YES` for its own canvas shader, and inheriting
+# that for the engine's kernels is exactly RFC-014 §5.1 trap 1. Building it
+# here keeps the math flags in one place, next to the reason for them.
+bundle_resources() {
+  local app="$here/../modern_UI/Spektrafilm/Spektrafilm/Resources/engine"
+  if [[ ! -f "$here/resources/spektrafilm_constants.bin" ]]; then
+    echo "build.sh: engine/resources is missing. Run:" >&2
+    echo "    PYTHONPATH=src .venv/bin/python engine/tools/bake_resources.py" >&2
+    exit 1
+  fi
+  mkdir -p "$app"
+  rsync -a --delete "$here/resources/" "$app/"
+  local size
+  size=$(du -sh "$app" | cut -f1)
+  echo "bundle     -> $app ($size)"
+}
+
 case "${1:-all}" in
   metallib) build_metallib ;;
   lib)      build_metallib; build_lib ;;
   dylib)    build_metallib; build_dylib ;;
   tests)    build_tests ;;
-  all)      build_metallib; build_lib; build_dylib; build_tests ;;
-  *) echo "usage: build.sh [all|lib|dylib|tests|metallib]" >&2; exit 2 ;;
+  bundle)   build_metallib; bundle_resources ;;
+  all)      build_metallib; build_lib; build_dylib; build_tests; bundle_resources ;;
+  *) echo "usage: build.sh [all|lib|dylib|tests|metallib|bundle]" >&2; exit 2 ;;
 esac

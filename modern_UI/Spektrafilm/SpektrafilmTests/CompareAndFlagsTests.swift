@@ -191,53 +191,59 @@ final class CapabilityNegotiationTests: XCTestCase {
     }
 }
 
-/// The one invariant that decides *which engine renders*.
+/// Where the engine's data comes from.
 ///
-/// The app spawns `<repo>/.venv/bin/python -m spektrafilm.service`, and
-/// `spektrafilm` is installed editable in that venv — so the interpreter would
-/// resolve the package with no help at all, and `PYTHONPATH` reads as dead
-/// weight. It is not. An editable install pins a `.pth` to whichever checkout
-/// `pip install -e` was run from and keeps pointing there regardless of which
-/// worktree the app was built from; `PYTHONPATH` overrides it. Deleting the
-/// line as a simplification would let a build from one checkout render with
-/// another checkout's engine, silently — HANDOFF-GPU-WIRING §0, which cost a
-/// full session.
+/// This class replaces `ServiceLaunchEnvironmentTests`, which protected the
+/// property that the *Python* service imported the engine next to the binary
+/// that launched it (`PYTHONPATH`, per-worktree). There is no child process
+/// and no `PYTHONPATH` any more — RFC-014 linked the engine in — but the bug
+/// that test existed to prevent is not language-specific and has bitten twice:
+/// a whole session's backend work measured against an engine nobody was
+/// running, and a two-worktree A/B that read as "no effect" because both arms
+/// resolved to the same source.
 ///
-/// The backend session hit the same trap from the other side: a two-worktree
-/// A/B that read as "no measurable effect" because both arms imported the same
-/// pinned source. Bare `python` and `pytest` have no protection from this. The
-/// app does, and this is the whole of it.
+/// The equivalent property now is that the engine's **baked constants, film
+/// profiles and Metal library come from the app bundle**, not from a checkout
+/// that happens to be above it. So that is what is asserted, plus the fact
+/// that the out-of-tree fallback is *visible* rather than silent.
 @MainActor
-final class ServiceLaunchEnvironmentTests: XCTestCase {
+final class EngineResourceOriginTests: XCTestCase {
 
-    private let repo = URL(fileURLWithPath: "/tmp/some-worktree")
-
-    func testTheEngineComesFromTheRepoTheAppResolved() {
-        let env = ServiceClient.childEnvironment(repo: repo)
-        XCTAssertEqual(env["PYTHONPATH"], "/tmp/some-worktree/src",
-                       "the service must import the engine next to the binary that launched it")
+    func testTheResourcesAreTheOnesNextToTheBinary() {
+        let resources = EngineClient.defaultResources()
+        XCTAssertTrue(resources.path.hasPrefix(EngineClient.bundle.bundleURL.path),
+                      "the engine resolved its resources to \(resources.path), which is outside "
+                      + "\(EngineClient.bundle.bundleURL.path) — a render would then come from a "
+                      + "checkout rather than from this build")
     }
 
-    /// A second worktree must get its own engine. If this ever passes with two
-    /// equal values, the override is gone and every build shares one engine.
-    func testTwoCheckoutsGetTwoDifferentEngines() {
-        let a = ServiceClient.childEnvironment(repo: URL(fileURLWithPath: "/tmp/a"))
-        let b = ServiceClient.childEnvironment(repo: URL(fileURLWithPath: "/tmp/b"))
-        XCTAssertNotEqual(a["PYTHONPATH"], b["PYTHONPATH"])
-    }
-
-    /// Unbuffered stdout is not a nicety: the transport is newline-delimited
-    /// JSON-RPC over a pipe, and a buffered child deadlocks the first request.
-    func testTheChildIsUnbuffered() {
-        XCTAssertEqual(ServiceClient.childEnvironment(repo: repo)["PYTHONUNBUFFERED"], "1")
-    }
-
-    /// It inherits the user's environment rather than replacing it — the venv
-    /// needs PATH and HOME, and a Metal device needs the window server's.
-    func testItInheritsRatherThanReplaces() {
-        let env = ServiceClient.childEnvironment(repo: repo)
-        for key in ["PATH", "HOME"] where ProcessInfo.processInfo.environment[key] != nil {
-            XCTAssertEqual(env[key], ProcessInfo.processInfo.environment[key], key)
+    /// Every file the engine refuses to start without. A missing one is a
+    /// clear error at launch rather than a frame that never appears.
+    func testTheBundleCarriesEverythingTheEngineNeeds() {
+        let resources = EngineClient.defaultResources()
+        for name in ["spektrafilm_constants.bin", "spektrafilm.metallib",
+                     "neutral_print_filters.json"] {
+            XCTAssertTrue(FileManager.default.fileExists(
+                atPath: resources.appending(path: name).path),
+                "\(name) is missing from \(resources.path); run engine/build.sh bundle")
         }
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: resources.appending(path: "profiles").path, isDirectory: &isDirectory)
+            && isDirectory.boolValue, "the film profiles are missing from \(resources.path)")
+    }
+
+    /// The override exists for a build run out of the tree, and it wins — so
+    /// a deliberate A/B is possible. If this ever stops working, two builds
+    /// silently share one set of constants.
+    func testTheOverrideWins() {
+        let key = "SPEKTRAFILM_ENGINE_RESOURCES"
+        guard ProcessInfo.processInfo.environment[key] == nil else {
+            // Already set for this run; the assertion above covers it.
+            return
+        }
+        setenv(key, "/tmp/some-other-engine", 1)
+        defer { unsetenv(key) }
+        XCTAssertEqual(EngineClient.defaultResources().path, "/tmp/some-other-engine")
     }
 }

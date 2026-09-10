@@ -72,13 +72,24 @@ typedef struct {
     uint32_t     channels;   /* 3 or 4; a 4th channel is dropped at the door */
 } spk_image;
 
-/* One rendered tier. `rgba16` is engine-owned and valid until the next
- * render on the same session or `spk_result_release`, whichever is first.
+/* One rendered tier.
  *
- * `texture` is the same pixels as an `id<MTLTexture>` the caller may draw
- * directly -- RFC-014 §2.2's zero copy, and the reason `spk_engine_create`
- * takes the caller's device. It is NULL when the engine could not share
- * (no device passed in); `rgba16` is always present.
+ * **This struct is the one exception to rule 2 above**, and it is worth
+ * reading before using it. `texture` is an `id<MTLTexture>` over the rendered
+ * pixels, returned **+1: the caller owns it**. In Swift that means
+ * `takeRetainedValue()` and ARC; in C it means `spk_result_free` when done.
+ *
+ * The exception exists because the caller caches these. The frontend keeps the
+ * last eight frames' live textures resident so switching frames is instant, so
+ * a texture whose pixels the engine reuses on the next render of the same tier
+ * would silently become a different photograph. Each render therefore gets its
+ * own buffer, and handing over the only reference is what ties that buffer's
+ * lifetime to the caller's use of it rather than to the engine's next frame.
+ *
+ * `rgba16` points into the texture's own memory, so it is valid for exactly as
+ * long as `texture` is retained. It is there for callers that want the pixels
+ * rather than something to draw -- the parity harness reads it, and it is the
+ * same rows `service._write_rgba16` used to put in a file.
  */
 typedef struct {
     const uint16_t* rgba16;
@@ -139,7 +150,10 @@ spk_status spk_solve(spk_session* session, const char* target, char** out_json);
 spk_status spk_reprint(spk_session* session, const char* tier, spk_result* out);
 spk_status spk_render(spk_session* session, const char* tier, spk_result* out);
 
-void spk_result_release(spk_session* session);
+/* Release a result's texture (and with it the pixels `rgba16` points at).
+ * Do **not** call it after taking ownership of `texture` in a language with
+ * its own reference counting -- Swift's `takeRetainedValue()` already did. */
+void spk_result_free(spk_result* result);
 void spk_session_release(spk_session* session);
 
 /* --- cancellation ------------------------------------------------------

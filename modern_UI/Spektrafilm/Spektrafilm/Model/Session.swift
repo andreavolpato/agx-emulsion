@@ -379,7 +379,7 @@ final class Session: CanvasHost {
 
     // MARK: engine
     let renderer: Renderer
-    let client: ServiceClient
+    let client: EngineClient
     let scheduler: RenderScheduler
     let catalog = StockCatalog.shared
     private var serviceSessionID: String?
@@ -396,8 +396,11 @@ final class Session: CanvasHost {
     init(renderer: Renderer? = Renderer()) {
         guard let renderer else { fatalError("Metal is required") }
         self.renderer = renderer
-        let repo = ServiceClient.defaultRepo()
-        client = ServiceClient(repo: repo, workspace: Session.cacheRoot.appending(path: "workspace"))
+        // The engine is in this process now (RFC-014): no subprocess, no
+        // workspace directory, and no walking up to a checkout's `.venv`. It
+        // gets the canvas's own `MTLDevice`, so a render lands in a texture
+        // the canvas can draw without a copy.
+        client = EngineClient(device: renderer.device)
         scheduler = RenderScheduler(client: client)
         scheduler.onResult = { [weak self] r, gen in self?.applyRender(r, generation: gen) }
         scheduler.onError = { [weak self] e in self?.lastError = e; self?.status = e }
@@ -813,7 +816,7 @@ final class Session: CanvasHost {
                 scheduleSave()
             }
             clock.lap("solve")
-            let rr: RenderResponse = try await client.call(.reprint, RenderRequest(sessionID: r.sessionID))
+            let rr = try await client.render(.reprint, RenderRequest(sessionID: r.sessionID))
             clock.lap("reprint")
             canvasLog(clock.summary()
                       + (warmUpMs.map { "  ·  warm_up \(Int($0)) ms" } ?? "")
@@ -827,28 +830,24 @@ final class Session: CanvasHost {
                 // cause is usually that the engine is not in this checkout.
                 stockWarning = "Rendering on the \(b.label) path, not the GPU core — see HANDOFF-GPU-WIRING.md."
             }
-            status = "\(statusBase!)  ·  \(rr.reprint ? "reprint" : "render") \(Int(rr.elapsedMs)) ms"
+            status = "\(statusBase!)  ·  \(rr.response.reprint ? "reprint" : "render") \(Int(rr.response.elapsedMs)) ms"
             // The user may have moved a slider while the film side was running.
             scheduler.request(sidecar.params)
         } catch {
             lastError = "\(error)"
             status = "\(error)"
-            if case ServiceClient.ClientError.noServiceExecutable = error { serviceReady = false }
+            if case EngineClient.ClientError.noResources = error { serviceReady = false }
         }
     }
 
-    private func applyRender(_ r: RenderResponse, generation: Int) {
+    private func applyRender(_ outcome: RenderOutcome, generation: Int) {
+        let r = outcome.response
         guard generation == serviceGeneration else {
             canvasLog("applyRender dropped: generation \(generation) != \(serviceGeneration)"); return
         }
         guard let url = selection else { canvasLog("applyRender dropped: no selection"); return }
-        guard let path = r.rawPath, let w = r.width, let h = r.height else {
-            canvasLog("applyRender dropped: no raw_path/size in the response (preview_path=\(r.previewPath ?? "nil"))"); return
-        }
-        guard let tex = renderer.store.uploadRGBA16(path: path, width: w, height: h) else {
-            let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? nil
-            canvasLog("applyRender dropped: upload failed for \(w)x\(h), file bytes=\(size.map(String.init) ?? "missing"), need \(w * h * 8)")
-            return
+        guard let tex = outcome.texture, let w = r.width, let h = r.height else {
+            canvasLog("applyRender dropped: the engine returned no texture"); return
         }
         canvasLog("applyRender uploaded \(w)x\(h)")
         renderer.store.setPrint(tex, for: url)
@@ -860,7 +859,6 @@ final class Session: CanvasHost {
         sidecar.state = .processed
         scheduleSave()
         updateThumbnail(url, from: tex)
-        try? FileManager.default.removeItem(atPath: path)
         // A resident detail render made from *different* parameters is no
         // longer the print on screen and showing it would be showing a
         // different film. One made from these parameters is still the truth:
@@ -1241,16 +1239,11 @@ final class Session: CanvasHost {
         canvasLog("detail \(tier.rawValue) requested for \(url.lastPathComponent)")
         defer { detailPending = false }
         do {
-            let r: RenderResponse = try await client.call(.reprint, RenderRequest(sessionID: sessionID, tier: tier.rawValue))
+            let outcome = try await client.render(.reprint,
+                RenderRequest(sessionID: sessionID, tier: tier.rawValue))
+            let r = outcome.response
             guard gen == detailGeneration, selection == url,
-                  let path = r.rawPath, let w = r.width, let h = r.height else {
-                if let path = r.rawPath { try? FileManager.default.removeItem(atPath: path) }
-                return
-            }
-            defer { try? FileManager.default.removeItem(atPath: path) }
-            guard let tex = renderer.store.uploadRGBA16(path: path, width: w, height: h) else {
-                canvasLog("detail \(tier.rawValue) upload failed for \(w)x\(h)"); return
-            }
+                  let tex = outcome.texture, let w = r.width, let h = r.height else { return }
             renderer.store.setDetail(tex, tier: tier.rawValue, rank: tier.rank, stamp: stamp, for: url)
             renderer.setDetail(tex)
             canvasLog("detail \(tier.rawValue) \(w)x\(h) landed in \(Int(r.elapsedMs)) ms")
@@ -1361,10 +1354,10 @@ final class Session: CanvasHost {
                 params = p
                 scheduler.invalidate()
                 serviceGeneration = scheduler.reset(sessionID: sid, params: p)
-                let rr: RenderResponse = try await client.call(.reprint, RenderRequest(sessionID: sid))
+                let rr = try await client.render(.reprint, RenderRequest(sessionID: sid))
                 guard serviceSessionID == sid else { return }
                 applyRender(rr, generation: serviceGeneration)
-                status = "Solved  ·  reprint \(Int(rr.elapsedMs)) ms"
+                status = "Solved  ·  reprint \(Int(rr.response.elapsedMs)) ms"
                 scheduleSave()
             } catch {
                 lastError = "\(error)"
@@ -1431,7 +1424,7 @@ func canvasLog(_ message: @autoclosure () -> String) {
 
 extension Notification.Name { static let thumbnailUpdated = Notification.Name("thumbnailUpdated") }
 
-extension ServiceClient {
+extension EngineClient {
     func set(onTermination: @escaping @Sendable (String) -> Void) { self.onTermination = onTermination }
 }
 

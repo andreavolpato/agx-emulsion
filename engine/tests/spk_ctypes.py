@@ -87,7 +87,7 @@ class Engine:
         lib.spk_progress.restype = ctypes.c_int32
         lib.spk_progress.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p)]
         lib.spk_session_release.argtypes = [ctypes.c_void_p]
-        lib.spk_result_release.argtypes = [ctypes.c_void_p]
+        lib.spk_result_free.argtypes = [ctypes.POINTER(SpkResult)]
         lib.spk_string_free.argtypes = [ctypes.c_char_p]
 
     def _last_error(self) -> str:
@@ -180,8 +180,13 @@ class Session:
         # using the stride the engine reports rather than re-deriving it.
         h, w, stride = result.height, result.width, result.row_stride_px
         flat = np.ctypeslib.as_array(result.rgba16, shape=(h * stride * 4,))
-        rgba = flat.reshape(h, stride, 4)[:, :w, :]
-        return np.array(rgba, copy=True), result
+        rgba = np.array(flat.reshape(h, stride, 4)[:, :w, :], copy=True)
+        # The texture is handed over +1 and its buffer is what `rgba16` points
+        # into, so the copy above has to happen before this. Swift's ARC does
+        # this release; a ctypes caller has to say it, and not saying it leaks
+        # a full-tier buffer per render.
+        self._engine._lib.spk_result_free(ctypes.byref(result))
+        return rgba, result
 
     def progress(self) -> dict:
         out = ctypes.c_char_p()

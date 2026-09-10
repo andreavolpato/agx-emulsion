@@ -269,3 +269,5 @@ engine/build/
 # this from `src/spektrafilm/data`, and it is 11.8 MB of copies. The generator
 # is checked in; its output is not.
 engine/resources/
+# The engine resources build.sh syncs into the app bundle (generated).
+modern_UI/Spektrafilm/Spektrafilm/Resources/engine/

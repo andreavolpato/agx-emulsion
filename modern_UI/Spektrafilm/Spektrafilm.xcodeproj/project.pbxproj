@@ -143,15 +143,17 @@
 			sourceTree = "<group>";
 		};
 		3CCEC3F26705D6819C65A60B /* Resources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources; sourceTree = "<group>"; };
+		BAC307A47D6F76302B897A1E /* EngineClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineClient.swift"; sourceTree = "<group>"; };
 		CC2B2BC90455A9EA24E3E716 /* Methods.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Methods.swift"; sourceTree = "<group>"; };
 		DE976148AF21CF886D599656 /* RenderScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RenderScheduler.swift"; sourceTree = "<group>"; };
-		C4680480FDDCE4FB76DC8BCC /* ServiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ServiceClient.swift"; sourceTree = "<group>"; };
+		0AFE98D44DD0FE2BF0D87E95 /* Spektrafilm-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Spektrafilm-Bridging-Header.h"; sourceTree = "<group>"; };
 		65D1C8FA5DFC679DA518FF8F /* Service */ = {
 			isa = PBXGroup;
 			children = (
+				BAC307A47D6F76302B897A1E /* EngineClient.swift */,
 				CC2B2BC90455A9EA24E3E716 /* Methods.swift */,
 				DE976148AF21CF886D599656 /* RenderScheduler.swift */,
-				C4680480FDDCE4FB76DC8BCC /* ServiceClient.swift */
+				0AFE98D44DD0FE2BF0D87E95 /* Spektrafilm-Bridging-Header.h */
 			);
 			path = "Service";
 			sourceTree = "<group>";
@@ -211,6 +213,7 @@
 		E6A23AED59A7DC706EEF5A37 /* CanvasViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CanvasViewTests.swift"; sourceTree = "<group>"; };
 		4334CBFCCDA1F207392FFFE1 /* CompareAndFlagsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CompareAndFlagsTests.swift"; sourceTree = "<group>"; };
 		161DD0623DE183C7D1120EED /* CurveMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CurveMathTests.swift"; sourceTree = "<group>"; };
+		05A13E7B8473337DA4F6B8FE /* EngineClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineClientTests.swift"; sourceTree = "<group>"; };
 		680FB4F2579B6CE01A3E641D /* FrontendPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FrontendPolicyTests.swift"; sourceTree = "<group>"; };
 		B8057DF6F7586C513DC4C6D8 /* GeometryContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeometryContractTests.swift"; sourceTree = "<group>"; };
 		6B156718E1AE69C25B473A8F /* GeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeometryTests.swift"; sourceTree = "<group>"; };
@@ -218,7 +221,6 @@
 		332D14B32AAD81387A7DD138 /* MaskTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MaskTests.swift"; sourceTree = "<group>"; };
 		D535AB20AF82118A0962C13F /* ParamsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ParamsTests.swift"; sourceTree = "<group>"; };
 		70F2B5843ED40F2BAD7DFEDD /* RendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RendererTests.swift"; sourceTree = "<group>"; };
-		5D57229935E7AD0FCCC76129 /* ServiceIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ServiceIntegrationTests.swift"; sourceTree = "<group>"; };
 		0A69EAE576B15BF34E5745A9 /* TIFFHandoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TIFFHandoffTests.swift"; sourceTree = "<group>"; };
 		B30E2FCC7C48E3CDEB2823F5 /* ViewportStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ViewportStateTests.swift"; sourceTree = "<group>"; };
 		09B059C0BF2C058329FCECB2 /* SpektrafilmTests */ = {
@@ -227,6 +229,7 @@
 				E6A23AED59A7DC706EEF5A37 /* CanvasViewTests.swift */,
 				4334CBFCCDA1F207392FFFE1 /* CompareAndFlagsTests.swift */,
 				161DD0623DE183C7D1120EED /* CurveMathTests.swift */,
+				05A13E7B8473337DA4F6B8FE /* EngineClientTests.swift */,
 				680FB4F2579B6CE01A3E641D /* FrontendPolicyTests.swift */,
 				B8057DF6F7586C513DC4C6D8 /* GeometryContractTests.swift */,
 				6B156718E1AE69C25B473A8F /* GeometryTests.swift */,
@@ -234,7 +237,6 @@
 				332D14B32AAD81387A7DD138 /* MaskTests.swift */,
 				D535AB20AF82118A0962C13F /* ParamsTests.swift */,
 				70F2B5843ED40F2BAD7DFEDD /* RendererTests.swift */,
-				5D57229935E7AD0FCCC76129 /* ServiceIntegrationTests.swift */,
 				0A69EAE576B15BF34E5745A9 /* TIFFHandoffTests.swift */,
 				B30E2FCC7C48E3CDEB2823F5 /* ViewportStateTests.swift */
 			);
@@ -242,6 +244,7 @@
 			sourceTree = "<group>";
 		};
 		3A46B823EB154761A6BF7A40 /* capture-live.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-live.sh"; sourceTree = "<group>"; };
+		871C92CEB47259580798BCA0 /* check-engine-resources.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "check-engine-resources.sh"; sourceTree = "<group>"; };
 		40B93B861DD78BF8A17094C9 /* compare-layout.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "compare-layout.py"; sourceTree = "<group>"; };
 		907F64D7CA2A857F64DF3134 /* gen-catalog.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "gen-catalog.py"; sourceTree = "<group>"; };
 		D657F6587F062BF4541C2DCE /* gen-project.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "gen-project.py"; sourceTree = "<group>"; };
@@ -252,6 +255,7 @@
 			isa = PBXGroup;
 			children = (
 				3A46B823EB154761A6BF7A40 /* capture-live.sh */,
+				871C92CEB47259580798BCA0 /* check-engine-resources.sh */,
 				40B93B861DD78BF8A17094C9 /* compare-layout.py */,
 				907F64D7CA2A857F64DF3134 /* gen-catalog.py */,
 				D657F6587F062BF4541C2DCE /* gen-project.py */,
@@ -260,6 +264,45 @@
 				87314BD67C9F03FF90F10BE7 /* snapshot.sh */
 			);
 			path = "Tools";
+			sourceTree = "<group>";
+		};
+		4AE77991B35C0D2578668A4D /* blob.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "blob.cpp"; path = "../../engine/src/core/blob.cpp"; sourceTree = SOURCE_ROOT; };
+		5E12AA6268ED8B70960FB611 /* cam16.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "cam16.cpp"; path = "../../engine/src/core/cam16.cpp"; sourceTree = SOURCE_ROOT; };
+		82C68D52B4AC7EEEABAA2E0F /* colour.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "colour.cpp"; path = "../../engine/src/core/colour.cpp"; sourceTree = SOURCE_ROOT; };
+		07E8BDBCBED237DE2FC0F943 /* curves.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "curves.cpp"; path = "../../engine/src/core/curves.cpp"; sourceTree = SOURCE_ROOT; };
+		FE41CD0D1F67586717EC7214 /* hanatos.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "hanatos.cpp"; path = "../../engine/src/core/hanatos.cpp"; sourceTree = SOURCE_ROOT; };
+		8EE65348773C45B1D968F31C /* json.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "json.cpp"; path = "../../engine/src/core/json.cpp"; sourceTree = SOURCE_ROOT; };
+		31570D5FF5811B6726E46061 /* numeric.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "numeric.cpp"; path = "../../engine/src/core/numeric.cpp"; sourceTree = SOURCE_ROOT; };
+		D54583B8F05D0A2875FE11AA /* params.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "params.cpp"; path = "../../engine/src/core/params.cpp"; sourceTree = SOURCE_ROOT; };
+		96B09847B1308EB125672DC2 /* printing.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "printing.cpp"; path = "../../engine/src/core/printing.cpp"; sourceTree = SOURCE_ROOT; };
+		34FC33B09373B76FB63801AA /* profile.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "profile.cpp"; path = "../../engine/src/core/profile.cpp"; sourceTree = SOURCE_ROOT; };
+		323F07930BF63C7C5F91540E /* spectral.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "spectral.cpp"; path = "../../engine/src/core/spectral.cpp"; sourceTree = SOURCE_ROOT; };
+		5DD87A6D0C73628E145AAEA0 /* metal_gpu.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "metal_gpu.cpp"; path = "../../engine/src/gpu/metal_gpu.cpp"; sourceTree = SOURCE_ROOT; };
+		D153B60031408AE88389D45D /* metal_impl.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "metal_impl.cpp"; path = "../../engine/src/gpu/metal_impl.cpp"; sourceTree = SOURCE_ROOT; };
+		D0529F7B7D3936D15E44D542 /* blur.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "blur.cpp"; path = "../../engine/src/pipeline/blur.cpp"; sourceTree = SOURCE_ROOT; };
+		21B72BAC7FE8B7705AEB18BA /* engine.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "engine.cpp"; path = "../../engine/src/pipeline/engine.cpp"; sourceTree = SOURCE_ROOT; };
+		1570483CC842799AAC479D62 /* pipeline.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "pipeline.cpp"; path = "../../engine/src/pipeline/pipeline.cpp"; sourceTree = SOURCE_ROOT; };
+		6E206BF4A16CC067140F0164 /* Engine */ = {
+			isa = PBXGroup;
+			children = (
+				4AE77991B35C0D2578668A4D /* blob.cpp */,
+				5E12AA6268ED8B70960FB611 /* cam16.cpp */,
+				82C68D52B4AC7EEEABAA2E0F /* colour.cpp */,
+				07E8BDBCBED237DE2FC0F943 /* curves.cpp */,
+				FE41CD0D1F67586717EC7214 /* hanatos.cpp */,
+				8EE65348773C45B1D968F31C /* json.cpp */,
+				31570D5FF5811B6726E46061 /* numeric.cpp */,
+				D54583B8F05D0A2875FE11AA /* params.cpp */,
+				96B09847B1308EB125672DC2 /* printing.cpp */,
+				34FC33B09373B76FB63801AA /* profile.cpp */,
+				323F07930BF63C7C5F91540E /* spectral.cpp */,
+				5DD87A6D0C73628E145AAEA0 /* metal_gpu.cpp */,
+				D153B60031408AE88389D45D /* metal_impl.cpp */,
+				D0529F7B7D3936D15E44D542 /* blur.cpp */,
+				21B72BAC7FE8B7705AEB18BA /* engine.cpp */,
+				1570483CC842799AAC479D62 /* pipeline.cpp */
+			);
+			name = Engine;
 			sourceTree = "<group>";
 		};
 		B6CDB6E5D160E013280D3C68 /* Spektrafilm.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Spektrafilm.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -277,6 +320,7 @@
 			isa = PBXGroup;
 			children = (
 				97F64766A459EBA203E857B8,
+				6E206BF4A16CC067140F0164,
 				09B059C0BF2C058329FCECB2,
 				B15C2DB998636C9DEE424DF8,
 				00C45FD35CB0F9C5F764F070
@@ -326,9 +370,9 @@
 		CCF471F409B3367D0B43B9EB /* Filmstrip.swift */ = {isa = PBXBuildFile; fileRef = 5D6616A8AE8BDBF35E1A2120; };
 		C62F760A04289FB4B908B23E /* LeftPanel.swift */ = {isa = PBXBuildFile; fileRef = D47835E8B05FDFA33E235A3E; };
 		3CCC10816711855EF8A483AB /* RightPanel.swift */ = {isa = PBXBuildFile; fileRef = C72C2D38653D03EEAE2393C1; };
+		E3B3644C25235A6C28182ECF /* EngineClient.swift */ = {isa = PBXBuildFile; fileRef = BAC307A47D6F76302B897A1E; };
 		A394D2865ED231DC4E689EF6 /* Methods.swift */ = {isa = PBXBuildFile; fileRef = CC2B2BC90455A9EA24E3E716; };
 		6625CDBA42276F9AC87D1C3D /* RenderScheduler.swift */ = {isa = PBXBuildFile; fileRef = DE976148AF21CF886D599656; };
-		1DACD9BCCC20D4A41E7593C3 /* ServiceClient.swift */ = {isa = PBXBuildFile; fileRef = C4680480FDDCE4FB76DC8BCC; };
 		8676E7DDCD7C4091B33A2290 /* Theme.swift */ = {isa = PBXBuildFile; fileRef = 99DD52B5777F1B47C013FE24; };
 		083D2FD0AFE185C84AA1E5A1 /* BootWindow.swift */ = {isa = PBXBuildFile; fileRef = 644C3C5C6B6D920DEE18AEB1; };
 		C2DAF32A79E3A15DBEA4D0AF /* BrowseView.swift */ = {isa = PBXBuildFile; fileRef = A93A35E01D7C5ADFCD2693CB; };
@@ -337,6 +381,22 @@
 		FB6BD13DF5D4CFD5676E1B8B /* TopBar.swift */ = {isa = PBXBuildFile; fileRef = 86F51859732FC4916476E8A1; };
 		1CACD6876969ED48F289275B /* TrafficLights.swift */ = {isa = PBXBuildFile; fileRef = 3FC40DFF1C8B85BA997D1C92; };
 		8D2FAA3202FF7D1008F53E59 /* SpektrafilmApp.swift */ = {isa = PBXBuildFile; fileRef = AE91E3D1136C0574EEA49D4A; };
+		EE1176168B2529D99B8B3AD1 /* blob.cpp */ = {isa = PBXBuildFile; fileRef = 4AE77991B35C0D2578668A4D; };
+		B619288CF0BBB4CFD6264E34 /* cam16.cpp */ = {isa = PBXBuildFile; fileRef = 5E12AA6268ED8B70960FB611; };
+		18D2802403CC58C656E2070C /* colour.cpp */ = {isa = PBXBuildFile; fileRef = 82C68D52B4AC7EEEABAA2E0F; };
+		7BCE162A912930027D1DC3EE /* curves.cpp */ = {isa = PBXBuildFile; fileRef = 07E8BDBCBED237DE2FC0F943; };
+		0A3BE94A6DD48B19217D0E50 /* hanatos.cpp */ = {isa = PBXBuildFile; fileRef = FE41CD0D1F67586717EC7214; };
+		4A5B0F600DA303ED8ED143F4 /* json.cpp */ = {isa = PBXBuildFile; fileRef = 8EE65348773C45B1D968F31C; };
+		2B5593C39C860F89E32C2749 /* numeric.cpp */ = {isa = PBXBuildFile; fileRef = 31570D5FF5811B6726E46061; };
+		5DE511A4B8870F758DB9A582 /* params.cpp */ = {isa = PBXBuildFile; fileRef = D54583B8F05D0A2875FE11AA; };
+		7D3754AD3F906286852EE680 /* printing.cpp */ = {isa = PBXBuildFile; fileRef = 96B09847B1308EB125672DC2; };
+		C632EC0A195196589DE46E9C /* profile.cpp */ = {isa = PBXBuildFile; fileRef = 34FC33B09373B76FB63801AA; };
+		425C02E57E7881C5EC18F421 /* spectral.cpp */ = {isa = PBXBuildFile; fileRef = 323F07930BF63C7C5F91540E; };
+		3EEE1C8B03BDEC1B93FCC8F7 /* metal_gpu.cpp */ = {isa = PBXBuildFile; fileRef = 5DD87A6D0C73628E145AAEA0; };
+		103EE77262E30B7D745D2E9E /* metal_impl.cpp */ = {isa = PBXBuildFile; fileRef = D153B60031408AE88389D45D; };
+		8940B6B4FF3DECC5FC81D0EB /* blur.cpp */ = {isa = PBXBuildFile; fileRef = D0529F7B7D3936D15E44D542; };
+		B4192276828E91094F2CD86B /* engine.cpp */ = {isa = PBXBuildFile; fileRef = 21B72BAC7FE8B7705AEB18BA; };
+		1C995322912984FA1CDB53AE /* pipeline.cpp */ = {isa = PBXBuildFile; fileRef = 1570483CC842799AAC479D62; };
 		AB6F1305312B9996E2538FF8 /* app-sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -384,9 +444,9 @@
 				CCF471F409B3367D0B43B9EB /* Filmstrip.swift */,
 				C62F760A04289FB4B908B23E /* LeftPanel.swift */,
 				3CCC10816711855EF8A483AB /* RightPanel.swift */,
+				E3B3644C25235A6C28182ECF /* EngineClient.swift */,
 				A394D2865ED231DC4E689EF6 /* Methods.swift */,
 				6625CDBA42276F9AC87D1C3D /* RenderScheduler.swift */,
-				1DACD9BCCC20D4A41E7593C3 /* ServiceClient.swift */,
 				8676E7DDCD7C4091B33A2290 /* Theme.swift */,
 				083D2FD0AFE185C84AA1E5A1 /* BootWindow.swift */,
 				C2DAF32A79E3A15DBEA4D0AF /* BrowseView.swift */,
@@ -394,7 +454,23 @@
 				C6C5D6A4F0698D7B38B79FD1 /* EditorWindow.swift */,
 				FB6BD13DF5D4CFD5676E1B8B /* TopBar.swift */,
 				1CACD6876969ED48F289275B /* TrafficLights.swift */,
-				8D2FAA3202FF7D1008F53E59 /* SpektrafilmApp.swift */
+				8D2FAA3202FF7D1008F53E59 /* SpektrafilmApp.swift */,
+				EE1176168B2529D99B8B3AD1 /* blob.cpp */,
+				B619288CF0BBB4CFD6264E34 /* cam16.cpp */,
+				18D2802403CC58C656E2070C /* colour.cpp */,
+				7BCE162A912930027D1DC3EE /* curves.cpp */,
+				0A3BE94A6DD48B19217D0E50 /* hanatos.cpp */,
+				4A5B0F600DA303ED8ED143F4 /* json.cpp */,
+				2B5593C39C860F89E32C2749 /* numeric.cpp */,
+				5DE511A4B8870F758DB9A582 /* params.cpp */,
+				7D3754AD3F906286852EE680 /* printing.cpp */,
+				C632EC0A195196589DE46E9C /* profile.cpp */,
+				425C02E57E7881C5EC18F421 /* spectral.cpp */,
+				3EEE1C8B03BDEC1B93FCC8F7 /* metal_gpu.cpp */,
+				103EE77262E30B7D745D2E9E /* metal_impl.cpp */,
+				8940B6B4FF3DECC5FC81D0EB /* blur.cpp */,
+				B4192276828E91094F2CD86B /* engine.cpp */,
+				1C995322912984FA1CDB53AE /* pipeline.cpp */
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -420,6 +496,7 @@
 		D8FB2239657FB932937E1A93 /* CanvasViewTests.swift */ = {isa = PBXBuildFile; fileRef = E6A23AED59A7DC706EEF5A37; };
 		95CB53AEDAADDDB235088D80 /* CompareAndFlagsTests.swift */ = {isa = PBXBuildFile; fileRef = 4334CBFCCDA1F207392FFFE1; };
 		03DC6FB630D7A2882C8D54DA /* CurveMathTests.swift */ = {isa = PBXBuildFile; fileRef = 161DD0623DE183C7D1120EED; };
+		CC9D13C8BBF9B86CA5A24450 /* EngineClientTests.swift */ = {isa = PBXBuildFile; fileRef = 05A13E7B8473337DA4F6B8FE; };
 		36A7DE10220CF01502C836A0 /* FrontendPolicyTests.swift */ = {isa = PBXBuildFile; fileRef = 680FB4F2579B6CE01A3E641D; };
 		8F5D59F58B953480EE4A5E9A /* GeometryContractTests.swift */ = {isa = PBXBuildFile; fileRef = B8057DF6F7586C513DC4C6D8; };
 		C6E44BB1B77BC6F7C99AECA4 /* GeometryTests.swift */ = {isa = PBXBuildFile; fileRef = 6B156718E1AE69C25B473A8F; };
@@ -427,7 +504,6 @@
 		D34DD393F97F62DE05BB57E4 /* MaskTests.swift */ = {isa = PBXBuildFile; fileRef = 332D14B32AAD81387A7DD138; };
 		D02819FD7044EC71BA226A8D /* ParamsTests.swift */ = {isa = PBXBuildFile; fileRef = D535AB20AF82118A0962C13F; };
 		BD843F73AD6BED906A1B0660 /* RendererTests.swift */ = {isa = PBXBuildFile; fileRef = 70F2B5843ED40F2BAD7DFEDD; };
-		8A047F3C281F0D95D232F01E /* ServiceIntegrationTests.swift */ = {isa = PBXBuildFile; fileRef = 5D57229935E7AD0FCCC76129; };
 		9DB35A897A64B6FBCCF1E787 /* TIFFHandoffTests.swift */ = {isa = PBXBuildFile; fileRef = 0A69EAE576B15BF34E5745A9; };
 		9A9E4DB1B80C5D6660C7250D /* ViewportStateTests.swift */ = {isa = PBXBuildFile; fileRef = B30E2FCC7C48E3CDEB2823F5; };
 		89C6D3E47E14369371B282B0 /* CompareOverlay.swift */ = {isa = PBXBuildFile; fileRef = 36A126B6EE6C0850AF480C57; };
@@ -473,9 +549,9 @@
 		6016C8BBBCB1A6271F072FF5 /* Filmstrip.swift */ = {isa = PBXBuildFile; fileRef = 5D6616A8AE8BDBF35E1A2120; };
 		668EBFF29E4DC2F2AA0B69B0 /* LeftPanel.swift */ = {isa = PBXBuildFile; fileRef = D47835E8B05FDFA33E235A3E; };
 		14C3A0FE16B3F5E980DC8CB1 /* RightPanel.swift */ = {isa = PBXBuildFile; fileRef = C72C2D38653D03EEAE2393C1; };
+		F5E6C679281876F1A53869FC /* EngineClient.swift */ = {isa = PBXBuildFile; fileRef = BAC307A47D6F76302B897A1E; };
 		511A709B370A0526666BC97B /* Methods.swift */ = {isa = PBXBuildFile; fileRef = CC2B2BC90455A9EA24E3E716; };
 		868D5027B4E75FDD040F4DA9 /* RenderScheduler.swift */ = {isa = PBXBuildFile; fileRef = DE976148AF21CF886D599656; };
-		8F98F268D7F64ED1FA27E6EB /* ServiceClient.swift */ = {isa = PBXBuildFile; fileRef = C4680480FDDCE4FB76DC8BCC; };
 		A6C60B2349A122BF051689F1 /* Theme.swift */ = {isa = PBXBuildFile; fileRef = 99DD52B5777F1B47C013FE24; };
 		329CF6910C3616D355AABEAB /* BootWindow.swift */ = {isa = PBXBuildFile; fileRef = 644C3C5C6B6D920DEE18AEB1; };
 		22AB5BD4E3D96764B438CDF8 /* BrowseView.swift */ = {isa = PBXBuildFile; fileRef = A93A35E01D7C5ADFCD2693CB; };
@@ -483,6 +559,22 @@
 		13CE1087EDEB660481DAAFA6 /* EditorWindow.swift */ = {isa = PBXBuildFile; fileRef = 160FC1AA3C87A980448495BD; };
 		C63DBAB9AC90AB24F4984CC2 /* TopBar.swift */ = {isa = PBXBuildFile; fileRef = 86F51859732FC4916476E8A1; };
 		784EF7FAD35229368916B5FD /* TrafficLights.swift */ = {isa = PBXBuildFile; fileRef = 3FC40DFF1C8B85BA997D1C92; };
+		62CF4553654663609224B9AC /* blob.cpp */ = {isa = PBXBuildFile; fileRef = 4AE77991B35C0D2578668A4D; };
+		733C74F47C864698E5196C16 /* cam16.cpp */ = {isa = PBXBuildFile; fileRef = 5E12AA6268ED8B70960FB611; };
+		6000A0D74BF1A092F9727860 /* colour.cpp */ = {isa = PBXBuildFile; fileRef = 82C68D52B4AC7EEEABAA2E0F; };
+		4D466E327BA6E82CB82F7715 /* curves.cpp */ = {isa = PBXBuildFile; fileRef = 07E8BDBCBED237DE2FC0F943; };
+		02B86B1577F8435A533F25FC /* hanatos.cpp */ = {isa = PBXBuildFile; fileRef = FE41CD0D1F67586717EC7214; };
+		5C6CF34A54531FB09CB9FF36 /* json.cpp */ = {isa = PBXBuildFile; fileRef = 8EE65348773C45B1D968F31C; };
+		839E6B8226A99724C62FB35A /* numeric.cpp */ = {isa = PBXBuildFile; fileRef = 31570D5FF5811B6726E46061; };
+		2F079AF0AE9D0F3D0098ABCD /* params.cpp */ = {isa = PBXBuildFile; fileRef = D54583B8F05D0A2875FE11AA; };
+		20610CD8F3E63F22CDFFDC05 /* printing.cpp */ = {isa = PBXBuildFile; fileRef = 96B09847B1308EB125672DC2; };
+		F317D86BB02452DD7E1F3A77 /* profile.cpp */ = {isa = PBXBuildFile; fileRef = 34FC33B09373B76FB63801AA; };
+		E4BB296020A0E2278DBB50CB /* spectral.cpp */ = {isa = PBXBuildFile; fileRef = 323F07930BF63C7C5F91540E; };
+		89D87924DAC8FD0E2045035E /* metal_gpu.cpp */ = {isa = PBXBuildFile; fileRef = 5DD87A6D0C73628E145AAEA0; };
+		32125192E1182E2BFF2E962C /* metal_impl.cpp */ = {isa = PBXBuildFile; fileRef = D153B60031408AE88389D45D; };
+		7FEA5C5EF94270D82700C020 /* blur.cpp */ = {isa = PBXBuildFile; fileRef = D0529F7B7D3936D15E44D542; };
+		61F6720AEC00B0789AE01162 /* engine.cpp */ = {isa = PBXBuildFile; fileRef = 21B72BAC7FE8B7705AEB18BA; };
+		53F8CCC74674D8A45D24BC97 /* pipeline.cpp */ = {isa = PBXBuildFile; fileRef = 1570483CC842799AAC479D62; };
 		1F4D89CC2FE4F3BC028B2B29 /* test-sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -490,6 +582,7 @@
 				D8FB2239657FB932937E1A93 /* CanvasViewTests.swift */,
 				95CB53AEDAADDDB235088D80 /* CompareAndFlagsTests.swift */,
 				03DC6FB630D7A2882C8D54DA /* CurveMathTests.swift */,
+				CC9D13C8BBF9B86CA5A24450 /* EngineClientTests.swift */,
 				36A7DE10220CF01502C836A0 /* FrontendPolicyTests.swift */,
 				8F5D59F58B953480EE4A5E9A /* GeometryContractTests.swift */,
 				C6E44BB1B77BC6F7C99AECA4 /* GeometryTests.swift */,
@@ -497,7 +590,6 @@
 				D34DD393F97F62DE05BB57E4 /* MaskTests.swift */,
 				D02819FD7044EC71BA226A8D /* ParamsTests.swift */,
 				BD843F73AD6BED906A1B0660 /* RendererTests.swift */,
-				8A047F3C281F0D95D232F01E /* ServiceIntegrationTests.swift */,
 				9DB35A897A64B6FBCCF1E787 /* TIFFHandoffTests.swift */,
 				9A9E4DB1B80C5D6660C7250D /* ViewportStateTests.swift */,
 				89C6D3E47E14369371B282B0 /* CompareOverlay.swift */,
@@ -543,16 +635,32 @@
 				6016C8BBBCB1A6271F072FF5 /* Filmstrip.swift */,
 				668EBFF29E4DC2F2AA0B69B0 /* LeftPanel.swift */,
 				14C3A0FE16B3F5E980DC8CB1 /* RightPanel.swift */,
+				F5E6C679281876F1A53869FC /* EngineClient.swift */,
 				511A709B370A0526666BC97B /* Methods.swift */,
 				868D5027B4E75FDD040F4DA9 /* RenderScheduler.swift */,
-				8F98F268D7F64ED1FA27E6EB /* ServiceClient.swift */,
 				A6C60B2349A122BF051689F1 /* Theme.swift */,
 				329CF6910C3616D355AABEAB /* BootWindow.swift */,
 				22AB5BD4E3D96764B438CDF8 /* BrowseView.swift */,
 				E0F009F6B26E4FF268EF672D /* CollapseTab.swift */,
 				13CE1087EDEB660481DAAFA6 /* EditorWindow.swift */,
 				C63DBAB9AC90AB24F4984CC2 /* TopBar.swift */,
-				784EF7FAD35229368916B5FD /* TrafficLights.swift */
+				784EF7FAD35229368916B5FD /* TrafficLights.swift */,
+				62CF4553654663609224B9AC /* blob.cpp */,
+				733C74F47C864698E5196C16 /* cam16.cpp */,
+				6000A0D74BF1A092F9727860 /* colour.cpp */,
+				4D466E327BA6E82CB82F7715 /* curves.cpp */,
+				02B86B1577F8435A533F25FC /* hanatos.cpp */,
+				5C6CF34A54531FB09CB9FF36 /* json.cpp */,
+				839E6B8226A99724C62FB35A /* numeric.cpp */,
+				2F079AF0AE9D0F3D0098ABCD /* params.cpp */,
+				20610CD8F3E63F22CDFFDC05 /* printing.cpp */,
+				F317D86BB02452DD7E1F3A77 /* profile.cpp */,
+				E4BB296020A0E2278DBB50CB /* spectral.cpp */,
+				89D87924DAC8FD0E2045035E /* metal_gpu.cpp */,
+				32125192E1182E2BFF2E962C /* metal_impl.cpp */,
+				7FEA5C5EF94270D82700C020 /* blur.cpp */,
+				61F6720AEC00B0789AE01162 /* engine.cpp */,
+				53F8CCC74674D8A45D24BC97 /* pipeline.cpp */
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -575,6 +683,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		20A1F637DF0C8F92FA52C1DD /* Check engine resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Check engine resources";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/Tools/check-engine-resources.sh\"\n";
+		};
 		11809352A555BC659DD7F622 = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 98F54143AB4E86B28C3AFEE0;
@@ -593,7 +715,10 @@
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = NO;
 				CODE_SIGN_ENTITLEMENTS = Spektrafilm/Spektrafilm.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -603,19 +728,28 @@
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = c11;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../../engine/include",
+					"$(SRCROOT)/../../engine/src",
+					"$(SRCROOT)/../../engine/src/core",
+					"$(SRCROOT)/../../engine/third_party/metal-cpp",
+				);
 				INFOPLIST_FILE = Spektrafilm/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = "-framework Metal -framework QuartzCore";
 				PRODUCT_BUNDLE_IDENTIFIER = com.hanze.spektrafilm;
 				PRODUCT_NAME = Spektrafilm;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "Spektrafilm/Service/Spektrafilm-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
@@ -628,7 +762,10 @@
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = NO;
 				CODE_SIGN_ENTITLEMENTS = Spektrafilm/Spektrafilm.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -637,18 +774,27 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_PREVIEWS = YES;
+				GCC_C_LANGUAGE_STANDARD = c11;
 				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../../engine/include",
+					"$(SRCROOT)/../../engine/src",
+					"$(SRCROOT)/../../engine/src/core",
+					"$(SRCROOT)/../../engine/third_party/metal-cpp",
+				);
 				INFOPLIST_FILE = Spektrafilm/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = "-framework Metal -framework QuartzCore";
 				PRODUCT_BUNDLE_IDENTIFIER = com.hanze.spektrafilm;
 				PRODUCT_NAME = Spektrafilm;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "Spektrafilm/Service/Spektrafilm-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
@@ -668,6 +814,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 23746EFE221170E24101FE05;
 			buildPhases = (
+				20A1F637DF0C8F92FA52C1DD,
 				AB6F1305312B9996E2538FF8,
 				AA9A663971E63899B42E7E70,
 				C831EECBAB01524E02C71B42
@@ -687,7 +834,10 @@
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = NO;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -695,18 +845,27 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = c11;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../../engine/include",
+					"$(SRCROOT)/../../engine/src",
+					"$(SRCROOT)/../../engine/src/core",
+					"$(SRCROOT)/../../engine/third_party/metal-cpp",
+				);
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = "-framework Metal -framework QuartzCore";
 				PRODUCT_BUNDLE_IDENTIFIER = com.hanze.spektrafilm.tests;
 				PRODUCT_NAME = SpektrafilmTests;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "Spektrafilm/Service/Spektrafilm-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
@@ -719,24 +878,36 @@
 				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = NO;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
+				GCC_C_LANGUAGE_STANDARD = c11;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../../engine/include",
+					"$(SRCROOT)/../../engine/src",
+					"$(SRCROOT)/../../engine/src/core",
+					"$(SRCROOT)/../../engine/third_party/metal-cpp",
+				);
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = "-framework Metal -framework QuartzCore";
 				PRODUCT_BUNDLE_IDENTIFIER = com.hanze.spektrafilm.tests;
 				PRODUCT_NAME = SpektrafilmTests;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "Spektrafilm/Service/Spektrafilm-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
