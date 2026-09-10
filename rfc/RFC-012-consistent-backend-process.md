@@ -298,9 +298,54 @@ Each step is independently valuable and independently abandonable.
    float32 storage epsilon against skimage (max abs 1.2e-7); the edge mode was
    the trap, as expected — skimage's `mode='reflect'` is the numpy-pad name and
    maps to ndimage *mirror*, not scipy reflect.
-3. **Bake the colour-science constants** (§2.2), with the re-derivation test.
-   Removes 148 MB and the last per-render third-party call. Valuable even if
-   this RFC goes no further.
+3. ~~**Bake the colour-science constants**~~ (§2.2) — **substantially done
+   2026-09-10.** `scripts/bake_colour_constants.py` emits
+   `data/baked/colour_constants.npz` (**21.9 KiB** — that is the whole of what
+   148 MB of dependency was supplying at run time), and
+   `model/colour_baked.py` does the matrix work over it.
+
+   §4.1's mitigation is built as specified: `tests/test_rfc012_baked_colour.py`
+   re-derives every table and every transform from colour-science and asserts
+   equality — 108 checks over the reachable colourspaces, illuminants,
+   adaptation transforms, transfer curves and CIECAM02 scalars. colour-science
+   stays a development dependency and the reference, exactly as numba does
+   (RFC-011 §3.3); it stops being loaded to render a photograph.
+
+   **Achieved:** a reprint touches colour-science zero times; importing the
+   service loads neither colour nor pandas.
+   `tests/test_rfc012_no_colour_at_render_time.py` asserts both in a
+   subprocess, so the result does not depend on test ordering.
+
+   **Not yet:** `open` still reaches colour-science at three sites in
+   `utils/gamut_compression.py`, building the CAM16-UCS C_max table
+   (`XYZ_to_CAM16UCS` / `CAM16UCS_to_XYZ`, plus one `RGB_COLOURSPACES`
+   lookup). Those are the full CIECAM16 forward and inverse — a port, not a
+   constant — and `utils/fused_gamut_cam16.py` already has a numba
+   implementation of the same model that is the obvious thing to route to. The
+   acceptance test carries this as an `xfail` naming the three sites, so it
+   turns green on its own when they are done.
+
+   **What did not change:** import time. A back-to-back A/B against HEAD was
+   inconclusive (1.28–2.06 s on both arms; machine noise dominates), so the
+   ~1.9 s warm-up in §1.2 should still be treated as unimproved. The win here
+   is bundle size and the removal of a dependency the native host would
+   otherwise have to reproduce — not speed.
+
+   Four traps, each found by the re-derivation test rather than by reading:
+   - colour's Planck uses CODATA `c1` and **ITS-90** `c2` with a `1/pi`; the
+     exact physical constants differ by 9e-5 relative, which is a different
+     picture against measured profiles.
+   - sRGB's decode breakpoint is `0.0031308 * 12.92 = 0.040449936`, not the
+     rounded `0.04045` the spec prints.
+   - BT.2020's default is the **10-bit** system, sharing BT.709's alpha and
+     beta; the 12-bit constants are a different curve.
+   - the piecewise inverse's breakpoint is the *encoded* value of beta, not
+     `4.5 * beta`.
+
+   The LUT creator and the RAW decode legitimately need colourspaces outside
+   the shipping set (V-Gamut, the cinema log curves). `Colourspace.from_reference`
+   serves those from colour-science and raises where it is absent — a fallback
+   to the reference implementation, never to a guess.
 4. ~~**Split the service in two**~~ — **done 2026-09-10.** `service/engine.py`
    holds `RenderEngine`: typed arguments in, in-memory results out. It has no
    workspace, parses no JSON, and writes no file. `service/service.py` keeps
