@@ -481,6 +481,17 @@ None is on the path from opening a frame to seeing it; each is a subsystem
 rather than a node. `Exporter.swift` still calls them and will surface the
 refusal.
 
+Two behaviours were wrong and are now fixed and pinned by
+`engine/tests/parity_session.py`:
+
+  * `solve(exposure)` metered a 256 px stride sample. `RenderEngine.solve`
+    meters the whole live tier -- the *node* is the one that strides -- and the
+    two differ by 3.4e-3 EV. Now 1e-10.
+  * `spk_render` and `spk_reprint` were identical: `use_reprint` changed only
+    the flag the result reported, so `preview_render(layer: "shoot")` never
+    forced the film side. It looked right because a shoot-layer `set_params`
+    drops the negative before the render is reached.
+
 Also open:
 
 - **Per-node timings are off by default.** Dispatches batch into one command

@@ -551,7 +551,7 @@ bool Pipeline::node_geometry(const Image& in, Image& out, std::string& error) {
                           out.pixels(), error);
 }
 
-bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& error) {
+bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& error, bool stride) {
     const std::string& method = params_.camera.auto_exposure_method;
     if (method != "center_weighted" && method != "average" && method != "median") {
         error = "auto_exposure_method '" + method + "' is not implemented by the native engine "
@@ -564,7 +564,7 @@ bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& err
     // a stride, and the meter only ever wanted a sparse view of the frame
     // (AGENTS.md trap 10).
     const uint32_t n = std::max(in.h, in.w);
-    const uint32_t step = n > 256 ? uint32_t(std::ceil(double(n) / 256.0)) : 1u;
+    const uint32_t step = (stride && n > 256) ? uint32_t(std::ceil(double(n) / 256.0)) : 1u;
     Image small;
     small.h = (in.h + step - 1) / step;
     small.w = (in.w + step - 1) / step;

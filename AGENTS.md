@@ -8,30 +8,40 @@ before touching the pipeline.
 
 ## What this repo is, in one screen
 
-**Two programs and a pipe.** A native macOS app under `modern_UI/`, a Python
-render service under `src/`, newline-delimited JSON-RPC 2.0 between them over
-stdio with images passed as file paths. `ARCHITECTURE.md` §0 is the map; read
-it before reasoning about a symptom, because most confusion in past sessions
-came from debugging one half while the other was what had changed.
+**One binary, plus a reference.** The macOS app under `modern_UI/` has a C++
+render engine (`engine/`) compiled into it and reached through a hand-written
+`extern "C"` surface; it renders into an `MTLTexture` the canvas draws. The
+Python engine under `src/` is a **development dependency that never ships** —
+it is the reference and the oracle for five parity harnesses.
+`ARCHITECTURE.md` §0 is the map and §8 is the engine. RFC-014 §8 is the
+after-the-fact record: what parity measures, why each bar is where it is, and
+the bugs already found.
+
+**There is no CPU fallback and no Python at run time.** If something is slow,
+it is not "falling back" — there is nothing to fall back to. A 45 MP full
+render is 0.87 s; a number near the old numba figures means something else is
+wrong, and three such causes are already recorded (trap 18).
 
 **Two sessions work here concurrently**, split by
 `CONTRACT-frontend-backend.md` §4: frontend owns `modern_UI/**`, backend owns
-`src/**`, `tests/**`, `scripts/**`, `rfc/**`. `AGENTS.md`, `ARCHITECTURE.md`,
+`src/**`, `tests/**`, `scripts/**`, `rfc/**`. **`engine/**` is new and the
+contract predates it** — it is backend-shaped (it is the render engine) but it
+is compiled into the frontend's target, so say which you are touching. `AGENTS.md`, `ARCHITECTURE.md`,
 `API-SPEC-*` and `CONTRACT-*` belong to neither — **say so before editing one**.
 §4.1 also forbids rebasing or force-pushing a branch the other side may have
 read, and `git stash` / `git clean -fdx` / `git checkout -- .` at the repo root.
 
-**The C++ pieces do not do what their name suggests.** There are two, and
-neither is a native render engine — see `ARCHITECTURE.md` §8.5.
-`native/spektrafilm-native-host` works and speaks the wire, but it is a
-*proxy*: it launches `<repo>/.venv/bin/python -m spektrafilm.service` and
-forwards JSON-RPC, so the Python dependency and the bundling problem are
-exactly where they were. `scripts/gpu_native/native_host_spike/` is a 17.5 kB
-verification harness that proved MLX kernels are byte-identical from C++;
-nothing spawns it. **Rendering is Python + Metal in both cases.**
+**`native/` and `scripts/gpu_native/native_host_spike/` are dead.** They were
+the stdio proxy host and its verification spike, from before the engine
+existed. Nothing references either; they should be deleted (RFC-014 §6 step 6).
 
-**The engine that renders is chosen by which checkout the app resolves**, not
-by a setting. See trap 14.
+**Three wire methods are not ported** and the engine refuses them by name:
+`export`, `export_di`, `preview_stock_lut`. Each is a subsystem (file writers,
+the DI package, the `.cube` machinery), none is on the path from opening a
+frame to seeing it. `Exporter.swift` will surface the refusal.
+
+**The engine's data comes from the app bundle**, not from a checkout above it.
+See trap 14.
 
 ---
 
@@ -124,34 +134,70 @@ rather than what a script measures.
 
 ---
 
-## The frontend and the service
+## Building and testing
 
-`modern_UI/Spektrafilm/README.md` is the detailed document; `ARCHITECTURE.md`
-§7 is the summary. What you need to run it:
+### The engine
+
+```bash
+engine/build.sh all          # metallib + static lib + dylib + test drivers + bundle
+engine/build.sh metallib     # just the kernels (after editing a .metal)
+engine/build.sh bundle       # sync resources into the app's Resources/engine
+engine/build.sh dylib        # what the ctypes parity harnesses load
+```
+
+If `engine/resources/` does not exist (it is gitignored — it is 11.8 MB of
+generated copies), bake it first:
+
+```bash
+PYTHONPATH=src .venv/bin/python engine/tools/bake_resources.py
+```
+
+**Run the parity harnesses before believing any engine change.** They take
+under a minute together and each one catches a different class of mistake:
+
+```bash
+PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_setup.py    # constants
+PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_schema.py   # the wire
+PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_render.py   # the picture
+PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_session.py  # every field, live
+PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_grain.py    # distributions
+engine/build/gpu_smoke engine/resources/spektrafilm.metallib                 # the boundary
+engine/tests/check_math_guard.sh                                             # that the guard fires
+```
+
+`parity_render.py --size 180` uses a small synthetic frame and runs in
+seconds; with no `--size` it uses the 1 MP frame RFC-014 §3 prescribes.
+`ARCHITECTURE.md` §8.6 says what each holds and why the bars are where they
+are.
+
+### The app
 
 ```bash
 cd modern_UI/Spektrafilm
-python3 Tools/gen-project.py        # REGENERATE after adding/removing any Swift file
+python3 Tools/gen-project.py        # REGENERATE after adding/removing any source file
 xcodebuild -project Spektrafilm.xcodeproj -scheme Spektrafilm \
     -configuration Debug -derivedDataPath build/DerivedData build
-xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmFrontend \
-    -configuration Debug -derivedDataPath build/DerivedData test   # ~2 s, no render
 xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmTests \
-    -configuration Debug -derivedDataPath build/DerivedData test   # + the real service
+    -configuration Debug -derivedDataPath build/DerivedData test   # 99 tests, ~5 s
 ```
 
 `project.pbxproj` is **generated from the filesystem** by `Tools/gen-project.py`
-(ids are path hashes, so it is byte-stable). A new `.swift` file that is not in
-the project fails the build with `cannot find X in scope`, which reads like a
-missing import. Run the generator first.
+(ids are path hashes, so it is byte-stable). It also lists the engine's C++
+translation units, so **a new `engine/src/**/*.cpp` needs the generator too** —
+without it the file simply is not compiled, and the failure is a link error
+about a missing symbol rather than anything pointing at the file. A new
+`.swift` that is not in the project fails with `cannot find X in scope`, which
+reads like a missing import.
 
-**Two test schemes, and the difference matters.** `SpektrafilmFrontend` skips
-`ServiceIntegrationTests` — the only class that spawns Python and renders. Use
-it while iterating. Run `SpektrafilmTests` whenever you touch
-`Service/Methods.swift`, `Model/Params.swift`'s wire names, or anything under
-`src/spektrafilm/service/`: that skipped class is what guards the wire, and
-`ParamsTests.testWireNamesMatchTheServiceSchema` is what catches a renamed
-field before it becomes a runtime rejection.
+The test target is standalone (no TEST_HOST) and compiles the app's sources
+plus the engine's. `EngineClientTests` covers the C ABI boundary from Swift;
+`ParamsTests.testWireNamesMatchTheServiceSchema` still pins the field names
+against `service/schema.py`, which is what catches a rename before it becomes
+a runtime rejection.
+
+**A stale test binary reports a stale result.** `xcodebuild test` piped
+straight into `grep` can report a failure from the previous build; if a
+failure looks impossible, run it once more before investigating it.
 
 Capturing the interface:
 
@@ -173,17 +219,25 @@ The app's own timing instrument, which you should not delete:
 
 ```
 $ SPEKTRAFILM_CANVAS_LOG=1 …/Spektrafilm --snapshot 1600x900 /tmp/o.png \
-      --open "tests/Test_image/Nikon Z7ii/_DSC2439.NEF" --wait 180 2>&1 >/dev/null \
-  | grep "open path"
-session: open path (ms): decode 96 · preview-texture 230 · linear-tiff 12
-         · service.open 922 · solve 117 · reprint 36 · TOTAL 1415 · core=metal
+      --open "tests/Test_image/A7m3/DSC03710.ARW" --wait 90 2>&1 >/dev/null \
+  | grep -E "open path|detail"
+session: open path (ms): decode 76 · preview-texture 195 · linear-tiff 51
+         · service.open 1613 · solve 30 · reprint 44 · TOTAL 2011
+         · core=native-metal
+session: detail preview 3400x2266 landed in 191 ms
 ```
 
-**`core=metal` is the first thing to check.** If it says anything else, stop —
-nothing else you measure means what you think it means (trap 14). The service
-reports `elapsed_ms` for renders and the status bar shows it, so without this
-line the *only* visible number is the fastest thing in the pipeline, and a slow
-open reads as a slow render. That mistake cost a session.
+**`core=native-metal` is the first thing to check**, and it is now the *only*
+value it can take — if it says anything else the app is not running this
+engine. `service.open` keeps its name for continuity; there is no service, and
+what it measures is Core Image rendering the linear TIFF to a float bitmap plus
+the upload. On a 24 MP RAW that read is most of it.
+
+The `detail … landed` line is the one that says a higher-resolution render
+actually reached the canvas. `scheduleDetail` drops a result whose generation
+changed, so when a full render was slow the line never appeared and the app
+looked like it never showed full resolution — which is what a 13.6 s render
+did before trap 18 was fixed.
 
 Snapshot flags for canvas features a test cannot see: `--zoom`, `--geometry`,
 `--mask`, `--compare`.
@@ -361,36 +415,34 @@ camera LUT can beat spectral reconstruction on those hues — it never builds a
 spectrum. Pinned by `tests/test_spectral_roundtrip_hue.py`; do not raise those
 bounds without looking at colours.
 
-### 14. The engine that renders is whichever checkout the app resolved
+### 14. The engine that renders is whichever *data* the app resolved
 
-There are two checkouts and two venvs, and `spektrafilm` is installed
-**editable** in each. An editable install pins a `.pth` to *one* `src`
-directory — whichever `pip install -e` was run from — and it keeps pointing
-there regardless of the current working directory, the branch, or which
-worktree you are standing in.
+The old form of this trap was about `PYTHONPATH` and editable installs, and it
+is gone with the service: the engine is compiled into the binary, so the *code*
+that renders is now unambiguous. The same failure mode moved one level down, to
+the data.
 
-Consequences, all of which have already happened here:
+`EngineClient.defaultResources()` looks in the **app bundle** first
+(`Resources/engine`), then honours `SPEKTRAFILM_ENGINE_RESOURCES`, then walks
+up to a checkout's `engine/resources`. That last fallback is for a build run
+out of the tree and it is the one that can lie: a build whose resources were
+never synced will happily render from whatever checkout is above it.
 
-- **A third worktree has no venv, so it borrows one, so it runs that venv's
-  source.** A `git worktree add` + `cd` + measure A/B therefore executes the
-  *same* code in both arms. The arms agree, and the agreement reads as "no
-  effect" — which is exactly how a correct result was nearly retracted on
-  2026-09-10. Under `pytest` it is the same: **a worktree test run does not
-  necessarily test that worktree.** Set `PYTHONPATH=<worktree>/src`, and check
-  `spektrafilm.__file__` before believing any A/B.
-- **The app is immune, and only by construction.**
-  `ServiceClient.childEnvironment(repo:)` sets `PYTHONPATH=<repo>/src` from the
-  bundle-resolved repo, and `PYTHONPATH` takes precedence over the `.pth`. That
-  line looks redundant next to an editable install and it is the only thing
-  guaranteeing the app renders with the engine sitting next to the binary you
-  launched. **Do not delete it as a simplification** — contract §5, and
-  `ServiceLaunchEnvironmentTests` fails if two checkouts ever resolve to one
-  engine.
-- **The original version of this bug cost a whole session.** The GPU core lived
-  on a branch the app's checkout did not have, so every render ran on numba and
-  the only symptom was that things felt slow. `Capabilities` did not decode
-  `backend`, so nothing could report it. See `HANDOFF-GPU-WIRING.md` §0 — and
-  check `core=metal` before believing any measurement.
+- `engine/build.sh bundle` is what syncs them. The app target has a pre-build
+  phase (`Tools/check-engine-resources.sh`) that fails the build if they are
+  missing, so the silent case is *stale*, not absent.
+- `EngineResourceOriginTests` asserts the resources resolve inside the bundle.
+  It replaced `ServiceLaunchEnvironmentTests`, which guarded the `PYTHONPATH`
+  version of exactly this.
+- The two-worktree half of the old trap still applies to **Python**: an
+  editable install pins a `.pth` to one `src`, so a worktree A/B under `pytest`
+  can execute the same code in both arms. Set `PYTHONPATH=<worktree>/src` and
+  check `spektrafilm.__file__` before believing any A/B. The parity harnesses
+  take `PYTHONPATH=src:engine/tests` for this reason.
+
+The original version of this bug cost a whole session — the GPU core lived on a
+branch the app's checkout did not have, every render ran on numba, and the only
+symptom was that things felt slow.
 
 ### 15. A refactor that only moves code can still move the wire
 
@@ -446,6 +498,96 @@ the cause was **Civilization VI holding the GPU at 125 % CPU**, load average
   useful.
 
 ---
+
+### 18. A slow render is not a fallback — three causes, all measured
+
+A 45 MP full render taking ~13 s matched the numba number exactly, and read as
+"Metal was never enabled". **There is no CPU path in the engine to fall back
+to.** Three separate causes, and any of them can come back:
+
+1. **The frame arena did not reuse within a render.** Buffers were reclaimed
+   only at the end of a frame, so the footprint became the sum of every
+   intermediate instead of the two or three live at once: ~11 buffers of
+   288 MB at 24 MP, one command buffer making all 3.2 GB resident, **6.4 s
+   instead of 0.4**. Buffers are reference-counted now (`gpu::BufferRef`).
+2. **The setup caches were not ported.** Python has three
+   (`_SETUP_CACHE`, `_OUTPUT_CMAX_CACHE`, `filming_tc_lut_memory`) and the port
+   had none, so every parameter outside `LIVE_MUTABLE` re-derived the
+   46,080-cell C_max table and the 192×192×81 tc_lut: 160–250 ms per slider.
+   `core/setup_cache.hpp`.
+3. **Full-frame copies on the open path.** The alpha strip ran per pixel in
+   Swift at `-Onone`; the source was kept on the host *and* uploaded per tier.
+   5.9 s to open a 24 MP RAW, now 2.0 s.
+
+Before theorising: check `core=native-metal`, then time the tiers
+(`live`/`preview`/`full` separately), then watch peak RSS across *repeated*
+renders — a pool that grows is the tell.
+
+### 19. Free is not idle
+
+When a buffer's last handle drops, no *future* dispatch names it. That says
+nothing about dispatches already encoded into an open command buffer. Handing
+it to the next `alloc` there let a later kernel overwrite a buffer an earlier
+one had not read: **25 of 27 render-parity cases wrong, no crash, no error
+message.**
+
+A freed buffer becomes reusable at `flush`, which is why the pipeline flushes
+at node boundaries — the same place the reference evaluates (trap 5). If you
+find yourself removing those flushes for speed, this is what you are removing.
+
+### 20. The transferred kernels disagree about matrix orientation
+
+`spk_tc_b` and `spk_cam16ucs_compress` want plain row-major M
+(`out[i] = Σ m[3i+j]·x[j]`). `spk_matmul3` and `spk_cctf_encode_matrix` want M
+**transposed**. Both are correct for the Python call site each came from —
+`tc_b_matrix` already returns `RGB_to_XYZ(eye).T`, while `XYZ_to_RGB(eye)` is
+handed through raw.
+
+Getting it wrong shifted the red channel's mean by +0.14 and blue's by −0.08,
+which looks like a grading decision rather than a bug. `pipeline.cpp` has
+`row_major()` and `transposed()` helpers named for exactly this; use them.
+
+### 21. The print balance evaluates its grey in sRGB
+
+`FilmingStage._simple_rgb_to_density_spectral` calls `_rgb_to_film_raw(rgb)`
+with no `color_space`, so it takes that method's **default — `"sRGB"`**, not
+`io.input_color_space`. Every print's exposure is normalised against an sRGB
+grey whatever the frame is encoded in.
+
+That reads like an oversight and may be one, but it is what sets the balance.
+It is reproduced deliberately as `core/printing.hpp::kMidgrayProbeColourSpace`;
+using the input space instead moved every rendered print by 2 counts over 93 %
+of the frame. If you "fix" it, expect the parity suite to go red and think
+hard about which side is wrong.
+
+### 22. Two wire parameters do not mean what the schema says
+
+- **`camera.lens_blur_um` does nothing on the Python engine.**
+  `_build_topology` derives its sigma from `pixel_size_um`, which is `None`
+  until the first render, so the node is pruned unconditionally. Measured:
+  `max |out(0) − out(50 µm)| == 0.0` exactly. The C++ engine computes blur
+  sigmas per run, so the parameter works there — a deliberate divergence, and
+  `parity_render.py` fails if the two ever *agree*.
+- **`dir_couplers_amount` above ≈1.736** (bisected on kodak_portra_400) makes
+  the coupler inverse's own exposure axis non-monotonic, and `np.interp`
+  requires an increasing `xp`. Past that the reference's output is a product of
+  numpy's internal search rather than of the model. **The wire allows up to
+  4.0**, so the schema's range is wider than the maths supports.
+
+### 23. A green parity suite is not a correct picture
+
+Two of the six real bugs in the port were outside every harness's reach,
+because the harnesses hand the engine a numpy array and never go through the
+app's own file reader:
+
+- a **vertical flip** in `readLinearRGB` produced a correctly developed,
+  upside-down photograph with 27 of 27 cases green;
+- the result **texture was arena-owned** and freed before the caller could draw
+  it.
+
+`testTheFrameIsReadTopRowFirst` and `testEachTierRendersAtItsOwnResolution` pin
+both. **Look at a snapshot.** `--snapshot` is cheap and it is the only check
+that sees the thing the user sees.
 
 ## Conventions
 
@@ -584,8 +726,20 @@ the cause was **Civilization VI holding the GPU at 125 % CPU**, load average
   without telling the other session — contract §4 makes them shared, and a
   unilateral edit makes the other side's context wrong.
 - Do not restore `tests/baseline/`. See "Fixed experimental setup".
-- Do not delete `PYTHONPATH` from `ServiceClient.childEnvironment` (trap 14) or
-  `Session.LoadClock` (the open-path instrument).
+- Do not delete `Session.LoadClock` (the open-path instrument) or the
+  `core=native-metal` line it prints.
+- Do not remove the per-node `flush` in the pipeline's `SPK_NODE` macro, or the
+  one between `Blur::mixture` components, as a batching optimisation — trap 19.
+  They are what makes a freed buffer safe to reuse.
+- Do not drop `-fmetal-math-mode=safe` / `-fmetal-math-fp32-functions=precise`
+  from `engine/build.sh`, and do not move the kernels into the Xcode target
+  (which compiles `MTL_FAST_MATH = YES`). `spk_math_probe` will refuse to start
+  the engine, which is the intended outcome, not a bug to work around.
+- Do not "fix" `kMidgrayProbeColourSpace` to use the input colour space without
+  reading trap 21 first.
+- Do not tighten the render-parity bar to float32 epsilon. It is 3e-5 because
+  that is what the *validated* Metal core measures on the same frame; no GPU
+  path over 21 nodes meets epsilon (`ARCHITECTURE.md` §8.6).
 - Do not add GPL-incompatible dependencies. The code is GPL-3.0-or-later; the
   profiles under `data/profiles/` are CC BY-SA 4.0 with separate attribution
   obligations.

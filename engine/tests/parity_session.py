@@ -113,10 +113,46 @@ def main() -> int:
                 print(f"ok   {name:26s} = {value!r:24} {got_layer:5s} "
                       f"{'reused' if cached else 're-rendered'} in {result.elapsed_ms:6.1f} ms")
 
+        # --- the two methods the field walk does not reach ------------------
+        from spektrafilm.utils.autoexposure import measure_autoexposure_ev
+        from spektrafilm.utils.preview import resize_for_preview
+
+        session.set_params({f["name"]: f["default"] for f in fields
+                            if f["name"] not in ("film_stock", "print_stock")})
+
+        # `solve(exposure)` meters the whole live tier, unlike the
+        # auto-exposure *node*, which meters a 256 px stride sample. The two
+        # differ by ~3e-3 EV, so which one `solve` reproduces is a real choice
+        # and this is what pins it.
+        got_ev = session.solve("exposure")["solved_params"]["exposure_compensation_ev"]
+        want_ev = float(measure_autoexposure_ev(
+            resize_for_preview(frame, 1600)[..., :3], "ProPhoto RGB", False,
+            method="center_weighted"))
+        if abs(got_ev - want_ev) > 1e-6:
+            print(f"FAIL solve(exposure): {got_ev:+.8f} EV, reference {want_ev:+.8f} EV")
+            failures += 1
+        elif args.verbose:
+            print(f"ok   solve(exposure)          {got_ev:+.6f} EV, matches the reference")
+
+        # `preview_render` exists to force the film side; without that it is
+        # `reprint` in everything but the flag it reports.
+        session.render("live", reprint=True)
+        _, cached = session.render("live", reprint=True)
+        _, forced = session.render("live", reprint=False)
+        if not cached.negative_was_cached:
+            print("FAIL reprint re-rendered the negative instead of reusing it")
+            failures += 1
+        if forced.negative_was_cached:
+            print("FAIL preview_render reused the cached negative instead of forcing the film side")
+            failures += 1
+        if args.verbose:
+            print("ok   reprint reuses the negative, preview_render forces the film side")
+
         session.close()
 
     if not failures:
         print(f"ok   all {len(fields)} fields applied, rendered, and invalidated the right layer")
+        print("ok   solve and preview_render match the reference")
     print(f"\n{len(fields)} fields, {failures} failed")
     return 1 if failures else 0
 

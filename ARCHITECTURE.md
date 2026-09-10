@@ -13,36 +13,60 @@ native host that does not exist yet.
 
 ## 0. The product, end to end
 
-spektrafilm is two programs and a pipe. Nothing in the repo is a single
-application, and most confusion in past sessions came from reasoning about one
-half while the other was the thing that had changed.
+spektrafilm is **one application with a C++ render engine linked into it**, and
+a Python engine beside it that ships to nobody and is the reference every
+number is measured against. It used to be two programs and a pipe; RFC-014
+deleted the pipe (2026-09-10).
 
 ```
-  ┌─ modern_UI/Spektrafilm ──────────────┐        ┌─ src/spektrafilm ─────────────────┐
-  │  SwiftUI + Metal, macOS app          │        │  Python render service            │
-  │                                      │        │                                   │
-  │  Session (@Observable, @MainActor)   │        │  service/service.py   the wire    │
-  │  Renderer  ── Metal canvas, Layer 2  │        │  service/engine.py    the engine  │
-  │  ServiceClient ──────────────────────┼── () ──┼─▶ runtime/pipeline.py  ~24 nodes  │
-  │                                      │ stdio  │        │                          │
-  │  RAW decode (Core Image)             │        │        ├─ backends/metal  (GPU)   │
-  │  linear TIFF ────────────────────────┼─ file ─┼─▶      ├─ numba          (CPU)    │
-  │  ◀──────────────────── rgba16 dump ──┼─ file ─┼──      └─ reference      (CPU)    │
-  └──────────────────────────────────────┘        └───────────────────────────────────┘
+  ┌─ modern_UI/Spektrafilm ─── one binary, ~20 MB ────────────────────────┐
+  │  SwiftUI + Metal, macOS app                                           │
+  │                                                                       │
+  │  Session (@Observable, @MainActor)                                    │
+  │  Renderer  ── Metal canvas, Layer 2                                   │
+  │  EngineClient ── actor, JSON in / MTLTexture out                      │
+  │        │                                                              │
+  │        │  spk_engine.h, a hand-written extern "C" surface             │
+  │        ▼                                                              │
+  │  ┌─ engine/ ── C++20, compiled into this target ──────────────────┐   │
+  │  │  core/      the setup maths: colour, profiles, curves,         │   │
+  │  │             couplers, CAM16, the Hanatos LUT                   │   │
+  │  │  gpu/       a five-verb interface + its Metal backend          │   │
+  │  │  shaders/   the kernels, MSL, in spektrafilm.metallib          │   │
+  │  │  pipeline/  the 21-node graph, the session, the C ABI          │   │
+  │  └────────────────────────────────────────────────────────────────┘   │
+  │  Resources/engine/  baked constants, 28 film profiles, the metallib   │
+  │  RAW decode (Core Image) ── linear ProPhoto float ──▶ spk_open        │
+  └───────────────────────────────────────────────────────────────────────┘
+
+  ┌─ src/spektrafilm ── development dependency, never shipped ────────────┐
+  │  the reference and the test oracle: numba, colour-science, scipy.     │
+  │  engine/tests/parity_*.py drive the *shipping* binary through ctypes  │
+  │  and compare against it.                                              │
+  └───────────────────────────────────────────────────────────────────────┘
 ```
 
-**The pipe** is newline-delimited JSON-RPC 2.0 over stdio, nine methods, frozen
-by `CONTRACT-frontend-backend.md` §1. Small values travel in JSON; images
-travel as **paths to files**, never inline and never through shared memory.
-The app writes a linear ProPhoto TIFF for `open` and reads back a raw
-`rgba16` dump per render (row-major, row 0 = top, Display-P3 *encoded*
-uint16). At 45 MP that TIFF is 364 MB in each direction, which is the single
-biggest architectural cost in the product and the subject of RFC-012.
+**There is no pipe, and no Python at run time.** The engine takes pixels and
+returns an `MTLTexture` the canvas draws — RFC-014 §2.2's zero copy. What that
+deleted, concretely: a 364 MB TIFF crossing the boundary in each direction on
+every `open`, `_write_rgba16` (10 ms of a 30.6 ms reprint), JSON-RPC framing, a
+workspace directory, a subprocess, and the requirement that a repository
+checkout with a 2.2 GB virtualenv sit next to the `.app`.
 
-**The app spawns the service itself**: it walks up from its own bundle to a
-directory containing `src/spektrafilm`, then runs `<repo>/.venv/bin/python -m
-spektrafilm.service`. There is one long-lived process per launch and the
-transport is single-flight by default.
+**The method surface did not change.** `EngineClient.call(_:_:as:)` takes the
+same `Method` and the same Codable request/response types the stdio client
+took, and the engine reports the same `transport_version` and `schema_version`
+(both 1). Parameters still cross as JSON, because they are small, the schema
+already exists, and a struct-per-parameter boundary breaks every time a slider
+is added. Renders are the one exception and go through
+`EngineClient.render(_:_:)`, because a texture cannot travel through a
+`Decodable`.
+
+**What is still Python.** `src/spektrafilm` is the reference implementation and
+the oracle for five parity harnesses (§8.6). It is a development dependency. It
+is also still the *only* implementation of three wire methods — `export`,
+`export_di`, `preview_stock_lut` — which the engine refuses by name rather than
+answering wrongly (§8.7).
 
 ### Who owns what
 
@@ -63,12 +87,12 @@ when it looks like a refactor — see §8.4.
 
 | topic | file |
 |---|---|
+| **the native engine: what was built, what parity measures, what is left** | `rfc/RFC-014-native-cpp-engine.md` §8 |
 | the wire, ownership, version negotiation | `CONTRACT-frontend-backend.md` |
-| the service's methods and semantics | `API-SPEC-callable-render-service.md` |
+| the method surface and semantics | `API-SPEC-callable-render-service.md` |
 | the frontend in detail | `modern_UI/Spektrafilm/README.md` |
-| the GPU-native render core | `rfc/RFC-011-gpu-native-render-core.md` |
-| why the Python process is still here | `rfc/RFC-012-consistent-backend-process.md` |
-| what the frontend does when the host lands | `HANDOFF-NATIVE-HOST.md` (nothing) |
+| the GPU-native render core (the kernels this port inherited) | `rfc/RFC-011-gpu-native-render-core.md` |
+| why the Python process *was* still here | `rfc/RFC-012-consistent-backend-process.md` |
 
 ---
 
@@ -254,6 +278,12 @@ GPU-native core of §8.
 
 ## 6. Where the time goes
 
+> **These are the *Python reference's* numbers, and they are the reason RFC-014
+> exists — not what the shipped app does.** For the engine that actually
+> renders, see §8.7: 45 MP is 0.87 s at the full tier and 0.13 s at the live
+> one. This section is kept because it is still where the *model's* cost lives,
+> and because the reference is what every parity harness runs against.
+
 Exact path — LUTs off, no grain, no glare — **8.14 s, 6.15 GB**:
 
 | stage | time | % |
@@ -345,8 +375,8 @@ Model/Geometry.swift     the oriented-crop model (crop, straighten, turns, flips
 Model/Sidecar.swift      per-frame settings on disk, schema 3
 Canvas/Renderer.swift    Metal state; the Layer 2 compute pass and the canvas draw
 Canvas/Shaders.metal     layer2 · geometryResample · histogram · canvasFragment
-Service/ServiceClient.swift  spawns and talks to the Python process
-Service/RenderScheduler.swift  sent-vs-wanted coalescing over a single-flight pipe
+Service/EngineClient.swift   the C++ engine, in this process (§8)
+Service/RenderScheduler.swift  sent-vs-wanted coalescing of slider deltas
 Panels/ Windows/ Controls/   the interface
 ```
 
@@ -356,13 +386,14 @@ Panels/ Windows/ Controls/   the interface
 |---|---|---|
 | what | film, paper, camera, enlarger | exposure, contrast, curves, colour balance |
 | where | the **engine** | a **Metal compute kernel in the app** |
-| cost | a service round trip, tens of ms to seconds | one draw, sub-millisecond |
+| cost | an engine call: ~10 ms live, ~170 ms full | one draw, sub-millisecond |
 | panel | left | right |
 
 A Layer 1 edit sends a `params_delta` and waits for pixels. A Layer 2 edit
 never leaves the app. Putting a control on the wrong side is not a cosmetic
 mistake — it is the difference between a slider that tracks the mouse and one
-that does not.
+that does not. The gap is narrower than it was (a live-tier reprint is ~10 ms
+now, not 190) but it is still a gap, and it still runs on a debounce.
 
 `FilmParams.wire` is the single place the Layer 1 field names live, each tagged
 `shoot` or `print`, and `ParamsTests.testWireNamesMatchTheServiceSchema` pins
@@ -390,178 +421,183 @@ renders are cached by *rank* — a `full` render satisfies a request for
 
 ---
 
-## 8. Executors, and the native host that does not exist yet
+## 8. The native engine
 
-### 8.1 Three executors, one topology
+RFC-014, implemented 2026-09-10. Read `rfc/RFC-014-native-cpp-engine.md` §8
+first if you are about to change any of this; it records what parity measures,
+why each bar is where it is, and the bugs already found.
 
-The same `~24`-node graph of §2 runs on three things. Which one is running is
-reported at `open` as `capabilities.backend.render_core`:
+### 8.1 Layout
 
-| `render_core` | what runs the nodes | selected by |
+```
+engine/include/spektrafilm/spk_engine.h   the whole C ABI
+engine/src/core/        setup maths — no GPU, no pixels, testable on its own
+      blob, json, colour, spectral, profile, params, curves, cam16,
+      hanatos, printing, setup_cache
+engine/src/gpu/         gpu.hpp (the interface) + metal_gpu.cpp (metal-cpp)
+engine/src/shaders/     the kernels; built by build.sh, not by Xcode
+engine/src/pipeline/    image, blur, pipeline (21 nodes), engine (the C ABI)
+engine/tools/           bake_resources.py
+engine/tests/           five parity harnesses + two C++ drivers
+engine/build.sh         lib | dylib | metallib | tests | bundle | all
+```
+
+The engine compiles **into the app target** (`Tools/gen-project.py` lists the
+translation units; C++20, metal-cpp on the header path, a hand-written bridging
+header). One target, not two: a separate static-library target would only add a
+second place for the include paths to drift.
+
+### 8.2 The C ABI
+
+Three rules, and they are the ones to keep:
+
+1. **Nothing throws.** Every entry point is `noexcept`; failure is a negative
+   `spk_status` plus `spk_last_error`. A C++ exception unwinding into Swift is
+   undefined behaviour.
+2. **Ownership never crosses** — with exactly one documented exception. The
+   caller owns the device and the input pixels; the engine owns what it
+   allocates. The exception is `spk_result.texture`, returned **+1**, because
+   the frontend caches the last eight frames' textures and a texture whose
+   pixels the engine reused on the next render would silently become a
+   different photograph. Swift takes it with `takeRetainedValue()`; C calls
+   `spk_result_free`.
+3. **Parameters are JSON.**
+
+A C ABI rather than Swift's C++ interop (which Xcode 26.6 supports and which
+works): it is ABI-stable across toolchains, it keeps the boundary narrow, and
+it is callable from `ctypes` — which is what lets the parity harnesses drive
+the **shipping binary** rather than a reimplementation of it.
+
+### 8.3 The GPU layer
+
+Five verbs — alloc/upload, dispatch, flush, read, texture — and nothing above
+`gpu.hpp` names Metal. This is the abstraction the MSL-only decision was taken
+*with*: a Vulkan backend would implement `Gpu` and supply its own SPIR-V for
+the same kernel names.
+
+**Buffer lifetime is the part to understand before changing anything here.**
+Buffers are reference-counted into a pool (`gpu::BufferRef`), and two
+conditions must both hold before one is handed out again:
+
+- **free** — its last handle dropped, so no *future* dispatch names it;
+- **idle** — the command buffer that last named it has completed.
+
+Only the first was true in the first version, and a later kernel overwrote a
+buffer an earlier one had not read: 25 of 27 render-parity cases wrong, no
+crash and no error. A freed buffer waits on a pending list and becomes
+reusable at `flush`. The pipeline therefore flushes at node boundaries, which
+is also where the reference evaluates (`mx.eval`; AGENTS trap 5), and
+`Blur::mixture` flushes between components because a four-component halation
+scatter is where one node holds the most memory at once.
+
+Reclaiming only at the end of a frame instead cost **6.4 s and 3.2 GB at 24 MP
+against 0.4 s** — a number that looks exactly like a CPU fallback and is not
+one.
+
+### 8.4 The kernels
+
+MSL, compiled by `engine/build.sh` into `spektrafilm.metallib` and shipped as
+a resource — **not** compiled by Xcode. The app target sets
+`MTL_FAST_MATH = YES` for its own canvas shader, and letting the engine's
+kernels inherit that is RFC-014 §5.1 trap 1: `exp` and fma contraction drift by
+up to 1.1e-5, past the float32 bar, silently.
+
+Every body transferred verbatim from `backends/metal/*.py`. What was added is
+what MLX supplied for free: `take_rgb`, `affine3`, `mul`, `transpose3`, a max
+reduction, a strided sample for the meter, the rgba16 conversion, the two
+transfer-function kernels, and `spk_math_probe`.
+
+`spk_math_probe` computes `a*b - a*b`, which is exactly `0.0` under fast math
+and the fma error term under safe math. `spk_engine_create` refuses to start if
+it comes back zero, and `engine/tests/check_math_guard.sh` builds a deliberately
+fast-math library to prove the guard can fire.
+
+### 8.5 Caches, and why a slider is fast
+
+Three caches exist on the Python side and all three had to be ported; missing
+them made every non-live slider cost 160–250 ms:
+
+| what | why it is expensive | keyed on |
 |---|---|---|
-| `metal` | `backends/metal/` — hand-written MSL through `mx.fast.metal_kernel` | `settings.gpu_backend = "metal"` (default) |
-| `mlx` | stock MLX ops, partial coverage | RFC-004 path |
-| `cpu` | numba / the reference bodies | no GPU available, or explicitly |
+| the CAM16 C_max table | 64 × 720 cells × 18 bisections ≈ 830,000 CAM16 inversions | output colourspace |
+| the Hanatos tc_lut | a 192×192×81 contraction plus a 192×192 ray-polygon remap | film stock **+ the sensitivity array itself** |
+| the session's negative | the whole film side | invalidated by a shoot-layer edit only |
 
-**numba is the reference and stays forever** (RFC-011). It is what every ported
-node is checked against at float32 storage epsilon by
-`scripts/gpu_native/parity.py`. It stopped being the *runtime* and did not stop
-being the truth.
+`core/setup_cache.hpp` holds the first two on the *engine*, shared by every
+pipeline it builds. The tc_lut's key folds in the sensitivity rather than the
+stock name because that is where the camera's UV/IR cut lands.
 
-### 8.2 The Metal core
+The negative cache is why the layer table in `service/schema.py` is a
+correctness concern rather than metadata: a `print`-layer edit reuses the
+cached negative and a `shoot`-layer edit must not.
 
-`backends/metal/nodes.py` binds **21 node implementations** onto a pipeline,
-baking each node's constants (matrices, curves, LUTs) once from the same stage
-objects the reference bodies read — so the two executors are fed identical
-measured data.
+### 8.6 Parity: what is actually measured
 
-**21 bindings is not 21 nodes on the GPU, and the difference matters if you are
-building a performance model.** The default topology is also 21 nodes, but the
-two sets are not the same 21:
+Python stays the oracle. All five drive the shipping binary.
 
-- `preprocess.geometry` is bound and **pruned at default params** (an identity
-  crop and rotation), so the binding is unused on a default render.
-- `preprocess.crop_rescale` is **in the topology with no Metal body** and falls
-  back to the reference.
+| harness | holds | result |
+|---|---|---|
+| `parity_setup.py` | 227 setup quantities vs colour-science/scipy/numpy | 0 failed, 86 bit-exact |
+| `parity_schema.py` | the wire schema and digested params, 6 stock pairs | identical |
+| `parity_render.py` | the picture, 27 configurations, 1 MP frame, vs numba | 0 failed, max 2.3e-5 |
+| `parity_session.py` | all 39 wire fields applied to a *live* session | 0 failed |
+| `parity_grain.py` | grain's mean/std/skew at 9 densities | 0 failed |
 
-So **20 of the 21 default nodes run on Metal** and `crop_rescale` does not.
-Verify with `comm` on the bound labels against `pipeline._topology`, rather
-than trusting either count on its own. `msl.py` holds the compiled-kernel cache and the MSL fragments
-shared between kernels; `kernels.py` the kernels themselves; `device.py`
-residency and `mx.eval()` barriers; `blur.py`, `cam16.py`, `grain.py`,
-`resize.py` the heavier stages.
+Plus `gpu_smoke` (the boundary) and `check_math_guard.sh` (that the guard
+fires).
 
-Measured: **45 MP, 14.15 s → 1.03 s.** Held to float32 storage epsilon against
-numba.
+The render bar is **measured, not asserted**: 3e-5 absolute, because the
+already-validated Python Metal core reaches 1.9e-5 against the same numba
+reference on the same frame and this engine reaches 2.3e-5. Do not tighten it
+to float32 epsilon — no GPU path over 21 nodes meets that — and do not loosen
+it without saying what you measured. It is paired with a count-level bar so a
+systematic shift cannot hide under the absolute one.
 
-`resize.py` is worth knowing about because it is not a render node at all — it
-is `skimage.transform.resize` with its exact parameters (`sigma = (1/scale −
-1)/2`, `truncate=4.0`, `mode='reflect'`, `order=1`), ported because the tier
-downscale, not the render, was the largest cost in opening a frame. The trap
-there was that skimage's `mode='reflect'` maps to ndimage *mirror*.
+`parity_session.py` exists because the render suite opens a *fresh* session per
+case and so never took the path a user takes: open once, then move sliders.
+That gap hid a bug that broke twelve print-layer fields outright.
 
-### 8.3 The engine / service seam (RFC-012 §5 step 4)
+### 8.7 Speed and size, measured
 
-```
-service/service.py   the wire:   parse a request, call one engine method,
-     (389 lines)                  materialise the result to a path
-service/engine.py    the engine: typed arguments in, in-memory results out.
-     (779 lines)                  Knows nothing about JSON, files or workspaces.
-```
+45 MP, warm, on an M3 Max:
 
-The rule, which is enforced by an AST guard in
-`tests/test_rfc012_engine_seam.py`: **the engine returns pixels, the service
-turns pixels into paths.** It exists so that removing the process later is a
-*deletion* rather than a rewrite — RFC-012's option D links the engine into the
-app, at which point `service.py`'s materialisation and JSON parsing go away and
-nothing else does.
+| tier | first | reprint |
+|---|---|---|
+| live 1600 px | 0.13 s | 0.01 s |
+| preview 3400 px | 0.25 s | 0.04 s |
+| full 7800×5800 | 0.87 s | 0.17 s |
 
-`session.py` holds the per-frame state: the three tier images (downscaled
-lazily, under a per-tier lock — do not make them eager), the cached negative,
-and the param deltas applied in place where the schema allows.
+A non-live slider is 0.2–3.4 ms of `set_params` plus a reprint. Opening a
+24 MP RAW through the app is ~2.0 s, of which ~1.6 s is Core Image rendering
+the linear TIFF to a float bitmap — now the largest single cost on that path.
 
-### 8.4 Version negotiation, and why a refactor can break the wire
+Bundle **20 MB**, of which 11 MB is baked resources (6.0 MB of colour
+constants, of which 5.97 MB is the Hanatos irradiance spectra kept float16 as
+the reference stores them; 5.8 MB of profiles for all 28 stocks). Both are
+data, both are trimmable, neither is code.
 
-`capabilities` reports `transport_version` and `schema_version`, both `1`.
-The frontend **refuses to start** on an unknown `transport_version` and shows a
-blocking panel; a `schema_version` mismatch only warns, because a renamed
-parameter costs some sliders and is not a reason to refuse to show someone
-their photograph. `schema_version` is therefore the cheap one to bump and
-`transport_version` the expensive one.
+### 8.8 What is not ported
 
-Neither field is optional in the Swift `Capabilities` type. This is deliberate:
-a service that cannot say which wire it speaks is one the app cannot reason
-about. A refactor that only moves code still moves the wire if the wire is
-assembled from both halves — this has already happened once, caught before it
-landed.
+The engine refuses these **by name** rather than answering wrongly:
 
-### 8.5 The native host: a transparent proxy, not option C
+- `export` — the render exists, the file writer does not;
+- `export_di` — three files plus the shipped print-preview LUTs;
+- `preview_stock_lut` — needs the `.cube` machinery.
 
-RFC-012 picks **option C** (a native binary speaking the same wire) on the way
-to **option D** (linking the engine in and deleting the process). Steps 1, 3
-and 4 have landed.
+`Exporter.swift` still calls them and will surface the refusal. None is on the
+path from opening a frame to seeing it; each is a subsystem rather than a node.
 
-`native/spektrafilm-native-host` exists and works: it speaks the wire, reports
-`backend.host: "native"`, and the frontend opts into it with
-`SPEKTRAFILM_NATIVE_HOST=<path>`. **Read what it does before counting it as
-option C.** It is a *proxy*: it `exec`s `<repo>/.venv/bin/python -m
-spektrafilm.service` with `PYTHONPATH=<repo>/src` and forwards
-newline-delimited JSON-RPC between the app and that process.
+Also open: `native/` (the stdio proxy host) and `scripts/gpu_native/native_host_spike/`
+are dead and should be deleted; per-node timings are off unless
+`SPEKTRAFILM_NODE_TIMINGS=1` (§8.9); Xcode's Debug configuration compiles the
+engine at `-O0`, which is ~1.7× on the setup maths and nothing on the kernels.
 
-So it does not remove the Python dependency — it still requires the same
-checkout and the same built `.venv` that RFC-012 §2 says is why the app cannot
-be given to anyone. It adds a process in front of the one that was already
-there. Its own `native/README.md` is straight about this ("the transport/process
-half of option C, not the final direct C++ render engine… expected to have
-essentially the same startup and RSS as the Python service, plus a small proxy
-process"), and that is the framing to keep: **it is a seam that proves the wire
-is host-transparent, not progress on shipping.** The distribution problem is
-untouched until the engine itself stops being Python — RFC-012's option D.
+### 8.9 Node timings measure encode time unless you ask
 
-**Decided 2026-09-10: none of this is the destination.** `rfc/RFC-014-native-cpp-engine.md`
-takes RFC-012's option D in C++ and **without MLX** — the `mx.*` calls in
-`backends/metal/` are buffer plumbing and kernel compilation, never arithmetic,
-so `mlx.metallib` (174.8 MB) and `libmlx.dylib` (21.9 MB) are not needed at all.
-One ~15 MB binary, Metal compute, C++ for a Windows/Vulkan future, linked into
-the Swift app over a C ABI sharing one `MTLDevice`. `native/` is retired by it.
+Dispatches batch into one command buffer, so a wall-clock timer around a node
+body measures how long it took to *encode* — 0.003 ms for a full-frame matmul,
+three orders of magnitude below the truth. `progress.node_times` is therefore
+**empty** unless `SPEKTRAFILM_NODE_TIMINGS=1`, which flushes per node and gives
+up the batching for the run. An empty field is honest; a plausible wrong number
+in front of someone bisecting a slow frame is not.
 
-The step-1 gate below is separate, and is what established that option C is
-possible at all. It is a **gate**, not a beginning. Step 1's job was to make it safe to
-commit to the plan by answering one question that options C and D both rest on:
-is `mx.fast.metal_kernel` reachable from MLX's C++ API, and identical there? It
-is. That answer is the entire deliverable; the code that produced it is test
-scaffolding and is not on any path to becoming the host.
-
-```
-scripts/gpu_native/native_host_spike/     7 tracked files, 17.5 kB total
-    dump_cases.py   6.1 kB — monkeypatches msl.kernel/launch, calls the REAL
-                    kernels, records MSL source, buffers, grid and Python's
-                    output bytes. The larger and more important half: it
-                    records what the *shipping* kernels dispatch rather than
-                    reimplementing them, so the two sides cannot drift.
-    host.cpp        5.2 kB — links libmlx.dylib (otool -L shows no Python) and
-                    replays those recordings through mlx::core::fast::metal_kernel
-    compare.py      compares bytes
-    build.sh / run.sh
-```
-
-**Nothing spawns the spike.** It is test scaffolding, and it is a different
-thing from `native/` above. If you have arrived looking for "the C++ backend",
-those two are what the phrase refers to: a verification harness, and a proxy
-that launches Python.
-
-What the spike established, and what it constrains:
-
-- `mx.fast.metal_kernel` is reachable from MLX's C++ API and **byte-identical**
-  across four kernels chosen for where a differently-compiled host would
-  diverge (log10 and its guard, exp, a binary search over a repeated knot, fma
-  contraction in the 3×3).
-- The negative control is the part that makes that meaningful: recompiling the
-  same source under `MathMode::Fast` moves two of them by up to 1.1e-5, so the
-  comparison is known to *detect* compile-level differences. **The host must
-  keep MLX's default `CompileOptions{MathMode::Safe}`** or colour drifts past
-  RFC-011's bar with nothing to say so.
-- When the host lands, the frontend changes **nothing** — same wire, same
-  methods, same handoff. `capabilities.backend` gains an additive
-  `host: "python" | "native"` so a bug report can say which binary made the
-  picture. See `HANDOFF-NATIVE-HOST.md`.
-
-### 8.6 What is still Python-shaped
-
-- **`open` still loads colour-science.** RFC-012 §5 step 3 baked the constants
-  (21.9 KiB replacing ~148 MB of `colour-science` + `pandas`), and a *reprint*
-  now touches colour-science zero times. `open` still reaches it at three call
-  sites in `utils/gamut_compression.py` — `RGB_COLOURSPACES`,
-  `XYZ_to_CAM16UCS`, `CAM16UCS_to_XYZ`, which build the CAM16-UCS `C_max`
-  table. That is a CIECAM16 port, not a constant. Carried as an `xfail` naming
-  the three.
-  **Do not conclude from `grep -c "colour\." gamut_compression.py` (33) that
-  30 more sites need porting** — the rest are alternative Oklab and Jzazbz
-  compressors the default pipeline never executes.
-- **The 364 MB round trip.** On a 45 MP frame the file handoff is now
-  **50–64 % of a render** depending on tier, because RFC-011 made the render
-  fast and left `_write_rgba16` fixed. RFC-012 §1.1 measured 33 % and already
-  called it the strongest argument in the document; the ratio has got worse
-  since.
-- **~1.3 s of interpreter and import** at service start, hidden by a warm-up
-  request the app fires at launch.

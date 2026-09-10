@@ -665,6 +665,15 @@ spk_status render_tier(spk_session* session, const char* tier_name, bool use_rep
     gpu->begin_frame();
     std::string error;
     const bool had_negative = session->tiers[tier->name].has_negative;
+    if (!use_reprint && had_negative) {
+        // `spk_render` is the `preview_render(layer: "shoot")` path: it exists
+        // to force the film side to run. Without this it returned the cached
+        // negative and was identical to `spk_reprint` in everything but the
+        // flag it reported -- which happened to look right, because a
+        // shoot-layer `set_params` drops the negative before this is reached.
+        session->tiers[tier->name].negative = Image{};
+        session->tiers[tier->name].has_negative = false;
+    }
     Image negative, rgb;
     // Before anything runs, and from the tier image rather than from whatever
     // the pipeline last saw: a print-layer rebuild hands us a fresh pipeline
@@ -685,7 +694,7 @@ spk_status render_tier(spk_session* session, const char* tier_name, bool use_rep
     out->elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - started).count();
     out->reprint = use_reprint && had_negative ? 1 : 0;
-    out->negative_was_cached = had_negative ? 1 : 0;
+    out->negative_was_cached = use_reprint && had_negative ? 1 : 0;
     std::snprintf(out->progress_id, sizeof out->progress_id, "%s",
                   session->progress.progress_id.c_str());
     session->progress.done = true;
@@ -807,8 +816,11 @@ spk_status spk_solve(spk_session* session, const char* target, char** out_json) 
         Image live;
         std::string error;
         double ev = 0.0;
+        // `RenderEngine.solve` meters the whole live tier, not the stride
+        // sample the auto-exposure node uses. Same measurement, different
+        // sampling, and they differ by ~3e-3 EV.
         bool ok = tier_image(session, kTiers[0], live, error) &&
-                  session->pipeline->measure_exposure_ev(live, ev, error);
+                  session->pipeline->measure_exposure_ev(live, ev, error, /*stride=*/false);
         gpu->end_frame();
         if (!ok) { g_error = error; return SPK_ERR_GPU; }
         solved.set("exposure_compensation_ev", Json(ev));

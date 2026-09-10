@@ -100,7 +100,12 @@ public:
     // and the user can override it; `preprocess.auto_exposure` applies the
     // same number. One implementation, so the two cannot disagree about what
     // "the exposure" is.
-    bool measure_exposure_ev(const Image& in, double& ev, std::string& error);
+    // `stride` picks which of the reference's *two* samplings to reproduce,
+    // because they differ: `preprocess.auto_exposure` meters a 256 px stride
+    // sample (`small_preview`), while `RenderEngine.solve` meters the whole
+    // live tier. They disagree by ~3e-3 EV, and matching whichever one the
+    // caller stands in for is what keeps parity honest.
+    bool measure_exposure_ev(const Image& in, double& ev, std::string& error, bool stride = true);
 
     // The film's pixel pitch for the frame most recently run through
     // `run_film`, in micrometres. Grain, halation and the DIR-coupler
