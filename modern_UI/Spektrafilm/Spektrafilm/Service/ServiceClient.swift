@@ -53,6 +53,37 @@ actor ServiceClient {
         return URL(fileURLWithPath: NSHomeDirectory()).appending(path: "Documents/Summer 2026/spektrafilm")
     }
 
+    /// The environment the service process is launched with.
+    ///
+    /// Pulled out of `start()` for one reason: `PYTHONPATH` here is
+    /// load-bearing in a way that is invisible at the call site, and a
+    /// property that only exists in a comment is a property that rots. This
+    /// is testable; the comment was not.
+    ///
+    /// **`PYTHONPATH` is not redundant with the editable install.** It looks
+    /// it — `spektrafilm` is installed editable in the venv, so the
+    /// interpreter resolves the package without help. But an editable install
+    /// pins a `.pth` to *one* checkout's `src`, whichever `pip install -e` was
+    /// run from, and it keeps pointing there however many worktrees exist and
+    /// whichever one the app was built from. `PYTHONPATH` takes precedence
+    /// over that `.pth`, and it is what guarantees the engine that renders is
+    /// the engine sitting next to the binary the user launched.
+    ///
+    /// Without it, a build from one worktree renders with another worktree's
+    /// engine, silently, and the only symptom is that the picture is subtly
+    /// not what the code in front of you says it should be. That is
+    /// HANDOFF-GPU-WIRING §0 verbatim — the session that landed a day of work
+    /// against a backend nobody was running. It is also why the app is immune
+    /// to a trap that bare `python` and `pytest` are not: the backend session
+    /// measured a no-op A/B across two worktrees because both arms imported
+    /// the same pinned source (contract §5, 2026-09-10).
+    static func childEnvironment(repo: URL) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONPATH"] = repo.appending(path: "src").path
+        return env
+    }
+
     func start() throws {
         guard state != .running, state != .starting else { return }
         state = .starting
@@ -66,10 +97,7 @@ actor ServiceClient {
         p.executableURL = python
         p.arguments = ["-W", "ignore", "-m", "spektrafilm.service", "--workspace", workspace.path]
         p.currentDirectoryURL = repo
-        var env = ProcessInfo.processInfo.environment
-        env["PYTHONUNBUFFERED"] = "1"
-        env["PYTHONPATH"] = repo.appending(path: "src").path
-        p.environment = env
+        p.environment = ServiceClient.childEnvironment(repo: repo)
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
         p.standardInput = inPipe
         p.standardOutput = outPipe

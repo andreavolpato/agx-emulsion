@@ -190,3 +190,54 @@ final class CapabilityNegotiationTests: XCTestCase {
         }
     }
 }
+
+/// The one invariant that decides *which engine renders*.
+///
+/// The app spawns `<repo>/.venv/bin/python -m spektrafilm.service`, and
+/// `spektrafilm` is installed editable in that venv — so the interpreter would
+/// resolve the package with no help at all, and `PYTHONPATH` reads as dead
+/// weight. It is not. An editable install pins a `.pth` to whichever checkout
+/// `pip install -e` was run from and keeps pointing there regardless of which
+/// worktree the app was built from; `PYTHONPATH` overrides it. Deleting the
+/// line as a simplification would let a build from one checkout render with
+/// another checkout's engine, silently — HANDOFF-GPU-WIRING §0, which cost a
+/// full session.
+///
+/// The backend session hit the same trap from the other side: a two-worktree
+/// A/B that read as "no measurable effect" because both arms imported the same
+/// pinned source. Bare `python` and `pytest` have no protection from this. The
+/// app does, and this is the whole of it.
+@MainActor
+final class ServiceLaunchEnvironmentTests: XCTestCase {
+
+    private let repo = URL(fileURLWithPath: "/tmp/some-worktree")
+
+    func testTheEngineComesFromTheRepoTheAppResolved() {
+        let env = ServiceClient.childEnvironment(repo: repo)
+        XCTAssertEqual(env["PYTHONPATH"], "/tmp/some-worktree/src",
+                       "the service must import the engine next to the binary that launched it")
+    }
+
+    /// A second worktree must get its own engine. If this ever passes with two
+    /// equal values, the override is gone and every build shares one engine.
+    func testTwoCheckoutsGetTwoDifferentEngines() {
+        let a = ServiceClient.childEnvironment(repo: URL(fileURLWithPath: "/tmp/a"))
+        let b = ServiceClient.childEnvironment(repo: URL(fileURLWithPath: "/tmp/b"))
+        XCTAssertNotEqual(a["PYTHONPATH"], b["PYTHONPATH"])
+    }
+
+    /// Unbuffered stdout is not a nicety: the transport is newline-delimited
+    /// JSON-RPC over a pipe, and a buffered child deadlocks the first request.
+    func testTheChildIsUnbuffered() {
+        XCTAssertEqual(ServiceClient.childEnvironment(repo: repo)["PYTHONUNBUFFERED"], "1")
+    }
+
+    /// It inherits the user's environment rather than replacing it — the venv
+    /// needs PATH and HOME, and a Metal device needs the window server's.
+    func testItInheritsRatherThanReplaces() {
+        let env = ServiceClient.childEnvironment(repo: repo)
+        for key in ["PATH", "HOME"] where ProcessInfo.processInfo.environment[key] != nil {
+            XCTAssertEqual(env[key], ProcessInfo.processInfo.environment[key], key)
+        }
+    }
+}
