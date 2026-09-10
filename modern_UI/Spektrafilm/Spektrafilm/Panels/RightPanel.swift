@@ -17,7 +17,9 @@ struct RightPanel: View {
                     ExposureSection(session: session)
                     CurveSection(session: session)
                     ColorBalanceSection(session: session)
-                    MasksSection(session: session)
+                    // Withdrawn while the mask system is redesigned; the
+                    // section itself is intact (`FeatureFlags.masks`).
+                    if FeatureFlags.masks { MasksSection(session: session) }
                 }
                 .padding(.top, 4)
             }

@@ -45,6 +45,8 @@ struct CanvasUniforms {           // must match Renderer.swift
     GeometryUniform geometry;
     uint editingCrop;             // show the whole frame, dim outside the crop
     uint checker;                 // draw a soft focus frame (unused)
+    uint compare;                 // 0 off, 1 split, 2 before-only
+    float compareSplit;           // split position, 0…1 across the *output*
 };
 
 //  Output uv → source uv. A transliteration of
@@ -355,6 +357,7 @@ vertex QuadOut canvasVertex(uint vid [[vertex_id]]) {
 
 fragment float4 canvasFragment(QuadOut in [[stage_in]],
                                texture2d<float> image [[texture(0)]],
+                               texture2d<float> before [[texture(1)]],
                                constant CanvasUniforms &u [[buffer(0)]])
 {
     // Below 100 % the image is minified: linear. At or above 100 % every
@@ -379,7 +382,26 @@ fragment float4 canvasFragment(QuadOut in [[stage_in]],
     if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
         return float4(ground, 1);
     }
-    float3 c = (u.magnification >= 1.0) ? image.sample(near, suv).rgb : image.sample(lin, suv).rgb;
+    //  Before/after. The split is measured across the **output** — the
+    //  picture — not across the viewport, so the line stays on the same part
+    //  of the frame when the view is panned or zoomed. That is Capture One's
+    //  behaviour and it is the one that survives a zoom: a viewport-anchored
+    //  line slides across the subject as soon as you move, which makes the
+    //  comparison meaningless at anything but fit.
+    //
+    //  `before` is the decoded frame — the same texture Space shows — and it
+    //  is sampled through the *same* `suv`, so the crop, the straighten and
+    //  the flips apply to both halves and the two sides line up pixel for
+    //  pixel. Comparing an uncropped before against a cropped after would be
+    //  comparing two different pictures.
+    bool useBefore = (u.compare == 2u) ||
+                     (u.compare == 1u && ouv.x < u.compareSplit);
+    float3 c;
+    if (useBefore) {
+        c = (u.magnification >= 1.0) ? before.sample(near, suv).rgb : before.sample(lin, suv).rgb;
+    } else {
+        c = (u.magnification >= 1.0) ? image.sample(near, suv).rgb : image.sample(lin, suv).rgb;
+    }
     if (u.editingCrop != 0 && u.geometry.active != 0 && !insideCrop(suv, u.geometry)) {
         c = mix(c, ground, 0.6);
     }

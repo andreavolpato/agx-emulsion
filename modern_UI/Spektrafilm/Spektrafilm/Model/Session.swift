@@ -106,6 +106,19 @@ final class Session: CanvasHost {
     /// rather than branched on per pixel, so the shader's loop is only over
     /// masks that can actually do something.
     private func syncMasks() {
+        // `FeatureFlags.masks` is off while the user redesigns the system.
+        // The sidecar still carries whatever masks it had — nothing is
+        // deleted — but none of them reaches a pixel, so a frame saved with
+        // masks looks the same as one saved without while the feature is
+        // withdrawn. That is the difference between hiding a feature and
+        // hiding its effect, and only the second one is honest.
+        guard FeatureFlags.masks else {
+            guard !renderer.masks.isEmpty || renderer.maskOverlay >= 0 else { return }
+            renderer.masks = []
+            renderer.maskOverlay = -1
+            renderer.needsDraw?()
+            return
+        }
         let live = masks.filter { $0.enabled && !$0.isEmpty }.prefix(EditMask.maxCount)
         renderer.masks = live.map { $0.uniform() }
         renderer.maskOverlay = maskOverlayVisible
@@ -119,6 +132,7 @@ final class Session: CanvasHost {
     /// `MaskOverlay` draws them, so the two cannot disagree about where a
     /// grip is.
     var maskHandles: [MaskHandle] {
+        guard FeatureFlags.masks else { return [] }
         guard let m = selectedMask, m.enabled, sourceImageSize.width > 1 else { return [] }
         let size = sourceImageSize
         return m.components.flatMap { c -> [MaskHandle] in
@@ -225,8 +239,34 @@ final class Session: CanvasHost {
             // Entering the crop tool shows the whole frame; leaving it fits
             // the crop. The renderer does both from this one flag.
             renderer.editingCrop = tool == .crop
+            // What Esc goes back to. Taken on the way *in*, so a crop the user
+            // spent a minute on is not lost by leaving the tool with the
+            // mouse and coming back — only Esc discards, and only back to
+            // where this session of the tool started.
+            cropEntryGeometry = tool == .crop ? geometry : nil
             renderer.needsDraw?()
         }
+    }
+    /// The crop as it was when the crop tool was entered. See `cancelCrop`.
+    private var cropEntryGeometry: Geometry?
+
+    /// Return: keep what is on screen and leave the tool.
+    func commitCrop() {
+        guard tool == .crop else { return }
+        cropEntryGeometry = nil
+        tool = .select
+    }
+
+    /// Esc: put the crop back to where the tool was entered and leave.
+    ///
+    /// Not an undo step of its own — `geometry`'s setter already pushes one —
+    /// so ⌘Z after an Esc reaches the edit before the crop, which is what
+    /// "cancel" is supposed to have left behind.
+    func cancelCrop() {
+        guard tool == .crop else { return }
+        if let g = cropEntryGeometry, g != geometry { geometry = g }
+        cropEntryGeometry = nil
+        tool = .select
     }
     /// An observable mirror of the renderer's viewport, so `CropOverlay` can
     /// draw handles in view coordinates. The renderer is not `@Observable`
@@ -248,6 +288,35 @@ final class Session: CanvasHost {
     /// Mirrors `Renderer.showOriginal` so the canvas badge can react: the
     /// renderer is a plain class, not `@Observable`.
     var showingOriginal = false
+
+    // MARK: before / after
+    //
+    // Capture One's split: the decoded frame on the left of a draggable line,
+    // the print on its right, both through the same crop. The shader does the
+    // pixels (`canvasFragment`); `Canvas/CompareOverlay.swift` does the line,
+    // the handle and the two labels, because a one-point line drawn into the
+    // image would be resampled with it.
+    //
+    // These mirror the renderer, which is not `@Observable` — the same
+    // arrangement `viewportSnapshot` uses and for the same reason.
+
+    var comparing = false {
+        didSet {
+            guard oldValue != comparing else { return }
+            renderer.compareSplit = comparing
+        }
+    }
+    /// 0…1 across the output. Stored here so the overlay can bind to it.
+    var comparePosition: Double = 0.5 {
+        didSet {
+            let clamped = comparePosition.clamped(to: 0...1)
+            if clamped != comparePosition { comparePosition = clamped; return }
+            renderer.comparePosition = Float(comparePosition)
+        }
+    }
+    /// There has to be something to compare against: the decode preview, which
+    /// arrives with the frame.
+    var canCompare: Bool { selection != nil && renderer.canCompare }
     var histogram: [Float] = Array(repeating: 0, count: 1024)
     var hoverValue: SIMD3<Float>?      // encoded RGB under the cursor, for the curve readout
     var status = "Open a folder or an image to begin."
@@ -1095,6 +1164,58 @@ final class Session: CanvasHost {
         markStale()
         scheduleSave()
         status = "Pasted settings — each frame keeps its own exposure solve."
+    }
+
+    // MARK: - solve, and looking at the original
+
+    var canSolve: Bool { serviceReady && serviceSessionID != nil && !busy }
+
+    /// Ask the engine to solve this frame: auto-exposure **and** the enlarger
+    /// filter pack for the paper that is selected.
+    ///
+    /// The load path already calls `solve(target: "exposure")`, which is
+    /// read-only — it reports the baseline the Exp. Comp. slider offsets from
+    /// and writes nothing. This is the other half, `target: "both"`, which
+    /// *does* write neutrals onto the session, and it is a button rather than
+    /// something that happens on open for exactly that reason: it changes the
+    /// picture, so the user asks for it.
+    ///
+    /// The Y/M filter shifts are offsets from the solved neutrals, so they go
+    /// back to zero here — leaving a shift on top of a freshly solved pack
+    /// means "solve" would visibly not solve.
+    func solveNow() {
+        guard let sid = serviceSessionID, serviceReady else {
+            status = "The render service is not running."; return
+        }
+        busy = true
+        startClock()
+        status = "Solving…"
+        Task {
+            defer { busy = false }
+            do {
+                _ = try await client.call(.solve, SolveRequest(sessionID: sid, target: "both"),
+                                          as: SolveResponse.self)
+                guard serviceSessionID == sid else { return }
+                var p = params
+                p.yFilterShift = 0
+                p.mFilterShift = 0
+                // The scheduler's `sent` no longer describes the session: the
+                // engine wrote neutrals underneath it. Re-open the generation
+                // so the next request is a full delta rather than one
+                // computed against parameters the engine has moved.
+                params = p
+                scheduler.invalidate()
+                serviceGeneration = scheduler.reset(sessionID: sid, params: p)
+                let rr: RenderResponse = try await client.call(.reprint, RenderRequest(sessionID: sid))
+                guard serviceSessionID == sid else { return }
+                applyRender(rr, generation: serviceGeneration)
+                status = "Solved  ·  reprint \(Int(rr.elapsedMs)) ms"
+                scheduleSave()
+            } catch {
+                lastError = "\(error)"
+                status = "\(error)"
+            }
+        }
     }
 
     /// The Python process can die; `ServiceClient.start()` is idempotent, so a

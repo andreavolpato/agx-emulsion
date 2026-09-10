@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_2" data-name="图层 2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60.8 48.11">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #fff;
+        stroke: #fbf8f3;
+      }
+
+      .cls-1, .cls-2 {
+        stroke-miterlimit: 10;
+        stroke-width: 2px;
+      }
+
+      .cls-3 {
+        fill: #5f5f5f;
+      }
+
+      .cls-2 {
+        fill: none;
+        stroke: #fff;
+      }
+    </style>
+  </defs>
+  <g id="Image">
+    <g id="icon_template">
+      <rect class="cls-2" x="1" y="6.32" width="23.52" height="35.28"/>
+      <rect class="cls-3" x="35.87" y="5.27" width="24.93" height="37.39"/>
+      <line class="cls-1" x1="30.5" x2="30.5" y2="48.11"/>
+    </g>
+  </g>
+</svg>

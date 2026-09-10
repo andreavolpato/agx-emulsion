@@ -37,7 +37,6 @@ struct WhiteBalanceBlock: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(session.wbPickerActive ? Theme.accent : Theme.text)
                         .frame(width: 22, height: 18)
-                        .background(session.wbPickerActive ? Theme.field : .clear, in: RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
                 .help("Pick a neutral point on the image")

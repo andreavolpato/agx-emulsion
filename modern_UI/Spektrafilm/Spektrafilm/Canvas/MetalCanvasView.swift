@@ -29,6 +29,11 @@ protocol CanvasHost: AnyObject {
     /// the rotation is rigid in *pixels*, so the hit tests need it.
     var sourceImageSize: CGSize { get }
     func geometryChanged(_ geometry: Geometry)
+    /// Return: keep the crop and leave the tool. Esc: put the crop back the
+    /// way it was on entering the tool, and leave. Both are no-ops outside
+    /// the crop tool.
+    func commitCrop()
+    func cancelCrop()
     /// The line being drawn for a ⌘-drag straighten, or nil. Published so
     /// `CropOverlay` can draw it; the gesture itself stays in the view.
     func straightenPreview(_ line: StraightenLine?)
@@ -343,8 +348,25 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
         case 6 where !e.modifierFlags.contains(.command):                // z
             renderer.viewport.toggleHundred(about: CGPoint(x: bounds.midX, y: bounds.midY))
             host.viewportChanged(); scheduleDraw()
+        // Return commits the crop, Esc abandons it — every crop tool in every
+        // editor, and the pair of keys a photographer's hands already know.
+        // They are handled here rather than as menu shortcuts because Return
+        // and Esc belong to whatever has focus; as a global ⌘-less menu key
+        // they would fire while a slider value was being typed into.
+        // (`where` binds to its own pattern, so both spellings carry it.)
+        case 36 where host.tool == .crop, 76 where host.tool == .crop:   // ⏎ / ⌤
+            host.commitCrop()
+        case 53 where host.tool == .crop:                                // esc
+            host.cancelCrop()
         default: super.keyDown(with: e)
         }
+    }
+
+    /// Esc reaches a view through `cancelOperation` when the responder chain
+    /// gets to interpret it first (a sheet, a menu, a field). Same action, so
+    /// the key works whichever route it takes.
+    override func cancelOperation(_ sender: Any?) {
+        if host?.tool == .crop { host?.cancelCrop() } else { super.cancelOperation(sender) }
     }
 
     override func keyUp(with e: NSEvent) {

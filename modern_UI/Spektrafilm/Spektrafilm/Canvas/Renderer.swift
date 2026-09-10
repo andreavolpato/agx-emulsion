@@ -28,7 +28,21 @@ struct CanvasUniforms {
     var geometry = Geometry.Uniform()
     var editingCrop: UInt32 = 0
     var checker: UInt32 = 0
+    /// 0 off · 1 split · 2 before-only. See `CompareMode`.
+    var compare: UInt32 = 0
+    /// Where the split sits, 0…1 across the output.
+    var compareSplit: Float = 0.5
 }
+
+/// The before/after comparison, as the canvas understands it.
+///
+/// `split` is the one the toolbar button turns on and the one the reference
+/// shows: a vertical line with the decoded frame on its left and the print on
+/// its right, dragged by a handle. `before` is the whole-canvas version, which
+/// is what Space has always done and what the toggle button in the print panel
+/// does — it is here so that both go through one code path in the shader
+/// rather than two that can disagree about sampling.
+enum CompareMode: UInt32, Sendable { case off = 0, split = 1, before = 2 }
 
 @MainActor
 final class Renderer: NSObject {
@@ -79,6 +93,30 @@ final class Renderer: NSObject {
 
     var viewport = ViewportState()
     var showOriginal = false { didSet { if oldValue != showOriginal { needsDraw?() } } }
+    /// Split-view before/after. Independent of `showOriginal`: holding Space
+    /// while a split is up shows the whole original, and releasing it returns
+    /// to the split, which is what both gestures separately promise.
+    var compareSplit = false { didSet { if oldValue != compareSplit { needsDraw?() } } }
+    /// The split's position, 0…1 across the **output** (the cropped picture),
+    /// so it stays on the same part of the frame under pan and zoom.
+    var comparePosition: Float = 0.5 {
+        didSet {
+            comparePosition = comparePosition.clamped(to: 0...1)
+            if oldValue != comparePosition { needsDraw?() }
+        }
+    }
+    /// Whether a comparison can be shown at all: there has to be something to
+    /// compare against. `original` is nil until the decode preview lands.
+    var canCompare: Bool { original != nil }
+    /// What the shader is told to do, from the three pieces of state above.
+    ///
+    /// Space wins over the split: it is a momentary gesture meaning "show me
+    /// all of the original", and `draw` has already swapped the shown texture
+    /// for the original to serve it — so the comparison is simply off, and the
+    /// split comes back on release because nothing here writes `compareSplit`.
+    var compareMode: CompareMode {
+        (original == nil || showOriginal) ? .off : (compareSplit ? .split : .off)
+    }
     /// Crop, straighten, quarter turns and flips. Applied to what the canvas
     /// draws, not only to what export writes — the two disagreeing is what
     /// made the old crop a lie past the canvas edge.
@@ -365,6 +403,8 @@ final class Renderer: NSObject {
         u.magnification = Float(viewport.scale * backingScale * output / max(spanned, 1))
         u.geometry = geometry.uniform(for: CGSize(width: shown.width, height: shown.height))
         u.editingCrop = editingCrop ? 1 : 0
+        u.compare = compareMode.rawValue
+        u.compareSplit = comparePosition
         return u
     }
 
@@ -416,6 +456,11 @@ final class Renderer: NSObject {
         if let shown {
             enc.setRenderPipelineState(quadPipelineDrawable)
             enc.setFragmentTexture(shown, index: 0)
+            // Always bound, even when nothing is being compared: an unbound
+            // fragment texture is a sampling of undefined memory the moment a
+            // branch is mispredicted into, and "the compare flag is off" is
+            // not a guarantee the GPU makes.
+            enc.setFragmentTexture(original ?? shown, index: 1)
             enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         }
@@ -489,6 +534,7 @@ final class Renderer: NSObject {
         if let shown {
             enc.setRenderPipelineState(quadPipelineOffscreen)
             enc.setFragmentTexture(shown, index: 0)
+            enc.setFragmentTexture(original ?? shown, index: 1)
             enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         }

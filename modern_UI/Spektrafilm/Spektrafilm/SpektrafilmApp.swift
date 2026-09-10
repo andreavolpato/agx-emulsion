@@ -59,6 +59,9 @@ struct EditorCommands: Commands {
             Button("Toggle Filmstrip") { withAnimation { session.filmstripCollapsed.toggle() } }.keyboardShortcut("f", modifiers: [.command, .shift])
             Divider()
             Button("Bypass Adjustments") { var a = session.adjustments; a.enabled.toggle(); session.adjustments = a }.keyboardShortcut("b", modifiers: [.command, .shift])
+            Button(session.comparing ? "Hide Before / After" : "Before / After") { session.comparing.toggle() }
+                .keyboardShortcut("\\", modifiers: [.option])
+                .disabled(!session.canCompare)
             Divider()
             Button("Restart Render Service") { session.restartService() }
                 .keyboardShortcut("r", modifiers: [.command, .option])
@@ -69,22 +72,27 @@ struct EditorCommands: Commands {
             Button("Previous") { session.selectRelative(-1) }.keyboardShortcut("[")
             Button("Next") { session.selectRelative(1) }.keyboardShortcut("]")
         }
-        CommandMenu("Mask") {
-            Button("Add Linear Gradient") { session.addMask(.linearGradient) }
-                .keyboardShortcut("m", modifiers: [.shift])
-            Button("Add Radial Gradient") { session.addMask(.radialGradient) }
-                .keyboardShortcut("m", modifiers: [.shift, .option])
-            Button("Add Luminance Range") { session.addMask(.luminanceRange) }
-            Button("Add Colour Range") { session.addMask(.colorRange) }
-            Divider()
-            Button("Show Mask Overlay") { session.maskOverlayVisible.toggle() }
-                .keyboardShortcut("o", modifiers: [.shift])
-            Button("Invert Mask") {
-                if var m = session.selectedMask { m.inverted.toggle(); session.selectedMask = m }
-            }.disabled(session.selectedMask == nil)
-            Divider()
-            Button("Delete Mask") { if let id = session.selectedMaskID { session.deleteMask(id) } }
-                .disabled(session.selectedMaskID == nil)
+        // Withdrawn with the rest of the mask system (`FeatureFlags.masks`):
+        // a menu is a promise, and this one cannot be kept while the feature
+        // is not on offer.
+        if FeatureFlags.masks {
+            CommandMenu("Mask") {
+                Button("Add Linear Gradient") { session.addMask(.linearGradient) }
+                    .keyboardShortcut("m", modifiers: [.shift])
+                Button("Add Radial Gradient") { session.addMask(.radialGradient) }
+                    .keyboardShortcut("m", modifiers: [.shift, .option])
+                Button("Add Luminance Range") { session.addMask(.luminanceRange) }
+                Button("Add Colour Range") { session.addMask(.colorRange) }
+                Divider()
+                Button("Show Mask Overlay") { session.maskOverlayVisible.toggle() }
+                    .keyboardShortcut("o", modifiers: [.shift])
+                Button("Invert Mask") {
+                    if var m = session.selectedMask { m.inverted.toggle(); session.selectedMask = m }
+                }.disabled(session.selectedMask == nil)
+                Divider()
+                Button("Delete Mask") { if let id = session.selectedMaskID { session.deleteMask(id) } }
+                    .disabled(session.selectedMaskID == nil)
+            }
         }
         CommandMenu("Crop") {
             Button("Rotate Left") { session.geometry = session.geometry.turned(by: -1) }
@@ -122,6 +130,14 @@ struct SnapshotRequest {
     /// visible offscreen: it happens in the `layer2` kernel and
     /// `renderOffscreen` runs it.
     var mask: (kind: MaskComponentKind, exposure: Double, overlay: Bool)?
+    /// `--compare [position]` — put the before/after split up before
+    /// capturing. Like the geometry and the mask, this one *is* visible
+    /// offscreen: the split happens in `canvasFragment` and `renderOffscreen`
+    /// draws through it. Only the shader half is captured — the line, the
+    /// handle and the labels are SwiftUI over the canvas, and `SnapshotCanvas`
+    /// stands in for the Metal view — which is exactly the half that a test
+    /// cannot otherwise see.
+    var compare: Double?
 
     static func parse(_ args: [String]) -> SnapshotRequest? {
         guard let i = args.firstIndex(of: "--snapshot"), args.count > i + 2 else { return nil }
@@ -136,6 +152,9 @@ struct SnapshotRequest {
             if let kind = MaskComponentKind(rawValue: f[0]) {
                 r.mask = (kind, f.count > 1 ? Double(f[1]) ?? -1 : -1, f.count > 2 && f[2] == "overlay")
             }
+        }
+        if let j = args.firstIndex(of: "--compare") {
+            r.compare = args.count > j + 1 ? (Double(args[j + 1]) ?? 0.5) : 0.5
         }
         if let j = args.firstIndex(of: "--geometry"), args.count > j + 1 {
             let f = args[j + 1].split(separator: ",").compactMap { Double($0) }
@@ -243,6 +262,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let g = req.geometry {
             session.geometry = g.fitted(in: session.sourceImageSize)
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        if let position = req.compare {
+            session.comparePosition = position
+            session.comparing = true
             try? await Task.sleep(for: .milliseconds(300))
         }
         if let zoom = req.zoom {

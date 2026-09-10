@@ -96,9 +96,18 @@ struct CanvasArea: View {
             // the dimming; this does the lines, which want to stay crisp.
             if session.tool == .crop && !snapshotMode {
                 CropOverlay(session: session)
-            } else if !snapshotMode && session.selectedMask != nil {
+            } else if FeatureFlags.masks && !snapshotMode && session.selectedMask != nil {
                 MaskOverlay(session: session)
             }
+            // Above both: the split's handle is a control, and it is the only
+            // overlay that takes the mouse.
+            //
+            // Drawn in snapshot mode too, unlike the other two. The shader
+            // puts the split at `ouv.x`, this puts the line at a view point,
+            // and the two arithmetics are written in different files — so a
+            // capture where the line does not sit on the seam is the only
+            // thing that catches them disagreeing.
+            CompareOverlay(session: session)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .leading) { CollapseTab(edge: .leading, collapsed: $session.leftCollapsed) }

@@ -1,5 +1,13 @@
 //  TopBar.swift — tools at the left, zoom at the right, exactly the design's
-//  glyphs: select · hand · crop  ……  zoom-in · [100 %] · zoom-out · fit · fullscreen.
+//  glyphs: select · hand · crop  ……  before/after · zoom-in · [100 %] ·
+//  zoom-out · fit · fullscreen.
+//
+//  **Selection is orange, not grey.** A selected control tints the glyph
+//  itself (`Theme.accent`) instead of putting a darker plate behind it. That
+//  is Capture One's convention and it is the better one here for a specific
+//  reason: this interface is almost entirely greys, so a grey-on-grey plate
+//  reads as a rendering artefact at a glance and has to be looked *for*. The
+//  one accent colour in the palette exists to be found without looking.
 
 import SwiftUI
 
@@ -31,6 +39,22 @@ struct TopBar: View {
                     .foregroundStyle(session.detailPending ? Theme.accent : Theme.dim)
                     .help("The canvas is rendering this frame at \(session.detailTier.rawValue) resolution because the zoom is past the live tier.")
             }
+            // Before/after, immediately left of the zoom controls — the
+            // reference layout's position
+            // (`reference_layout/before_and_after/`). It belongs with zoom
+            // rather than with the tools because it changes how the canvas is
+            // *displayed*, not what a click on it does.
+            Button { session.comparing.toggle() } label: {
+                BeforeAfterIcon(color: session.comparing ? Theme.accent : Theme.text)
+                    .frame(width: 20, height: 16)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!session.canCompare)
+            .opacity(session.canCompare ? 1 : 0.4)
+            .help("Before / after split — drag the line on the canvas (⌥\\)")
+            .padding(.trailing, 6)
             iconButton("plus.magnifyingglass", "Zoom in (⌘+)") { session.zoomStep(1) }
             zoomPill.padding(.horizontal, 12)
             iconButton("minus.magnifyingglass", "Zoom out (⌘−)") { session.zoomStep(-1) }
@@ -55,9 +79,8 @@ struct TopBar: View {
         Button { session.tool = tool } label: {
             Image(systemName: name)
                 .font(.system(size: Theme.Metric.toolIcon, weight: .regular))
-                .foregroundStyle(session.tool == tool ? Theme.text : Theme.text.opacity(0.55))
+                .foregroundStyle(session.tool == tool ? Theme.accent : Theme.text.opacity(0.55))
                 .frame(width: 28, height: 28)
-                .background(session.tool == tool ? Theme.well.opacity(0.7) : .clear, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

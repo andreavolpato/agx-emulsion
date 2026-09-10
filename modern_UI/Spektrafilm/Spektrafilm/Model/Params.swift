@@ -83,6 +83,21 @@ struct FilmParams: Codable, Equatable, Sendable {
     var yFilterShift: Double = 0                     // -1…1  yellow ↔ blue
     var mFilterShift: Double = 0                     // -1…1  magenta ↔ green
     var glareActive: Bool = true
+    /// "No print profile": scan the developed film instead of printing it, so
+    /// a slide film reads as a positive and a negative film reads as the
+    /// negative it is — orange mask and all.
+    ///
+    /// The engine drops the three `printing.*` nodes and runs the scan chain
+    /// from `Tap.CMY_FILM`, under the film's own viewing illuminant. It is a
+    /// print-layer parameter, so switching it costs a reprint (~60 ms) and
+    /// not a re-render.
+    ///
+    /// It is deliberately **not** spelled as `print_stock: "none"`, which is
+    /// what the frontend asked for first: `print_stock` names a paper, and a
+    /// sentinel there would collapse "which paper" and "is there a paper"
+    /// into one field. Keeping them apart is also what lets the user's paper
+    /// choice survive toggling the Positive row on and off.
+    var scanFilm: Bool = false
 
     static let `default` = FilmParams()
 
@@ -100,6 +115,7 @@ struct FilmParams: Codable, Equatable, Sendable {
             ("y_filter_shift", .double(yFilterShift), .print),
             ("m_filter_shift", .double(mFilterShift), .print),
             ("glare_active", .bool(glareActive), .print),
+            ("scan_film", .bool(scanFilm), .print),
         ]
     }
 
