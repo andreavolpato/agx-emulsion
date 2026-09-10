@@ -78,19 +78,6 @@ struct Pipeline::Timer {
     std::chrono::steady_clock::time_point start_;
 };
 
-Pipeline::~Pipeline() {
-    gpu::Buffer* owned[] = {
-        baked_.tc_lut, baked_.film_curve_x, baked_.film_curve_inv, baked_.film_curve_y,
-        baked_.coupler_curve_x, baked_.coupler_curve_inv, baked_.coupler_curve_y,
-        baked_.coupler_matrix, baked_.coupler_dmax, baked_.coupler_shift,
-        baked_.grain_xa, baked_.grain_inv, baked_.grain_ylay, baked_.grain_streams,
-        baked_.print_curve_x, baked_.print_curve_inv, baked_.print_curve_y,
-        baked_.scan_chd, baked_.scan_base, baked_.scan_ixs, baked_.glare_illuminant,
-        baked_.tc_b_matrix, baked_.xyz_to_rgb, baked_.output_matrix,
-        baked_.cam16_m2x, baked_.cam16_m2r, baked_.cam16_cmax, baked_.cam16_k,
-    };
-    for (gpu::Buffer* b : owned) gpu_->release_persistent(b);
-}
 
 uint32_t Pipeline::fresh_seed() {
     // splitmix64, so the stochastic grain sampler gets a fresh realisation per
@@ -104,10 +91,16 @@ uint32_t Pipeline::fresh_seed() {
     return uint32_t(z & 0xFFFFFFFFu);
 }
 
+void Pipeline::set_source_long_edge(uint32_t long_edge) {
+    if (long_edge == 0) return;
+    source_long_edge_ = long_edge;
+    pixel_size_um_ = params_.camera.film_format_mm * 1000.0 / double(long_edge);
+}
+
 bool Pipeline::alloc_like(const Image& img, Image& out, std::string& error) {
     out.h = img.h; out.w = img.w; out.c = img.c;
     out.buf = gpu_->alloc(img.bytes(), error);
-    return out.buf != nullptr;
+    return static_cast<bool>(out.buf);
 }
 
 // ---------------------------------------------------------------------------
@@ -173,15 +166,15 @@ bool Pipeline::build(const Params& params, std::string& error) {
     // --- the spectral upsampling LUT -------------------------------------
     if (!film_sensitivity(*colour_, *blob_, film, params_.camera, film_sensitivity_, error)) return false;
     {
-        Vec lut;
+        const Vec* lut = nullptr;
         size_t side = 0;
-        if (!build_tc_lut(*colour_, *blob_, film, params_.settings,
-                          params_.io.input_gamut_compress, film_sensitivity_, lut, side, error))
+        if (!cache_->tc_lut(*colour_, *blob_, film, params_.settings,
+                            params_.io.input_gamut_compress, film_sensitivity_, lut, side, error))
             return false;
         baked_.tc_lut_side = side;
-        baked_.tc_lut = gpu_->upload_persistent_f32(lut.data(), lut.size(), error);
+        baked_.tc_lut = gpu_->upload_persistent_f32(lut->data(), lut->size(), error);
         if (!baked_.tc_lut) return false;
-        tc_lut_host_ = std::move(lut);
+        tc_lut_host_ = *lut;
     }
     {
         Mat3 m;
@@ -338,7 +331,9 @@ bool Pipeline::build(const Params& params, std::string& error) {
                     "native engine (only cam16ucs and off)";
             return false;
         }
-        if (!cam16_setup_for(*colour_, params_.io.output_color_space, cam16_, error)) return false;
+        const Cam16Setup* cached = nullptr;
+        if (!cache_->cam16(*colour_, params_.io.output_color_space, cached, error)) return false;
+        cam16_ = *cached;
         double m2x[9], m2r[9];
         row_major(cam16_.m_to_xyz, m2x);   // spk_cam16ucs_compress's convention
         row_major(cam16_.m_to_rgb, m2r);
@@ -405,8 +400,8 @@ bool Pipeline::build(const Params& params, std::string& error) {
 // small dispatch helpers
 // ---------------------------------------------------------------------------
 
-bool Pipeline::curve_interp(const Image& x, gpu::Buffer* xa, gpu::Buffer* inv, gpu::Buffer* y,
-                            size_t k, Image& out, std::string& error) {
+bool Pipeline::curve_interp(const Image& x, const gpu::BufferRef& xa, const gpu::BufferRef& inv,
+                            const gpu::BufferRef& y, size_t k, Image& out, std::string& error) {
     if (!alloc_like(x, out, error)) return false;
     const uint32_t meta[2] = {uint32_t(k), uint32_t(x.pixels())};
     return gpu_->dispatch("spk_curves",
@@ -415,7 +410,7 @@ bool Pipeline::curve_interp(const Image& x, gpu::Buffer* xa, gpu::Buffer* inv, g
                           x.pixels(), error);
 }
 
-bool Pipeline::matmul3(const Image& x, gpu::Buffer* m, Image& out, std::string& error) {
+bool Pipeline::matmul3(const Image& x, const gpu::BufferRef& m, Image& out, std::string& error) {
     if (!alloc_like(x, out, error)) return false;
     const uint32_t n[1] = {uint32_t(x.pixels())};
     return gpu_->dispatch("spk_matmul3",
@@ -424,13 +419,13 @@ bool Pipeline::matmul3(const Image& x, gpu::Buffer* m, Image& out, std::string& 
                           x.pixels(), error);
 }
 
-bool Pipeline::spectral(const Image& cmy, gpu::Buffer* chd, gpu::Buffer* base, gpu::Buffer* ixs,
-                        const double gain[3], const double offset[3], bool log_out,
-                        size_t n_lambda, Image& out, std::string& error) {
+bool Pipeline::spectral(const Image& cmy, const gpu::BufferRef& chd, const gpu::BufferRef& base,
+                        const gpu::BufferRef& ixs, const double gain[3], const double offset[3],
+                        bool log_out, size_t n_lambda, Image& out, std::string& error) {
     if (!alloc_like(cmy, out, error)) return false;
     const float ep[6] = {float(gain[0]), float(gain[1]), float(gain[2]),
                          float(offset[0]), float(offset[1]), float(offset[2])};
-    gpu::Buffer* ep_buf = gpu_->upload(ep, sizeof ep, error);
+    gpu::BufferRef ep_buf = gpu_->upload(ep, sizeof ep, error);
     if (!ep_buf) return false;
     const uint32_t meta[3] = {uint32_t(cmy.pixels()), uint32_t(n_lambda), log_out ? 0u : 1u};
     return gpu_->dispatch("spk_spectral_epilogue",
@@ -446,7 +441,7 @@ bool Pipeline::lognormal_field(uint32_t h, uint32_t w, double mean, double std, 
     out.buf = gpu_->alloc(out.bytes(), error);
     if (!out.buf) return false;
     const float p[2] = {float(mean), float(std)};
-    gpu::Buffer* p_buf = gpu_->upload(p, sizeof p, error);
+    gpu::BufferRef p_buf = gpu_->upload(p, sizeof p, error);
     if (!p_buf) return false;
     const uint32_t meta[4] = {uint32_t(out.pixels()), seed, stream0, per_channel ? 1u : 0u};
     return gpu_->dispatch("spk_lognormal_field",
@@ -456,7 +451,7 @@ bool Pipeline::lognormal_field(uint32_t h, uint32_t w, double mean, double std, 
 
 bool Pipeline::device_max(const Image& img, double& out, std::string& error) {
     constexpr size_t groups = 256;
-    gpu::Buffer* partials = gpu_->alloc(groups * sizeof(float), error);
+    gpu::BufferRef partials = gpu_->alloc(groups * sizeof(float), error);
     if (!partials) return false;
     const uint32_t n[1] = {uint32_t(img.elements())};
     if (!gpu_->dispatch("spk_reduce_max",
@@ -466,7 +461,7 @@ bool Pipeline::device_max(const Image& img, double& out, std::string& error) {
     // optional: `boost_highlights` solves for its constants from the frame's
     // own maximum.
     if (!gpu_->flush(error)) return false;
-    const float* p = static_cast<const float*>(gpu_->contents(partials));
+    const float* p = static_cast<const float*>(gpu_->contents(partials.get()));
     float best = p[0];
     for (size_t i = 1; i < groups; ++i) best = std::fmax(best, p[i]);
     out = double(best);
@@ -476,7 +471,7 @@ bool Pipeline::device_max(const Image& img, double& out, std::string& error) {
 bool Pipeline::read_back(const Image& img, std::vector<float>& out, std::string& error) {
     if (!gpu_->flush(error)) return false;
     out.resize(img.elements());
-    std::memcpy(out.data(), gpu_->contents(img.buf), img.bytes());
+    std::memcpy(out.data(), gpu_->contents(img.buf.get()), img.bytes());
     return true;
 }
 
@@ -543,7 +538,7 @@ bool Pipeline::node_geometry(const Image& in, Image& out, std::string& error) {
         consts[2 * i] = float(vals[i]);
         consts[2 * i + 1] = float(vals[i] - double(consts[2 * i]));
     }
-    gpu::Buffer* g_buf = gpu_->upload(consts, sizeof consts, error);
+    gpu::BufferRef g_buf = gpu_->upload(consts, sizeof consts, error);
     if (!g_buf) return false;
     out.h = oh; out.w = ow; out.c = 3;
     out.buf = gpu_->alloc(out.bytes(), error);
@@ -570,7 +565,10 @@ bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& err
     // (AGENTS.md trap 10).
     const uint32_t n = std::max(in.h, in.w);
     const uint32_t step = n > 256 ? uint32_t(std::ceil(double(n) / 256.0)) : 1u;
-    Image small{nullptr, (in.h + step - 1) / step, (in.w + step - 1) / step, 3};
+    Image small;
+    small.h = (in.h + step - 1) / step;
+    small.w = (in.w + step - 1) / step;
+    small.c = 3;
     small.buf = gpu_->alloc(small.bytes(), error);
     if (!small.buf) return false;
     const uint32_t meta[4] = {in.w, small.h, small.w, step};
@@ -645,9 +643,12 @@ bool Pipeline::node_auto_exposure(const Image& in, Image& out, std::string& erro
 bool Pipeline::node_upsample(const Image& in, Image& out, std::string& error) {
     Timer t(this, "filming.expose.upsample");
     // Hanatos 2025: RGB -> (tc, b) -> bicubic tc_lut -> * b.
-    Image tc{nullptr, in.h, in.w, 2};
+    Image tc;
+    tc.h = in.h;
+    tc.w = in.w;
+    tc.c = 2;
     tc.buf = gpu_->alloc(tc.bytes(), error);
-    gpu::Buffer* b = gpu_->alloc(in.pixels() * sizeof(float), error);
+    gpu::BufferRef b = gpu_->alloc(in.pixels() * sizeof(float), error);
     if (!tc.buf || !b) return false;
     const uint32_t n[1] = {uint32_t(in.pixels())};
     if (!gpu_->dispatch("spk_tc_b",
@@ -696,7 +697,7 @@ bool Pipeline::node_boost(const Image& in, Image& out, std::string& error) {
     }
     const double kk = (std::pow(2.0, hal.boost_ev) - 1.0) / denom;
     const float p[4] = {float(raw_x0), float(1.0 / max_raw), float(a), float(kk * max_raw)};
-    gpu::Buffer* p_buf = gpu_->upload(p, sizeof p, error);
+    gpu::BufferRef p_buf = gpu_->upload(p, sizeof p, error);
     if (!p_buf) return false;
     if (!alloc_like(in, out, error)) return false;
     const uint32_t n[1] = {uint32_t(in.elements())};
@@ -823,7 +824,7 @@ bool Pipeline::node_expose_log(const Image& in, Image& out, std::string& error) 
         return false;
     }
     const float k[3] = {float(correction[0]), float(correction[1]), float(correction[2])};
-    gpu::Buffer* k_buf = gpu_->upload(k, sizeof k, error);
+    gpu::BufferRef k_buf = gpu_->upload(k, sizeof k, error);
     if (!k_buf) return false;
     if (!alloc_like(in, out, error)) return false;
     const uint32_t n[1] = {uint32_t(in.elements())};
@@ -934,7 +935,7 @@ bool Pipeline::node_grain(const Image& in, Image& out, std::string& error) {
                 lp[4 * col + 2] = float(n_particles);
                 lp[4 * col + 3] = float(g.uniformity[ch]);
             }
-        gpu::Buffer* lp_buf = gpu_->upload(lp, sizeof lp, error);
+        gpu::BufferRef lp_buf = gpu_->upload(lp, sizeof lp, error);
         if (!lp_buf) return false;
 
         if (!dye_clouds) {
@@ -990,9 +991,9 @@ bool Pipeline::node_grain(const Image& in, Image& out, std::string& error) {
             lp[4 * ch + 2] = float(n_particles[ch]);
             lp[4 * ch + 3] = float(g.uniformity[ch]);
         }
-        gpu::Buffer* lp_buf = gpu_->upload(lp, sizeof lp, error);
+        gpu::BufferRef lp_buf = gpu_->upload(lp, sizeof lp, error);
         const uint32_t streams[3] = {0, 1, 2};
-        gpu::Buffer* streams_buf = gpu_->upload_u32(streams, 3, error);
+        gpu::BufferRef streams_buf = gpu_->upload_u32(streams, 3, error);
         if (!lp_buf || !streams_buf) return false;
         if (!alloc_like(in, grain, error)) return false;
         const uint32_t meta[3] = {uint32_t(in.pixels()), uint32_t(nsub), seed};
@@ -1131,9 +1132,6 @@ bool Pipeline::refresh_print_constants(std::string& error) {
     if (!print_constants(*colour_, *blob_, params_, tc_lut_host_, baked_.tc_lut_side,
                          print_constants_, error)) return false;
 
-    gpu_->release_persistent(print_chd_);
-    gpu_->release_persistent(print_base_);
-    gpu_->release_persistent(print_ixs_);
     const SpectralConstants& sc = print_constants_.spectral;
     print_chd_ = gpu_->upload_persistent_f32(sc.channel_density.data(), sc.channel_density.size(), error);
     print_base_ = gpu_->upload_persistent_f32(sc.base_density.data(), sc.base_density.size(), error);
@@ -1196,9 +1194,9 @@ bool Pipeline::update_bw_references(std::string& error) {
         }
         // The scanner's spectral integral on one pixel, with the constants the
         // build already prepared.
-        const float* chd = static_cast<const float*>(gpu_->contents(baked_.scan_chd));
-        const float* base = static_cast<const float*>(gpu_->contents(baked_.scan_base));
-        const float* ixs = static_cast<const float*>(gpu_->contents(baked_.scan_ixs));
+        const float* chd = static_cast<const float*>(gpu_->contents(baked_.scan_chd.get()));
+        const float* base = static_cast<const float*>(gpu_->contents(baked_.scan_base.get()));
+        const float* ixs = static_cast<const float*>(gpu_->contents(baked_.scan_ixs.get()));
         double acc = 0.0;
         for (size_t l = 0; l < kNumWavelengths; ++l) {
             double d = double(base[l]);
@@ -1222,7 +1220,7 @@ bool Pipeline::node_print_exposure(const Image& in, Image& out, std::string& err
     Timer t(this, "printing.expose.print_exposure");
     const float k[3] = {float(print_exposure_gain_[0]), float(print_exposure_gain_[1]),
                         float(print_exposure_gain_[2])};
-    gpu::Buffer* k_buf = gpu_->upload(k, sizeof k, error);
+    gpu::BufferRef k_buf = gpu_->upload(k, sizeof k, error);
     if (!k_buf) return false;
     if (!alloc_like(in, out, error)) return false;
     const uint32_t n[1] = {uint32_t(in.elements())};
@@ -1264,7 +1262,7 @@ bool Pipeline::node_bw_correction(const Image& in, Image& out, std::string& erro
     double m = 1.0, q = 0.0, midgray_corrected = kMidgray;
     correction_line(m, q, midgray_corrected);
     const float p[2] = {float(m), float(q)};
-    gpu::Buffer* p_buf = gpu_->upload(p, sizeof p, error);
+    gpu::BufferRef p_buf = gpu_->upload(p, sizeof p, error);
     if (!p_buf) return false;
     if (!alloc_like(in, out, error)) return false;
     const uint32_t n[1] = {uint32_t(in.pixels())};
@@ -1356,6 +1354,15 @@ bool Pipeline::node_cctf(const Image& in, Image& out, std::string& error) {
 // the two runs
 // ---------------------------------------------------------------------------
 
+// Fire one node, then evaluate.
+//
+// The flush is not bookkeeping: a buffer freed by the node that just ran only
+// becomes reusable once the work naming it has completed, so without this the
+// next node allocates fresh memory and a full-resolution render's footprint
+// becomes the sum of every intermediate rather than the two or three live at
+// once. Measured at 24 MP: 6.4 s and 3.2 GB batched to the end of the frame,
+// 0.4 s evaluating here. It is also where the reference evaluates
+// (AGENTS.md trap 5, `mx.eval` at node boundaries).
 #define SPK_NODE(call)                                                     \
     do {                                                                   \
         if (progress_ && progress_->cancelled) {                           \
@@ -1363,6 +1370,7 @@ bool Pipeline::node_cctf(const Image& in, Image& out, std::string& error) {
             return false;                                                  \
         }                                                                  \
         if (!(call)) return false;                                         \
+        if (!gpu_->flush(error)) return false;                             \
     } while (0)
 
 bool Pipeline::run_film(const Image& in, Image& out, Progress* progress, std::string& error) {

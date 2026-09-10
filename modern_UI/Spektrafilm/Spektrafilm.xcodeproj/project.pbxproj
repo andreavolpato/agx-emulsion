@@ -276,6 +276,7 @@
 		D54583B8F05D0A2875FE11AA /* params.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "params.cpp"; path = "../../engine/src/core/params.cpp"; sourceTree = SOURCE_ROOT; };
 		96B09847B1308EB125672DC2 /* printing.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "printing.cpp"; path = "../../engine/src/core/printing.cpp"; sourceTree = SOURCE_ROOT; };
 		34FC33B09373B76FB63801AA /* profile.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "profile.cpp"; path = "../../engine/src/core/profile.cpp"; sourceTree = SOURCE_ROOT; };
+		CCB6D1377A4D858EF1B005F3 /* setup_cache.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "setup_cache.cpp"; path = "../../engine/src/core/setup_cache.cpp"; sourceTree = SOURCE_ROOT; };
 		323F07930BF63C7C5F91540E /* spectral.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "spectral.cpp"; path = "../../engine/src/core/spectral.cpp"; sourceTree = SOURCE_ROOT; };
 		5DD87A6D0C73628E145AAEA0 /* metal_gpu.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "metal_gpu.cpp"; path = "../../engine/src/gpu/metal_gpu.cpp"; sourceTree = SOURCE_ROOT; };
 		D153B60031408AE88389D45D /* metal_impl.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = "metal_impl.cpp"; path = "../../engine/src/gpu/metal_impl.cpp"; sourceTree = SOURCE_ROOT; };
@@ -295,6 +296,7 @@
 				D54583B8F05D0A2875FE11AA /* params.cpp */,
 				96B09847B1308EB125672DC2 /* printing.cpp */,
 				34FC33B09373B76FB63801AA /* profile.cpp */,
+				CCB6D1377A4D858EF1B005F3 /* setup_cache.cpp */,
 				323F07930BF63C7C5F91540E /* spectral.cpp */,
 				5DD87A6D0C73628E145AAEA0 /* metal_gpu.cpp */,
 				D153B60031408AE88389D45D /* metal_impl.cpp */,
@@ -391,6 +393,7 @@
 		5DE511A4B8870F758DB9A582 /* params.cpp */ = {isa = PBXBuildFile; fileRef = D54583B8F05D0A2875FE11AA; };
 		7D3754AD3F906286852EE680 /* printing.cpp */ = {isa = PBXBuildFile; fileRef = 96B09847B1308EB125672DC2; };
 		C632EC0A195196589DE46E9C /* profile.cpp */ = {isa = PBXBuildFile; fileRef = 34FC33B09373B76FB63801AA; };
+		3BB7C7FC9D160C01359654A8 /* setup_cache.cpp */ = {isa = PBXBuildFile; fileRef = CCB6D1377A4D858EF1B005F3; };
 		425C02E57E7881C5EC18F421 /* spectral.cpp */ = {isa = PBXBuildFile; fileRef = 323F07930BF63C7C5F91540E; };
 		3EEE1C8B03BDEC1B93FCC8F7 /* metal_gpu.cpp */ = {isa = PBXBuildFile; fileRef = 5DD87A6D0C73628E145AAEA0; };
 		103EE77262E30B7D745D2E9E /* metal_impl.cpp */ = {isa = PBXBuildFile; fileRef = D153B60031408AE88389D45D; };
@@ -465,6 +468,7 @@
 				5DE511A4B8870F758DB9A582 /* params.cpp */,
 				7D3754AD3F906286852EE680 /* printing.cpp */,
 				C632EC0A195196589DE46E9C /* profile.cpp */,
+				3BB7C7FC9D160C01359654A8 /* setup_cache.cpp */,
 				425C02E57E7881C5EC18F421 /* spectral.cpp */,
 				3EEE1C8B03BDEC1B93FCC8F7 /* metal_gpu.cpp */,
 				103EE77262E30B7D745D2E9E /* metal_impl.cpp */,
@@ -569,6 +573,7 @@
 		2F079AF0AE9D0F3D0098ABCD /* params.cpp */ = {isa = PBXBuildFile; fileRef = D54583B8F05D0A2875FE11AA; };
 		20610CD8F3E63F22CDFFDC05 /* printing.cpp */ = {isa = PBXBuildFile; fileRef = 96B09847B1308EB125672DC2; };
 		F317D86BB02452DD7E1F3A77 /* profile.cpp */ = {isa = PBXBuildFile; fileRef = 34FC33B09373B76FB63801AA; };
+		4D6448CC356589E43823A388 /* setup_cache.cpp */ = {isa = PBXBuildFile; fileRef = CCB6D1377A4D858EF1B005F3; };
 		E4BB296020A0E2278DBB50CB /* spectral.cpp */ = {isa = PBXBuildFile; fileRef = 323F07930BF63C7C5F91540E; };
 		89D87924DAC8FD0E2045035E /* metal_gpu.cpp */ = {isa = PBXBuildFile; fileRef = 5DD87A6D0C73628E145AAEA0; };
 		32125192E1182E2BFF2E962C /* metal_impl.cpp */ = {isa = PBXBuildFile; fileRef = D153B60031408AE88389D45D; };
@@ -655,6 +660,7 @@
 				2F079AF0AE9D0F3D0098ABCD /* params.cpp */,
 				20610CD8F3E63F22CDFFDC05 /* printing.cpp */,
 				F317D86BB02452DD7E1F3A77 /* profile.cpp */,
+				4D6448CC356589E43823A388 /* setup_cache.cpp */,
 				E4BB296020A0E2278DBB50CB /* spectral.cpp */,
 				89D87924DAC8FD0E2045035E /* metal_gpu.cpp */,
 				32125192E1182E2BFF2E962C /* metal_impl.cpp */,

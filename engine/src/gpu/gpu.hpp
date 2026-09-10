@@ -24,11 +24,19 @@
 // and not the round trip. The pipeline calls `flush` only where it must: a
 // host read, a reduction it needs the value of, or the end of a render.
 //
-// **Buffers come from a frame arena.** Every allocation inside a render is
-// released together at the end of it. A pool is kept and reused across renders
-// (RFC-011 measured the alternative: with the cache limit at zero, each 540 MB
-// buffer comes from the OS with page faults and a trivial pointwise node costs
-// 16 ms instead of 4 at 45 MP).
+// **Buffers are reference-counted, into a pool.** `alloc` hands back a
+// `BufferRef`; when the last handle to it goes out of scope the buffer returns
+// to the pool and the *next* `alloc` of a compatible size reuses it.
+//
+// The first version of this reclaimed only at the end of a frame, and that was
+// wrong in a way that only showed at full resolution. A render's peak
+// footprint became the sum of every intermediate rather than the two or three
+// that are live at once: 24 MP held ~11 buffers of 288 MB, one command buffer
+// referenced all 3.2 GB simultaneously, and the render took **6.4 s instead of
+// 0.8** -- a number that looks exactly like a CPU fallback and is not one. The
+// pool itself is still kept across renders, because the alternative is a page
+// fault per buffer (RFC-011: a trivial pointwise node then costs 16 ms instead
+// of 4 at 45 MP).
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -42,6 +50,36 @@ namespace spk::gpu {
 // no copy.
 struct Buffer;
 
+class Gpu;
+
+// A counted handle on a pooled buffer. Copy it and the buffer stays; drop the
+// last one and it goes back to the pool, ready for the next node.
+//
+// This is what makes a linear node chain (`cur = next`) return each stage's
+// memory as soon as the stage after it has run, without any node having to
+// know which of its inputs is dead.
+class BufferRef {
+public:
+    BufferRef() = default;
+    BufferRef(Gpu* gpu, Buffer* buffer) : gpu_(gpu), buffer_(buffer) {}
+    BufferRef(const BufferRef& other);
+    BufferRef(BufferRef&& other) noexcept : gpu_(other.gpu_), buffer_(other.buffer_) {
+        other.gpu_ = nullptr;
+        other.buffer_ = nullptr;
+    }
+    BufferRef& operator=(const BufferRef& other);
+    BufferRef& operator=(BufferRef&& other) noexcept;
+    ~BufferRef();
+
+    Buffer* get() const { return buffer_; }
+    explicit operator bool() const { return buffer_ != nullptr; }
+    void reset();
+
+private:
+    Gpu* gpu_ = nullptr;
+    Buffer* buffer_ = nullptr;
+};
+
 // One dispatch's arguments, in buffer-index order. A small constant may be
 // passed inline (`bytes`) instead of allocated; the backend decides how.
 struct Arg {
@@ -50,6 +88,7 @@ struct Arg {
     size_t size = 0;
 
     static Arg buf(Buffer* b) { return Arg{b, nullptr, 0}; }
+    static Arg buf(const BufferRef& b) { return Arg{b.get(), nullptr, 0}; }
     template <typename T>
     static Arg inline_bytes(const T* p, size_t count) { return Arg{nullptr, p, count * sizeof(T)}; }
 };
@@ -77,25 +116,33 @@ public:
     virtual void begin_frame() = 0;
     virtual void end_frame() = 0;
 
-    virtual Buffer* alloc(size_t bytes, std::string& error) = 0;
-    virtual Buffer* alloc_zeroed(size_t bytes, std::string& error) = 0;
-    virtual Buffer* upload(const void* data, size_t bytes, std::string& error) = 0;
+    // Counted. The buffer returns to the pool when the last handle drops.
+    virtual BufferRef alloc(size_t bytes, std::string& error) = 0;
+    virtual BufferRef alloc_zeroed(size_t bytes, std::string& error) = 0;
+    virtual BufferRef upload(const void* data, size_t bytes, std::string& error) = 0;
+
+    // Used only by `BufferRef`.
+    virtual void retain(Buffer* buffer) = 0;
+    virtual void release(Buffer* buffer) = 0;
     // float64 host data narrowed to float32 on the way in -- every constant
     // the setup maths produces arrives this way, and doing the narrowing here
     // means no caller keeps a float32 shadow copy.
-    virtual Buffer* upload_f32(const double* data, size_t count, std::string& error) = 0;
-    virtual Buffer* upload_u32(const uint32_t* data, size_t count, std::string& error) = 0;
+    virtual BufferRef upload_f32(const double* data, size_t count, std::string& error) = 0;
+    virtual BufferRef upload_u32(const uint32_t* data, size_t count, std::string& error) = 0;
 
-    // The second lifetime: the baked constants. A tc_lut, a C_max table and a
-    // set of density curves are built once per stock pair and read by every
-    // render, so they cannot live in the frame arena -- and they are not
-    // cheap to rebuild (the tc_lut is a 192x192x81 contraction). These are
-    // freed only by `release_persistent` or by the destructor.
-    virtual Buffer* alloc_persistent(size_t bytes, std::string& error) = 0;
-    virtual Buffer* upload_persistent(const void* data, size_t bytes, std::string& error) = 0;
-    virtual Buffer* upload_persistent_f32(const double* data, size_t count, std::string& error) = 0;
-    virtual Buffer* upload_persistent_u32(const uint32_t* data, size_t count, std::string& error) = 0;
-    virtual void release_persistent(Buffer* b) = 0;
+    // The baked constants, and the results that outlive a render. Same
+    // counted handle, different reclamation: a pooled buffer goes back to the
+    // pool at zero references and one of these is *destroyed*, because its
+    // size (a 192x192x3 LUT, a 64x720 table, a tier's rgba16) is not one a
+    // later node would want.
+    //
+    // One lifetime model rather than two. The first version had
+    // `release_persistent` alongside the pool and it was the seam every
+    // ownership bug landed on.
+    virtual BufferRef alloc_persistent(size_t bytes, std::string& error) = 0;
+    virtual BufferRef upload_persistent(const void* data, size_t bytes, std::string& error) = 0;
+    virtual BufferRef upload_persistent_f32(const double* data, size_t count, std::string& error) = 0;
+    virtual BufferRef upload_persistent_u32(const uint32_t* data, size_t count, std::string& error) = 0;
 
     virtual void* contents(Buffer* b) = 0;
     virtual size_t size_bytes(Buffer* b) const = 0;
@@ -122,5 +169,38 @@ public:
     // The row alignment `texture` requires, in pixels of RGBA16.
     virtual uint32_t texture_row_alignment_px() const = 0;
 };
+
+// --- BufferRef, once Gpu is complete ---------------------------------------
+
+inline BufferRef::BufferRef(const BufferRef& other) : gpu_(other.gpu_), buffer_(other.buffer_) {
+    if (gpu_ && buffer_) gpu_->retain(buffer_);
+}
+
+inline BufferRef& BufferRef::operator=(const BufferRef& other) {
+    if (this == &other) return *this;
+    if (other.gpu_ && other.buffer_) other.gpu_->retain(other.buffer_);
+    reset();
+    gpu_ = other.gpu_;
+    buffer_ = other.buffer_;
+    return *this;
+}
+
+inline BufferRef& BufferRef::operator=(BufferRef&& other) noexcept {
+    if (this == &other) return *this;
+    reset();
+    gpu_ = other.gpu_;
+    buffer_ = other.buffer_;
+    other.gpu_ = nullptr;
+    other.buffer_ = nullptr;
+    return *this;
+}
+
+inline BufferRef::~BufferRef() { reset(); }
+
+inline void BufferRef::reset() {
+    if (gpu_ && buffer_) gpu_->release(buffer_);
+    gpu_ = nullptr;
+    buffer_ = nullptr;
+}
 
 }  // namespace spk::gpu

@@ -24,7 +24,7 @@ void broadcast3(const double* src, double dst[3], double fallback) {
 bool Blur::alloc_like(const Image& img, Image& out, std::string& error) {
     out.h = img.h; out.w = img.w; out.c = img.c;
     out.buf = gpu_->alloc(img.bytes(), error);
-    return out.buf != nullptr;
+    return static_cast<bool>(out.buf);
 }
 
 bool Blur::fir(const Image& img, const double sigmas[3], double truncate, const bool active[3],
@@ -46,13 +46,13 @@ bool Blur::fir(const Image& img, const double sigmas[3], double truncate, const 
         for (size_t i = 0; i < kernels[c].size(); ++i)
             table[size_t(c) * (2 * R + 1) + (R - r + i)] = float(kernels[c][i]);
     }
-    gpu::Buffer* w = gpu_->upload(table.data(), table.size() * sizeof(float), error);
+    gpu::BufferRef w = gpu_->upload(table.data(), table.size() * sizeof(float), error);
     if (!w) return false;
 
     double wt[3];
     broadcast3(weight, wt, 1.0);
     const float wtf[3] = {float(wt[0]), float(wt[1]), float(wt[2])};
-    gpu::Buffer* wt_buf = gpu_->upload(wtf, sizeof wtf, error);
+    gpu::BufferRef wt_buf = gpu_->upload(wtf, sizeof wtf, error);
     if (!wt_buf) return false;
 
     // The reference runs vertical then horizontal, and the fused multiply-add
@@ -60,7 +60,7 @@ bool Blur::fir(const Image& img, const double sigmas[3], double truncate, const 
     Image tmp;
     if (!alloc_like(img, tmp, error)) return false;
     if (!alloc_like(img, out, error)) return false;
-    gpu::Buffer* dummy = acc ? acc->buf : img.buf;
+    const gpu::BufferRef& dummy = acc ? acc->buf : img.buf;
     const uint32_t meta_v[6] = {img.h, img.w, uint32_t(R), 0, 0, 0};
     const uint32_t meta_h[6] = {img.h, img.w, uint32_t(R), 1, acc ? 1u : 0u, 0};
     const size_t n = img.pixels();
@@ -93,14 +93,14 @@ bool Blur::iir(const Image& img, const double sigmas[3], const bool active[3],
     }
     if (!any && !acc) { out = img; return true; }
 
-    gpu::Buffer* coef_buf = gpu_->upload(coef, sizeof coef, error);
-    gpu::Buffer* act_buf = gpu_->upload_u32(act, 3, error);
+    gpu::BufferRef coef_buf = gpu_->upload(coef, sizeof coef, error);
+    gpu::BufferRef act_buf = gpu_->upload_u32(act, 3, error);
     if (!coef_buf || !act_buf) return false;
     double wt[3];
     broadcast3(weight, wt, 1.0);
     const float wtf[3] = {float(wt[0]), float(wt[1]), float(wt[2])};
-    gpu::Buffer* wt_buf = gpu_->upload(wtf, sizeof wtf, error);
-    gpu::Buffer* one = nullptr;
+    gpu::BufferRef wt_buf = gpu_->upload(wtf, sizeof wtf, error);
+    gpu::BufferRef one;
     {
         const float ones[3] = {1.0f, 1.0f, 1.0f};
         one = gpu_->upload(ones, sizeof ones, error);
@@ -109,9 +109,9 @@ bool Blur::iir(const Image& img, const double sigmas[3], const bool active[3],
 
     // The horizontal pass is the vertical kernel applied to a transposed copy,
     // so every recurrence thread marches down contiguous memory.
-    Image t{nullptr, img.w, img.h, 3};
+    Image t; t.h = img.w; t.w = img.h; t.c = 3;
     t.buf = gpu_->alloc(img.bytes(), error);
-    Image t2{nullptr, img.w, img.h, 3};
+    Image t2; t2.h = img.w; t2.w = img.h; t2.c = 3;
     t2.buf = gpu_->alloc(img.bytes(), error);
     Image back;
     if (!t.buf || !t2.buf || !alloc_like(img, back, error)) return false;
@@ -121,7 +121,7 @@ bool Blur::iir(const Image& img, const double sigmas[3], const bool active[3],
     const uint32_t bmeta[2] = {img.w, img.h};
     const uint32_t pass_plain[3] = {t.h, t.w, 0};
     const uint32_t pass_final[3] = {img.h, img.w, acc ? 1u : 0u};
-    gpu::Buffer* dummy = acc ? acc->buf : img.buf;
+    const gpu::BufferRef& dummy = acc ? acc->buf : img.buf;
 
     if (!gpu_->dispatch("spk_transpose3",
                         {gpu::Arg::buf(img.buf), gpu::Arg::inline_bytes(tmeta, 2), gpu::Arg::buf(t.buf)},
@@ -217,6 +217,11 @@ bool Blur::mixture(const Image& img, const std::vector<Component>& components, I
             if (!gaussian(img, comp.sigma, next, error, truncate, &acc, comp.weight)) return false;
             acc = next;
         }
+        // A mixture is where one node holds the most memory: halation's
+        // scatter is four components and each IIR pass needs a transpose, a
+        // result, and a transpose back. Evaluating between components lets the
+        // previous component's scratch be the next one's.
+        if (!gpu_->flush(error)) return false;
     }
     if (!have_acc) { error = "blur mixture with no components"; return false; }
     out = acc;
@@ -227,8 +232,8 @@ bool Blur::lincomb(const Image& x, const Image& y, const double a[3], const doub
                    Image& out, std::string& error) {
     const float af[3] = {float(a[0]), float(a[1]), float(a[2])};
     const float bf[3] = {float(b[0]), float(b[1]), float(b[2])};
-    gpu::Buffer* ab = gpu_->upload(af, sizeof af, error);
-    gpu::Buffer* bb = gpu_->upload(bf, sizeof bf, error);
+    gpu::BufferRef ab = gpu_->upload(af, sizeof af, error);
+    gpu::BufferRef bb = gpu_->upload(bf, sizeof bf, error);
     if (!ab || !bb) return false;
     if (!alloc_like(x, out, error)) return false;
     const uint32_t n[1] = {uint32_t(x.elements())};
@@ -241,8 +246,8 @@ bool Blur::lincomb(const Image& x, const Image& y, const double a[3], const doub
 bool Blur::affine(const Image& x, const double s[3], const double t[3], Image& out, std::string& error) {
     const float sf[3] = {float(s[0]), float(s[1]), float(s[2])};
     const float tf[3] = {float(t[0]), float(t[1]), float(t[2])};
-    gpu::Buffer* sb = gpu_->upload(sf, sizeof sf, error);
-    gpu::Buffer* tb = gpu_->upload(tf, sizeof tf, error);
+    gpu::BufferRef sb = gpu_->upload(sf, sizeof sf, error);
+    gpu::BufferRef tb = gpu_->upload(tf, sizeof tf, error);
     if (!sb || !tb) return false;
     if (!alloc_like(x, out, error)) return false;
     const uint32_t n[1] = {uint32_t(x.elements())};

@@ -37,6 +37,7 @@
 #include "image.hpp"
 #include "params.hpp"
 #include "printing.hpp"
+#include "setup_cache.hpp"
 #include "spectral.hpp"
 
 namespace spk {
@@ -69,14 +70,25 @@ struct Progress {
 
 class Pipeline {
 public:
-    Pipeline(gpu::Gpu* gpu, const Colour* colour, const Blob* blob)
-        : gpu_(gpu), colour_(colour), blob_(blob), blur_(gpu) {}
-    ~Pipeline();
+    Pipeline(gpu::Gpu* gpu, const Colour* colour, const Blob* blob, SetupCache* cache)
+        : gpu_(gpu), colour_(colour), blob_(blob), cache_(cache), blur_(gpu) {}
+    // No destructor: every buffer it owns is a counted handle.
 
     // Bake everything that does not depend on a pixel or on the frame's size.
     // Expensive: the tc_lut is a 192x192x81 contraction and the C_max table is
     // 46,080 bisections, which is why `warm_up` exists to pay it early.
     bool build(const Params& params, std::string& error);
+
+    // The film's pixel pitch, from the frame this pipeline is about to render.
+    //
+    // It must be set before *any* run, not just before `run_film`, and that is
+    // the whole reason it is a separate call. `set_params` replaces the
+    // pipeline for anything outside `LIVE_MUTABLE`, but only a *shoot*-layer
+    // change drops the cached negative -- so a print-layer rebuild
+    // (`scanner_lens_blur`, `output_color_space`, the filter pack, twelve
+    // fields in all) left a fresh pipeline reprinting a negative it had never
+    // rendered, with no pitch and no way to get one.
+    void set_source_long_edge(uint32_t long_edge);
 
     // `Tap.RGB_IN` -> `Tap.CMY_FILM`. `out` is the developed negative.
     bool run_film(const Image& in, Image& out, Progress* progress, std::string& error);
@@ -135,12 +147,12 @@ private:
 
     // --- helpers ---------------------------------------------------------
     bool alloc_like(const Image& img, Image& out, std::string& error);
-    bool curve_interp(const Image& x, gpu::Buffer* xa, gpu::Buffer* inv, gpu::Buffer* y,
-                      size_t k, Image& out, std::string& error);
-    bool matmul3(const Image& x, gpu::Buffer* m, Image& out, std::string& error);
-    bool spectral(const Image& cmy, gpu::Buffer* chd, gpu::Buffer* base, gpu::Buffer* ixs,
-                  const double gain[3], const double offset[3], bool log_out, size_t n_lambda,
-                  Image& out, std::string& error);
+    bool curve_interp(const Image& x, const gpu::BufferRef& xa, const gpu::BufferRef& inv,
+                      const gpu::BufferRef& y, size_t k, Image& out, std::string& error);
+    bool matmul3(const Image& x, const gpu::BufferRef& m, Image& out, std::string& error);
+    bool spectral(const Image& cmy, const gpu::BufferRef& chd, const gpu::BufferRef& base,
+                  const gpu::BufferRef& ixs, const double gain[3], const double offset[3],
+                  bool log_out, size_t n_lambda, Image& out, std::string& error);
     bool lognormal_field(uint32_t h, uint32_t w, double mean, double std, uint32_t seed,
                          uint32_t stream0, bool per_channel, Image& out, std::string& error);
     bool device_max(const Image& img, double& out, std::string& error);
@@ -160,6 +172,7 @@ private:
     gpu::Gpu* gpu_;
     const Colour* colour_;
     const Blob* blob_;
+    SetupCache* cache_;
     Blur blur_;
     Params params_;
     bool built_ = false;
@@ -170,28 +183,28 @@ private:
 
     // --- baked, persistent ----------------------------------------------
     struct Baked {
-        gpu::Buffer* tc_lut = nullptr;
+        gpu::BufferRef tc_lut;
         size_t tc_lut_side = 0;
 
-        gpu::Buffer* film_curve_x = nullptr, *film_curve_inv = nullptr, *film_curve_y = nullptr;
+        gpu::BufferRef film_curve_x, film_curve_inv, film_curve_y;
         size_t film_curve_k = 0;
-        gpu::Buffer* coupler_curve_x = nullptr, *coupler_curve_inv = nullptr, *coupler_curve_y = nullptr;
-        gpu::Buffer* coupler_matrix = nullptr, *coupler_dmax = nullptr, *coupler_shift = nullptr;
+        gpu::BufferRef coupler_curve_x, coupler_curve_inv, coupler_curve_y;
+        gpu::BufferRef coupler_matrix, coupler_dmax, coupler_shift;
 
-        gpu::Buffer* grain_xa = nullptr, *grain_inv = nullptr, *grain_ylay = nullptr;
-        gpu::Buffer* grain_streams = nullptr;
+        gpu::BufferRef grain_xa, grain_inv, grain_ylay;
+        gpu::BufferRef grain_streams;
 
-        gpu::Buffer* print_curve_x = nullptr, *print_curve_inv = nullptr, *print_curve_y = nullptr;
+        gpu::BufferRef print_curve_x, print_curve_inv, print_curve_y;
         size_t print_curve_k = 0;
 
-        gpu::Buffer* scan_chd = nullptr, *scan_base = nullptr, *scan_ixs = nullptr;
-        gpu::Buffer* glare_illuminant = nullptr;
+        gpu::BufferRef scan_chd, scan_base, scan_ixs;
+        gpu::BufferRef glare_illuminant;
 
-        gpu::Buffer* tc_b_matrix = nullptr;
-        gpu::Buffer* xyz_to_rgb = nullptr;
-        gpu::Buffer* output_matrix = nullptr;
+        gpu::BufferRef tc_b_matrix;
+        gpu::BufferRef xyz_to_rgb;
+        gpu::BufferRef output_matrix;
 
-        gpu::Buffer* cam16_m2x = nullptr, *cam16_m2r = nullptr, *cam16_cmax = nullptr, *cam16_k = nullptr;
+        gpu::BufferRef cam16_m2x, cam16_m2r, cam16_cmax, cam16_k;
         size_t cam16_nl = 0, cam16_nh = 0;
         bool cam16_lightness = false;
     } baked_;
@@ -211,7 +224,7 @@ private:
     uint32_t input_cctf_mode_ = 4;
 
     // print side, per run
-    gpu::Buffer* print_chd_ = nullptr, *print_base_ = nullptr, *print_ixs_ = nullptr;
+    gpu::BufferRef print_chd_, print_base_, print_ixs_;
     double print_gain_[3] = {1, 1, 1};
     double print_offset_[3] = {0, 0, 0};
     double print_exposure_gain_[3] = {1, 1, 1};

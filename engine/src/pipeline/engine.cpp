@@ -32,6 +32,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <vector>
 
 #include "spektrafilm/spk_engine.h"
 
@@ -41,6 +42,7 @@
 #include "json.hpp"
 #include "params.hpp"
 #include "pipeline.hpp"
+#include "setup_cache.hpp"
 
 using namespace spk;
 
@@ -127,6 +129,10 @@ struct spk_engine {
     Colour colour;
     gpu::Gpu* gpu = nullptr;
     Json neutral_filters;
+    // Shared by every pipeline this engine builds, which is the point: a
+    // slider outside LIVE_MUTABLE rebuilds the pipeline, and neither of these
+    // depends on what the slider changed.
+    SetupCache setup_cache;
     std::string math_mode;
     std::string cached_capabilities;
     std::string cached_schema;
@@ -155,6 +161,14 @@ struct spk_engine {
         cache.set("entries", Json(double(sessions.size())));
         cache.set("max_entries", Json(double(0)));
         cache.set("enabled", Json(false));
+        // The setup cache is what decides whether a non-live slider costs
+        // 7 ms or 250, so its hit rate belongs next to the session count
+        // rather than in a log.
+        const SetupCache::Stats s = setup_cache.stats();
+        cache.set("hits", Json(double(s.hits)));
+        cache.set("misses", Json(double(s.misses)));
+        cache.set("setup_tc_luts", Json(double(s.lut_entries)));
+        cache.set("setup_cam16", Json(double(s.cam16_entries)));
         backend.set("session_cache", std::move(cache));
 
         Json out = Json::object();
@@ -200,9 +214,9 @@ bool downscale(gpu::Gpu* gpu, const Image& src, uint32_t max_size, Image& out, s
         for (int c = 0; c < 3; ++c)
             for (size_t i = 0; i < weights.size(); ++i)
                 table[size_t(c) * weights.size() + i] = float(weights[i]);
-        gpu::Buffer* w = gpu->upload(table.data(), table.size() * sizeof(float), error);
+        gpu::BufferRef w = gpu->upload(table.data(), table.size() * sizeof(float), error);
         const float ones[3] = {1.0f, 1.0f, 1.0f};
-        gpu::Buffer* wt = gpu->upload(ones, sizeof ones, error);
+        gpu::BufferRef wt = gpu->upload(ones, sizeof ones, error);
         Image next;
         next.h = cur.h; next.w = cur.w; next.c = 3;
         next.buf = gpu->alloc(cur.bytes(), error);
@@ -346,11 +360,55 @@ spk_status spk_warm_up(spk_engine* engine, const char* film_stock, const char* p
     if (ok) {
         params.settings.working_precision = "float32";
         t0 = std::chrono::steady_clock::now();
-        Pipeline pipeline(engine->gpu, &engine->colour, &engine->blob);
+        Pipeline pipeline(engine->gpu, &engine->colour, &engine->blob, &engine->setup_cache);
         const bool built = pipeline.build(params, error);
         step("pipeline", built, std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - t0).count(), built ? "" : error);
         ok = built;
+
+        if (built) {
+            // Run a small frame all the way through, so every kernel's
+            // `MTLComputePipelineState` exists before the user's first frame
+            // needs it.
+            //
+            // Measured, because the obvious claim for this is wrong: it does
+            // *not* take 300 ms off the first reprint. Over seven runs the
+            // median first reprint is 83 ms cold and 80 ms warmed. What it
+            // removes is the tail -- worst case 160 ms cold against 86 ms
+            // warmed -- because a pipeline state built on first use lands on
+            // the frame the user is waiting for rather than on the boot
+            // window. Worth 4 ms of warm-up for that alone; not worth
+            // claiming more than it does.
+            t0 = std::chrono::steady_clock::now();
+            engine->gpu->begin_frame();
+            std::string warm_error;
+            // A small frame, but told it came from a *live-tier* one. The two
+            // are decoupled on purpose: every blur's sigma is in micrometres
+            // divided by the pixel pitch, so a 32 px frame that really was
+            // 32 px has a pitch of 1093 um and every blur collapses to a
+            // no-op -- warming nothing, in 3.7 ms. At the live tier's pitch
+            // the halation and DIR-coupler tails cross into the IIR kernel,
+            // which is the one a real frame actually pays for.
+            constexpr uint32_t kEdge = 64;
+            constexpr uint32_t kLiveLongEdge = 1600;
+            std::vector<float> pixels(size_t(kEdge) * kEdge * 3, 0.18f);
+            Image seed;
+            seed.h = kEdge;
+            seed.w = kEdge;
+            seed.c = 3;
+            seed.buf = engine->gpu->upload(pixels.data(), pixels.size() * sizeof(float), warm_error);
+            bool warmed = static_cast<bool>(seed.buf);
+            Image negative, rgb;
+            if (warmed) {
+                pipeline.set_source_long_edge(kLiveLongEdge);
+                warmed = pipeline.run_film(seed, negative, nullptr, warm_error) &&
+                         pipeline.run_print(negative, rgb, nullptr, warm_error) &&
+                         engine->gpu->flush(warm_error);
+            }
+            engine->gpu->end_frame();
+            step("kernels", warmed, std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count(), warmed ? "" : warm_error);
+        }
     }
 
     Json out = Json::object();
@@ -425,7 +483,8 @@ spk_session* spk_open(spk_engine* engine, const spk_image* input, const char* pa
             for (int c = 0; c < 3; ++c) session->source[3 * i + size_t(c)] = input->data[4 * i + size_t(c)];
     }
 
-    session->pipeline = std::make_unique<Pipeline>(engine->gpu, &engine->colour, &engine->blob);
+    session->pipeline = std::make_unique<Pipeline>(engine->gpu, &engine->colour, &engine->blob,
+                                                  &engine->setup_cache);
     if (!session->pipeline->build(session->params, error)) { g_error = error; return nullptr; }
 
     Json meta = Json::object();
@@ -478,7 +537,7 @@ bool tier_image(spk_session* session, const Tier& tier, Image& out, std::string&
     if (!full.buf) return false;
     Image scaled;
     if (!downscale(gpu, full, tier.long_edge, scaled, error)) return false;
-    if (scaled.buf == full.buf) {
+    if (scaled.buf.get() == full.buf.get()) {
         state.image = full;   // the frame is already at or below the tier
     } else {
         // The downscale ran in the frame arena; copy the result into a
@@ -487,9 +546,8 @@ bool tier_image(spk_session* session, const Tier& tier, Image& out, std::string&
         if (!gpu->flush(error)) return false;
         Image kept;
         kept.h = scaled.h; kept.w = scaled.w; kept.c = 3;
-        kept.buf = gpu->upload_persistent(gpu->contents(scaled.buf), scaled.bytes(), error);
+        kept.buf = gpu->upload_persistent(gpu->contents(scaled.buf.get()), scaled.bytes(), error);
         if (!kept.buf) return false;
-        gpu->release_persistent(full.buf);
         state.image = kept;
     }
     out = state.image;
@@ -512,7 +570,7 @@ bool negative_for(spk_session* session, const Tier& tier, Progress* progress, Im
     if (!gpu->flush(error)) return false;
     Image kept;
     kept.h = negative.h; kept.w = negative.w; kept.c = 3;
-    kept.buf = gpu->upload_persistent(gpu->contents(negative.buf), negative.bytes(), error);
+    kept.buf = gpu->upload_persistent(gpu->contents(negative.buf.get()), negative.bytes(), error);
     if (!kept.buf) return false;
     state.negative = kept;
     state.has_negative = true;
@@ -537,7 +595,7 @@ bool materialise(spk_session* session, const Image& rgb, spk_result* out, std::s
     const uint32_t align = gpu->texture_row_alignment_px();
     const uint32_t stride = ((rgb.w + align - 1) / align) * align;
     const size_t bytes = size_t(stride) * rgb.h * 4 * sizeof(uint16_t);
-    gpu::Buffer* buffer = gpu->alloc_persistent(bytes, error);
+    gpu::BufferRef buffer = gpu->alloc_persistent(bytes, error);
     if (!buffer) return false;
 
     const uint32_t meta[3] = {uint32_t(rgb.pixels()), rgb.w, stride};
@@ -546,16 +604,15 @@ bool materialise(spk_session* session, const Image& rgb, spk_result* out, std::s
                              gpu::Arg::buf(buffer)},
                             rgb.pixels(), error) && gpu->flush(error);
     if (ok) {
-        out->rgba16 = static_cast<const uint16_t*>(gpu->contents(buffer));
+        out->rgba16 = static_cast<const uint16_t*>(gpu->contents(buffer.get()));
         out->width = rgb.w;
         out->height = rgb.h;
         out->row_stride_px = stride;
-        out->texture = gpu->texture(buffer, rgb.w, rgb.h, stride, error);
+        out->texture = gpu->texture(buffer.get(), rgb.w, rgb.h, stride, error);
         ok = out->texture != nullptr;
     }
     // Drop the engine's reference either way. On success the texture still
     // holds one, so the buffer lives; on failure it dies here.
-    gpu->release_persistent(buffer);
     return ok;
 }
 
@@ -583,7 +640,14 @@ spk_status render_tier(spk_session* session, const char* tier_name, bool use_rep
     std::string error;
     const bool had_negative = session->tiers[tier->name].has_negative;
     Image negative, rgb;
-    bool ok = negative_for(session, *tier, &session->progress, negative, error);
+    // Before anything runs, and from the tier image rather than from whatever
+    // the pipeline last saw: a print-layer rebuild hands us a fresh pipeline
+    // that has never rendered a frame, and the negative it is about to reprint
+    // may be one the *previous* pipeline made.
+    Image tier_source;
+    bool ok = tier_image(session, *tier, tier_source, error);
+    if (ok) session->pipeline->set_source_long_edge(std::max(tier_source.h, tier_source.w));
+    if (ok) ok = negative_for(session, *tier, &session->progress, negative, error);
     if (ok) ok = session->pipeline->run_print(negative, rgb, &session->progress, error);
     if (ok) ok = materialise(session, rgb, out, error);
     gpu->end_frame();
@@ -662,7 +726,8 @@ spk_status spk_set_params(spk_session* session, const char* params_delta_json, c
 
     if (rebuild) {
         std::string error;
-        auto pipeline = std::make_unique<Pipeline>(engine->gpu, &engine->colour, &engine->blob);
+        auto pipeline = std::make_unique<Pipeline>(engine->gpu, &engine->colour, &engine->blob,
+                                                   &engine->setup_cache);
         if (!pipeline->build(session->params, error)) { g_error = error; return SPK_ERR_USER; }
         session->pipeline = std::move(pipeline);
     } else {
@@ -674,7 +739,8 @@ spk_status spk_set_params(spk_session* session, const char* params_delta_json, c
     if (shoot || (stock_change && delta.has("film_stock"))) {
         for (auto& kv : session->tiers) {
             if (kv.second.has_negative) {
-                engine->gpu->release_persistent(kv.second.negative.buf);
+                // Dropping the handle is the whole of it: the buffer goes back
+                // to the pool for the film side to reuse on the re-render.
                 kv.second.negative = Image{};
                 kv.second.has_negative = false;
             }
@@ -789,10 +855,8 @@ void spk_session_release(spk_session* session) {
                 break;
             }
     }
-    for (auto& kv : session->tiers) {
-        if (kv.second.image.buf) engine->gpu->release_persistent(kv.second.image.buf);
-        if (kv.second.negative.buf) engine->gpu->release_persistent(kv.second.negative.buf);
-    }
+    // Every buffer the session held is a counted handle, so destroying it is
+    // all the releasing there is.
     delete session;
 }
 

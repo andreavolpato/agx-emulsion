@@ -187,6 +187,37 @@ final class EngineClientTests: XCTestCase {
         await client.stop()
     }
 
+    /// The three tiers, and what "full" means.
+    ///
+    /// `full` must come back at the *source's* resolution, not the live tier's
+    /// -- it is what the canvas shows past 100 % zoom, and a `full` render
+    /// that quietly returned 1600 px would be a soft image the app believed
+    /// was sharp. The tiers must also be ordered: live <= preview <= full.
+    func testEachTierRendersAtItsOwnResolution() async throws {
+        // Above the live tier's 1600 px, so the three tiers are distinct.
+        let url = try writeFrame(1800)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let client = EngineClient(device: try device())
+        let open: OpenResponse = try await client.call(
+            .open, OpenRequest(imagePath: url.path, paramsDelta: nil))
+        let sourceWidth = open.meta.width, sourceHeight = open.meta.height
+
+        var sizes: [String: (Int, Int)] = [:]
+        for tier in ["live", "preview", "full"] {
+            var request = RenderRequest(sessionID: open.sessionID)
+            request.tier = tier
+            let outcome = try await client.render(.reprint, request)
+            let texture = try XCTUnwrap(outcome.texture, "\(tier) returned no texture")
+            sizes[tier] = (texture.width, texture.height)
+        }
+        XCTAssertEqual(sizes["full"]?.0, sourceWidth, "the full tier is not full resolution")
+        XCTAssertEqual(sizes["full"]?.1, sourceHeight, "the full tier is not full resolution")
+        XCTAssertEqual(sizes["live"]?.0, 1600, "the live tier should cap at 1600 px")
+        XCTAssertLessThanOrEqual(sizes["live"]!.0, sizes["preview"]!.0)
+        XCTAssertLessThanOrEqual(sizes["preview"]!.0, sizes["full"]!.0)
+        await client.stop()
+    }
+
     func testAnUnknownParameterIsRefused() async throws {
         let url = try writeFrame()
         defer { try? FileManager.default.removeItem(at: url) }
