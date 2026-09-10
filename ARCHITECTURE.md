@@ -498,6 +498,13 @@ process"), and that is the framing to keep: **it is a seam that proves the wire
 is host-transparent, not progress on shipping.** The distribution problem is
 untouched until the engine itself stops being Python — RFC-012's option D.
 
+**Decided 2026-09-10: none of this is the destination.** `rfc/RFC-014-native-cpp-engine.md`
+takes RFC-012's option D in C++ and **without MLX** — the `mx.*` calls in
+`backends/metal/` are buffer plumbing and kernel compilation, never arithmetic,
+so `mlx.metallib` (174.8 MB) and `libmlx.dylib` (21.9 MB) are not needed at all.
+One ~15 MB binary, Metal compute, C++ for a Windows/Vulkan future, linked into
+the Swift app over a C ABI sharing one `MTLDevice`. `native/` is retired by it.
+
 The step-1 gate below is separate, and is what established that option C is
 possible at all. It is a **gate**, not a beginning. Step 1's job was to make it safe to
 commit to the plan by answering one question that options C and D both rest on:
