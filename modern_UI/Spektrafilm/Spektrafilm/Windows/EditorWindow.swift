@@ -129,6 +129,31 @@ struct CanvasArea: View {
             }
             .padding(8)
         }
+        // Contract §2's "a visible error rather than a blank canvas". Centred
+        // and opaque, not a corner badge: the app is not going to render, and
+        // a caption the user has to go looking for would leave them staring at
+        // an empty canvas deciding the app is broken — which it is, but not in
+        // a way they can act on without being told.
+        .overlay {
+            if let why = session.serviceBlocked {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(Theme.accent)
+                    Text("The render service cannot be used")
+                        .font(Theme.Font.sectionTitle).foregroundStyle(Theme.text)
+                    Text(why)
+                        .font(Theme.Font.caption).foregroundStyle(Theme.secondaryText)
+                        .multilineTextAlignment(.center).frame(maxWidth: 380)
+                    Button("Restart the render service") { session.restartService() }
+                        .buttonStyle(.plain).font(Theme.Font.caption).foregroundStyle(Theme.accent)
+                        .padding(.top, 2)
+                }
+                .padding(20)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .shadow(color: .black.opacity(0.4), radius: 8)
+            }
+        }
         .overlay(alignment: .bottomLeading) {
             if let w = session.stockWarning {
                 Text(w).font(Theme.Font.caption).foregroundStyle(Theme.text).lineLimit(2)

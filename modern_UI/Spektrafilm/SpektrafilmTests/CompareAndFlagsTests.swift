@@ -136,3 +136,57 @@ final class CompareAndFlagsTests: XCTestCase {
         XCTAssertEqual(session.tool, .select)
     }
 }
+
+/// Contract §2's version negotiation, which until 2026-09-10 was written down
+/// and not built. The backend session nearly shipped a refactor that dropped
+/// `transport_version` and `schema_version` from `capabilities` while its
+/// commit message said "no wire change" — true of the code, false of the wire,
+/// because the wire is assembled from both halves. These are what would have
+/// caught it here.
+@MainActor
+final class CapabilityNegotiationTests: XCTestCase {
+
+    private func caps(transport: Int = 1, schema: Int = 1) throws -> Capabilities {
+        let json = """
+        {"version":"0.9","engine":"spektrafilm","max_mp":60,"tiers":{"live":1600},
+         "transport_version":\(transport),"schema_version":\(schema)}
+        """
+        return try JSONDecoder().decode(Capabilities.self, from: Data(json.utf8))
+    }
+
+    func testAKnownWireIsAccepted() throws {
+        let c = try caps()
+        XCTAssertNil(c.unsupportedTransport)
+        XCTAssertNil(c.schemaMismatch)
+    }
+
+    func testAnUnknownTransportIsRefusedInBothDirections() throws {
+        let newer = try XCTUnwrap(caps(transport: 2).unsupportedTransport)
+        XCTAssertTrue(newer.contains("service is newer"), newer)
+        let older = try XCTUnwrap(caps(transport: 0).unsupportedTransport)
+        XCTAssertTrue(older.contains("service is older"), older)
+    }
+
+    /// A renamed parameter costs some sliders; it is not a reason to refuse to
+    /// show the user their photograph. The asymmetry is deliberate.
+    func testASchemaMismatchWarnsButDoesNotRefuse() throws {
+        let c = try caps(schema: 2)
+        XCTAssertNil(c.unsupportedTransport)
+        XCTAssertNotNil(c.schemaMismatch)
+    }
+
+    /// Neither version field is optional, so dropping one is a decode failure
+    /// — and the message the user sees has to name the field. The raw
+    /// `DecodingError` is accurate and useless.
+    func testADroppedVersionFieldNamesItselfInPlainWords() {
+        let json = """
+        {"version":"0.9","engine":"spektrafilm","max_mp":60,"tiers":{},"schema_version":1}
+        """
+        XCTAssertThrowsError(try JSONDecoder().decode(Capabilities.self, from: Data(json.utf8))) { error in
+            let message = Session.capabilitiesFailure(error)
+            XCTAssertTrue(message.contains("transport_version"), message)
+            XCTAssertTrue(message.contains("will not render"), message)
+            XCTAssertFalse(message.contains("CodingKeys"), "that is the error, not the explanation")
+        }
+    }
+}

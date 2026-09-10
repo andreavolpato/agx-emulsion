@@ -437,12 +437,57 @@ final class Session: CanvasHost {
     private func warmUp() {
         Task { [weak self] in
             guard let self else { return }
-            let caps: Capabilities? = try? await self.client.call(.capabilities, as: Capabilities.self)
-            guard let caps else { return }
-            self.backend = caps.backend
-            self.serviceReady = true
-            canvasLog("service warm · core=\(caps.backend?.renderCore ?? "?") · engine \(caps.engine)")
+            do {
+                let caps: Capabilities = try await self.client.call(.capabilities, as: Capabilities.self)
+                self.accept(caps)
+                canvasLog("service warm · core=\(caps.backend?.renderCore ?? "?") · engine \(caps.engine)")
+            } catch {
+                // Deliberately not swallowed. This used to be `try?`, so a
+                // capabilities block the client could not decode looked
+                // exactly like a service that had not started yet — and the
+                // first symptom would have been the *next* thing to fail,
+                // several seconds later, somewhere else.
+                canvasLog("warm-up failed: \(error)")
+                self.serviceBlocked = Session.capabilitiesFailure(error)
+            }
         }
+    }
+
+    /// Why the app will not render, or nil. Contract §2: "FE refuses to start
+    /// against a transport version it does not know, with a visible error
+    /// rather than a blank canvas."
+    private(set) var serviceBlocked: String?
+
+    /// Take a capabilities block and decide whether we can talk to it.
+    private func accept(_ caps: Capabilities) {
+        if let why = caps.unsupportedTransport {
+            serviceBlocked = why
+            serviceReady = false
+            return
+        }
+        serviceBlocked = nil
+        backend = caps.backend
+        serviceReady = true
+        if let why = caps.schemaMismatch { stockWarning = why }
+    }
+
+    /// A decoding failure against `capabilities` is a wire problem, and the
+    /// message has to say so — `keyNotFound(CodingKeys(stringValue:
+    /// "transport_version"))` is true and useless.
+    static func capabilitiesFailure(_ error: Error) -> String {
+        guard let d = error as? DecodingError else {
+            return "The render service did not answer `capabilities`: \(error)"
+        }
+        let field: String
+        switch d {
+        case .keyNotFound(let key, _): field = key.stringValue
+        case .typeMismatch(_, let ctx), .valueNotFound(_, let ctx):
+            field = ctx.codingPath.map(\.stringValue).joined(separator: ".")
+        default: field = "?"
+        }
+        return "The render service's `capabilities` block is missing or malformed "
+             + "at `\(field)`. The app cannot tell which wire it is speaking, so it "
+             + "will not render. See CONTRACT-frontend-backend.md §2."
     }
 
     // MARK: - library
@@ -644,7 +689,12 @@ final class Session: CanvasHost {
             let req = OpenRequest(imagePath: tiff.path, paramsDelta: sidecar.params.fullDelta)
             let r: OpenResponse = try await client.call(.open, req)
             clock.lap("service.open")
-            backend = r.capabilities?.backend
+            // `open` echoes the whole block, so the check happens here too:
+            // a service can be restarted under a running app.
+            if let caps = r.capabilities {
+                accept(caps)
+                if let why = serviceBlocked { status = why; return }
+            }
             guard selection == url, !Task.isCancelled else { return }
             serviceReady = true
             serviceSessionID = r.sessionID

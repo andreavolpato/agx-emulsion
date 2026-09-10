@@ -24,6 +24,40 @@ struct Capabilities: Decodable, Sendable {
     let schemaVersion: Int
     let backend: Backend?
 
+    /// The wire this build was written against (contract §2). Both are 1.
+    ///
+    /// Neither field is optional here, and that is the point: a service that
+    /// does not report them is a service whose framing this app cannot
+    /// reason about, and the contract says refuse rather than guess. The
+    /// backend session nearly shipped a refactor that dropped both while its
+    /// commit message said "no wire change" — a split that only moves code
+    /// still moves the wire, because the wire is assembled from both halves.
+    static let knownTransportVersion = 1
+    static let knownSchemaVersion = 1
+
+    /// Why this app cannot talk to this service, or nil if it can.
+    ///
+    /// A *newer* transport is refused; the framing or the file-handoff
+    /// convention has changed under us and every subsequent read would be a
+    /// guess. An *older* one is refused too, for the same reason in the other
+    /// direction. Schema is a warning, not a refusal: a renamed parameter
+    /// makes some sliders stop working, which is bad, but it is not a reason
+    /// to refuse to show the user their photograph.
+    var unsupportedTransport: String? {
+        guard transportVersion != Capabilities.knownTransportVersion else { return nil }
+        return "This build speaks transport version \(Capabilities.knownTransportVersion); "
+             + "the render service speaks \(transportVersion). "
+             + (transportVersion > Capabilities.knownTransportVersion
+                ? "The service is newer than the app — update the app."
+                : "The service is older than the app — rebuild it from this checkout.")
+    }
+
+    var schemaMismatch: String? {
+        guard schemaVersion != Capabilities.knownSchemaVersion else { return nil }
+        return "Parameter schema version \(schemaVersion); this build was written against "
+             + "\(Capabilities.knownSchemaVersion). Some controls may not reach the engine."
+    }
+
     /// Which executor is actually rendering. The client had no way to ask
     /// this and it cost real time: with the engine on a branch the app did
     /// not have, every render ran on the CPU core and the only symptom was
