@@ -49,6 +49,24 @@ struct RenderOutcome: @unchecked Sendable {
     let texture: MTLTexture?
 }
 
+/// `preview_stock_lut`'s result: the same kind of texture a render returns,
+/// plus the metadata that says which table produced it.
+struct StockLUTOutcome: @unchecked Sendable {
+    let meta: StockLUTResponse
+    let texture: MTLTexture?
+    let width: Int
+    let height: Int
+}
+
+/// `export_di`'s picture half. The `.cube` is fetched separately, through
+/// `printLUTTable(_:)`, because it is a table rather than an image.
+struct DIOutcome: @unchecked Sendable {
+    let meta: ExportDIResponse
+    let texture: MTLTexture?
+    let width: Int
+    let height: Int
+}
+
 actor EngineClient {
     enum State: Sendable, Equatable { case stopped, starting, running, failed(String) }
 
@@ -151,7 +169,7 @@ actor EngineClient {
 
     enum ClientError: Error, CustomStringConvertible {
         case noResources(String), notRunning, engine(String), rpc(ServiceError)
-        case badResponse(String), unsupported(Method), needsRenderPath(Method)
+        case badResponse(String), needsRenderPath(Method)
         var description: String {
             switch self {
             case .noResources(let p): "the engine's resources are missing at \(p)"
@@ -159,8 +177,6 @@ actor EngineClient {
             case .engine(let m): m
             case .rpc(let e): e.description
             case .badResponse(let s): "bad response: \(s)"
-            case .unsupported(let m):
-                "\(m.rawValue) is not implemented by the native engine yet"
             case .needsRenderPath(let m):
                 "\(m.rawValue) returns a texture; call EngineClient.render(_:_:) instead"
             }
@@ -249,21 +265,17 @@ actor EngineClient {
             if let session { spk_cancel(session, nil) }
             return try decodeOwned("{}", as: R.self)
 
-        case .reprint, .previewRender:
-            // A render's result is an `MTLTexture`, and a texture cannot
-            // travel through a `Decodable`. Rather than invent a JSON shape
-            // that omits the only new thing, the render methods are reached
-            // through `render(_:_:)` and this path refuses by name.
+        case .reprint, .previewRender, .export, .exportDI, .previewStockLUT:
+            // Every one of these produces an `MTLTexture`, and a texture
+            // cannot travel through a `Decodable`. Rather than invent a JSON
+            // shape that omits the only thing the caller wanted, they are
+            // reached through `render(_:_:)`, `previewStockLUT(_:tier:)` and
+            // `exportDI(printStock:)`, and this path refuses by name.
+            //
+            // The last three used to be refused as *unimplemented*
+            // (ARCHITECTURE §8.8). They are implemented now; what is left is
+            // that the reply does not fit through this door.
             throw ClientError.needsRenderPath(method)
-
-        case .export, .exportDI, .previewStockLUT:
-            // Not ported. `export` writes a file, `export_di` writes three and
-            // needs the shipped print-preview LUTs, and `preview_stock_lut`
-            // needs the `.cube` machinery -- none of which is on the path from
-            // opening a frame to seeing it, and all of which is a subsystem
-            // rather than a node. Refused by name rather than silently
-            // returning something wrong.
-            throw ClientError.unsupported(method)
         }
     }
 
@@ -272,9 +284,96 @@ actor EngineClient {
     }
 
     /// A render, with the texture the engine drew into.
+    ///
+    /// `.export` is `.reprint` at the full tier and is spelled separately
+    /// because the caller means something different by it: the reference's
+    /// `RenderEngine.export` reuses the working-resolution negative when one
+    /// is warm and renders the film side when it is not, which is exactly
+    /// `spk_reprint`'s own contract.
     func render(_ method: Method, _ request: RenderRequest) async throws -> RenderOutcome {
         if state != .running { try start() }
         return try renderTexture(method, request)
+    }
+
+    // MARK: - the baked print LUTs
+
+    /// Which print stocks have a shipped preview LUT, and what each was baked
+    /// against. Empty when none are bundled — which is a fact about the
+    /// build, so callers hide the feature rather than failing at it.
+    func printLUTCatalog() throws -> [String: PrintLUTEntry] {
+        if state != .running { try start() }
+        guard let engine else { throw ClientError.notRunning }
+        let json = String(cString: spk_print_lut_catalog(engine))
+        return (try? JSONDecoder().decode([String: PrintLUTEntry].self, from: Data(json.utf8))) ?? [:]
+    }
+
+    /// One stock's table, copied out of the engine.
+    ///
+    /// The pointer the engine hands over is valid for the engine's lifetime,
+    /// so wrapping it would work and would also be a dangling read the first
+    /// time someone tears the engine down while a `.cube` is being written.
+    /// 431 kB copied once per export is not worth that.
+    func printLUTTable(_ printStock: String) throws -> (size: Int, table: [Float]) {
+        if state != .running { try start() }
+        guard let engine else { throw ClientError.notRunning }
+        var pointer: UnsafePointer<Float>?
+        var size: UInt32 = 0
+        guard printStock.withCString({ spk_print_lut_table(engine, $0, &pointer, &size) }) == SPK_OK,
+              let pointer, size > 1 else { throw ClientError.engine(lastError()) }
+        let count = Int(size) * Int(size) * Int(size) * 3
+        return (Int(size), Array(UnsafeBufferPointer(start: pointer, count: count)))
+    }
+
+    /// Flip to another print stock by table lookup rather than by re-running
+    /// the print+scan chain.
+    ///
+    /// Measured on this engine at 45 MP, warm, against a reprint of the same
+    /// tier: **2.0 ms against 9 ms** at live, 9.5 against 34 at preview,
+    /// 47 against 167 at full. About 4x, because the cached negative goes
+    /// through one trilinear sample instead of the print chain's dozen nodes
+    /// — not the 190x in HANDOFF-PRINT-LUT §3.1, which was this kernel
+    /// against *scipy on the CPU* and is the wrong comparison for a user who
+    /// would otherwise have got a real reprint.
+    ///
+    /// What it leaves out is `scanning.glare` — spatial and stochastic, and
+    /// not representable in a pointwise table — and the *user's* print grade:
+    /// the table bakes the chain at the bake's own settings, so print
+    /// exposure and the filter pack do not reach it. Both are why this is a
+    /// look preview and `.export` still runs the real pipeline.
+    func previewStockLUT(_ printStock: String, tier: String = "live") async throws -> StockLUTOutcome {
+        if state != .running { try start() }
+        guard let session else { throw ClientError.notRunning }
+        var result = spk_result()
+        var reply: UnsafeMutablePointer<CChar>?
+        let status = printStock.withCString { stock in
+            tier.withCString { t in spk_preview_stock_lut(session, stock, t, &result, &reply) }
+        }
+        guard status == SPK_OK else { throw ClientError.engine(lastError()) }
+        let texture = result.texture.map { Unmanaged<MTLTexture>.fromOpaque($0).takeRetainedValue() }
+        let meta: StockLUTResponse = try decode(reply, as: StockLUTResponse.self)
+        return StockLUTOutcome(meta: meta, texture: texture,
+                               width: Int(result.width), height: Int(result.height))
+    }
+
+    /// The DI package's picture: the full-tier negative normalised to [0, 1]
+    /// by the print LUT's own density axes. Layer 2 does not apply to it and
+    /// must not be baked in — it is pre-print by definition.
+    func exportDI(printStock: String? = nil) async throws -> DIOutcome {
+        if state != .running { try start() }
+        guard let session else { throw ClientError.notRunning }
+        var result = spk_result()
+        var reply: UnsafeMutablePointer<CChar>?
+        let status: spk_status
+        if let printStock {
+            status = printStock.withCString { spk_export_di(session, $0, &result, &reply) }
+        } else {
+            status = spk_export_di(session, nil, &result, &reply)
+        }
+        guard status == SPK_OK else { throw ClientError.engine(lastError()) }
+        let texture = result.texture.map { Unmanaged<MTLTexture>.fromOpaque($0).takeRetainedValue() }
+        let meta: ExportDIResponse = try decode(reply, as: ExportDIResponse.self)
+        return DIOutcome(meta: meta, texture: texture,
+                         width: Int(result.width), height: Int(result.height))
     }
 
     // MARK: - the two calls that are not just JSON
@@ -296,6 +395,7 @@ actor EngineClient {
 
         var reply: UnsafeMutablePointer<CChar>?
         let delta = try encode(request.paramsDelta ?? [:])
+        let uploadStarted = Date()
         let handle: OpaquePointer? = frame.pixels.withUnsafeBufferPointer { buffer in
             var image = spk_image(data: buffer.baseAddress,
                                   width: UInt32(frame.width),
@@ -307,6 +407,12 @@ actor EngineClient {
                 }
             }
         }
+        // What the engine does with the buffer: upload it and build the
+        // session's tiers. Small next to the read above, and worth separating
+        // from it — a slow upload would mean a slow GPU path, not a slow file.
+        EngineClient.logFrameRead(String(format: "frame upload to the engine (%.0f MB): %.0f ms",
+                                         Double(frame.width * frame.height * 16) / 1e6,
+                                         Date().timeIntervalSince(uploadStarted) * 1000))
         guard let handle else { throw ClientError.engine(lastError()) }
         session = handle
         let decoded: R = try decode(reply, as: R.self)
@@ -388,10 +494,12 @@ actor EngineClient {
     ///   Core Image for the working space instead would apply a conversion the
     ///   engine then applies again.
     static func readLinearRGB(_ url: URL) throws -> Frame {
+        let readStarted = Date()
         guard let image = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
             throw ImageDecoder.Failure.unsupported(url)
         }
         guard let space = ImageDecoder.linearProPhoto else { throw ImageDecoder.Failure.noColorSpace }
+        let opened = Date()
         let extent = image.extent.integral
         let width = Int(extent.width), height = Int(extent.height)
         guard width > 0, height > 0 else { throw ImageDecoder.Failure.unsupported(url) }
@@ -414,6 +522,51 @@ actor EngineClient {
         // Stripping it here instead was a per-pixel Swift loop over the whole
         // frame -- at -Onone, which is what a Debug build compiles, it was
         // most of a 5.1 s `open` on a 24 MP RAW.
+        let rendered = Date()
+        let megabytes = Double(width * height * 16) / 1e6
+        let renderSeconds = rendered.timeIntervalSince(opened)
+        logFrameRead(String(format: "frame read: tiff %d×%d %.0f MB on disk · decode %.0f ms"
+                            + " · ci-render-to-bitmap %.0f ms (%.0f MB float RGBA, %.0f MB/s)",
+                            width, height, Double((try? FileManager.default
+                                .attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0) / 1e6,
+                            opened.timeIntervalSince(readStarted) * 1000,
+                            renderSeconds * 1000, megabytes,
+                            renderSeconds > 0 ? megabytes / renderSeconds : 0))
         return Frame(pixels: rgba, width: width, height: height, channels: 4)
+    }
+
+    /// The frame's own timing, on the same switch the canvas and the session
+    /// read (`SPEKTRAFILM_CANVAS_LOG=1`), so that one run prints one story.
+    ///
+    /// `Session`'s clock calls all of this `service.open`, and on a 45 MP RAW
+    /// that number is almost entirely this function. Measured on
+    /// `_DSC2439.NEF` (5504×8256, 364 MB handoff TIFF, 727 MB float RGBA out):
+    ///
+    ///     decode 2 ms · ci-render-to-bitmap 6151 ms (118 MB/s) · upload 235 ms
+    ///
+    /// and the render behind it is 46 ms. So it is neither the engine nor the
+    /// scheduler: it is Core Image rasterising the handoff TIFF, once per
+    /// *image* and not once per launch — a second, different TIFF in the same
+    /// process pays it again (5490 ms, then 5518 ms). Nor is it the write
+    /// side, the disk, or the output format: the file mmaps in 0 ms and
+    /// ImageIO hands it over in 1 ms, and rendering it to `.RGBAh`, or to
+    /// `extendedLinearDisplayP3`, or through a context whose working space is
+    /// the destination, all produce the *same* 5.5 s. What is fast is the
+    /// frame we started with: the same decode rendered straight into the same
+    /// buffer is **241 ms**, and 181 ms warm.
+    ///
+    /// That is the shape of the answer to "why is the first frame of a session
+    /// slow" — the frame is handed to a process that shares its address space
+    /// through a file, and the file costs 20× the decode it came from.
+    ///
+    /// The switch is read here rather than borrowed from `Renderer.logDraws`,
+    /// which is main-actor-isolated and out of reach from this actor: same
+    /// environment variable, same prefix, same run.
+    private nonisolated static let logsOpenPath =
+        ProcessInfo.processInfo.environment["SPEKTRAFILM_CANVAS_LOG"] == "1"
+
+    private nonisolated static func logFrameRead(_ message: String) {
+        guard logsOpenPath else { return }
+        FileHandle.standardError.write(Data("session: \(message)\n".utf8))
     }
 }
