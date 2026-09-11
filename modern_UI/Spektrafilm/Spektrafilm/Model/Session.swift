@@ -854,7 +854,10 @@ final class Session: CanvasHost {
                 : "\(url.lastPathComponent)  ·  showing its last print."
             return
         }
-        await ensureDeveloped()
+        // Handed the clock so the develop continues the same line: the decode
+        // and the preview it lapped are the first half of *this* open, and a
+        // summary that starts at `linear-tiff` would hide them.
+        await ensureDeveloped(clock: clock)
     }
 
     /// The develop: the linear TIFF in the cache, the engine's session for the
@@ -886,7 +889,7 @@ final class Session: CanvasHost {
     /// starting another. Returns the engine's session id, or nil if the frame
     /// did not land.
     @discardableResult
-    func ensureDeveloped() async -> String? {
+    func ensureDeveloped(clock: LoadClock = LoadClock()) async -> String? {
         // `load` is what produces a decodable frame, so waiting for it is what
         // makes Solve during an open mean the same thing as Solve a moment
         // later. It is a no-op once the frame is on the canvas, and `load`'s
@@ -896,7 +899,7 @@ final class Session: CanvasHost {
         if let sid = serviceSessionID { return sid }
         if let task = developTask { return await task.value }
         guard let url = selection, let d = decoded else { return nil }
-        let task = Task { [weak self] in await self?.develop(url, d, clock: LoadClock()) }
+        let task = Task { [weak self] in await self?.develop(url, d, clock: clock) }
         developTask = task
         let sid = await task.value
         developTask = nil
