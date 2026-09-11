@@ -42,6 +42,7 @@
 #include "json.hpp"
 #include "params.hpp"
 #include "pipeline.hpp"
+#include "print_lut.hpp"
 #include "setup_cache.hpp"
 
 using namespace spk;
@@ -133,6 +134,13 @@ struct spk_engine {
     Colour colour;
     gpu::Gpu* gpu = nullptr;
     Json neutral_filters;
+    // The eight baked print+scan LUTs, loaded lazily and kept: `print_lut.hpp`
+    // for what they are and what they deliberately leave out.
+    PrintLutLibrary print_luts;
+    // One device copy per stock, alongside the host table. Flipping between
+    // stocks is the whole point of this path, so re-uploading 431 kB on every
+    // flip would be paying for the thing the LUT exists to avoid.
+    std::unordered_map<std::string, gpu::BufferRef> print_lut_buffers;
     // Shared by every pipeline this engine builds, which is the point: a
     // slider outside LIVE_MUTABLE rebuilds the pipeline, and neither of these
     // depends on what the slider changed.
@@ -143,7 +151,18 @@ struct spk_engine {
     std::vector<spk_session*> sessions;
     std::mutex lock;
 
-    ~spk_engine() { delete gpu; }
+    ~spk_engine() {
+        // Before `delete gpu`, and that ordering is the whole of this
+        // destructor. A `BufferRef` releases through the `Gpu` it was
+        // allocated from, and members are destroyed *after* the destructor
+        // body -- so leaving the cached LUT tables to be cleaned up
+        // implicitly called `release` on a deleted backend. It segfaulted at
+        // process exit, after every parity case had already passed and been
+        // printed, which is exactly the shape of failure a harness does not
+        // see.
+        print_lut_buffers.clear();
+        delete gpu;
+    }
 
     Json capabilities_json() {
         Json backend = Json::object();
@@ -291,6 +310,8 @@ spk_engine* spk_engine_create(const char* resources_dir, void* device) {
         }
     }
 
+    if (!engine->print_luts.init(engine->resources_dir, error)) { g_error = error; return nullptr; }
+
     engine->gpu = gpu::Gpu::create_metal(device, engine->resources_dir + "/spektrafilm.metallib", error);
     if (!engine->gpu) { g_error = error; return nullptr; }
 
@@ -429,15 +450,29 @@ spk_status spk_warm_up(spk_engine* engine, const char* film_stock, const char* p
     return SPK_OK;
 }
 
-spk_session* spk_open(spk_engine* engine, const spk_image* input, const char* params_delta_json,
-                      char** out_json) {
-    if (!engine || !input || !input->data) { g_error = "engine or image is null"; return nullptr; }
+namespace {
+
+// Where `open`'s pixels are: a host array (`spk_open`) or a buffer already on
+// the device (`spk_open_device`). Exactly one of the two pointers is set.
+struct FrameIn {
+    const float* host = nullptr;
+    void* device = nullptr;
+    uint32_t width = 0, height = 0, channels = 0;
+};
+
+// Everything the two entry points share. They differ only in how the frame
+// reaches the device, and that is one branch below -- not two copies of the
+// params and pipeline setup that could drift apart, which is the shape of
+// the `spk_render`/`spk_reprint` bug the session harness now pins.
+spk_session* open_frame(spk_engine* engine, const FrameIn& frame, const char* params_delta_json,
+                        char** out_json) {
     g_error.clear();
-    if (input->channels != 3 && input->channels != 4) {
+    if (frame.channels != 3 && frame.channels != 4) {
         g_error = "input image must have 3 or 4 channels";
         return nullptr;
     }
-    const double mp = double(input->width) * double(input->height) / 1e6;
+    if (frame.width == 0 || frame.height == 0) { g_error = "input image is empty"; return nullptr; }
+    const double mp = double(frame.width) * double(frame.height) / 1e6;
     if (mp > kMaxMP) {
         g_error = "image is " + std::to_string(mp) + " MP, above the engine limit of " +
                   std::to_string(int(kMaxMP)) + " MP";
@@ -477,19 +512,26 @@ spk_session* spk_open(spk_engine* engine, const spk_image* input, const char* pa
     // Uploaded as handed over, alpha and all; `spk_take_rgb` drops the fourth
     // channel on device below. Stripping it on the host would be a full-frame
     // CPU pass -- 543 MB of loads and stores at 45 MP.
+    //
+    // A device frame always goes through `spk_take_rgb`, even at three
+    // channels: the kernel is the copy, and the caller's buffer is only
+    // borrowed for this call, so the session must not keep it as its source.
     {
         engine->gpu->begin_frame();
         Image uploaded;
-        uploaded.h = input->height;
-        uploaded.w = input->width;
-        uploaded.c = input->channels;
+        uploaded.h = frame.height;
+        uploaded.w = frame.width;
+        uploaded.c = frame.channels;
         const size_t bytes = uploaded.elements() * sizeof(float);
         std::string upload_error;
-        if (input->channels == 3) {
-            uploaded.buf = engine->gpu->upload_persistent(input->data, bytes, upload_error);
+        if (frame.host && frame.channels == 3) {
+            uploaded.buf = engine->gpu->upload_persistent(frame.host, bytes, upload_error);
             session->source = uploaded;
         } else {
-            uploaded.buf = engine->gpu->upload(input->data, bytes, upload_error);
+            // The host copy is the 235 ms `spk_open_device` exists to avoid
+            // (727 MB at 45 MP); the borrow is no copy at all.
+            uploaded.buf = frame.host ? engine->gpu->upload(frame.host, bytes, upload_error)
+                                      : engine->gpu->borrow(frame.device, bytes, upload_error);
             Image rgb;
             rgb.h = uploaded.h;
             rgb.w = uploaded.w;
@@ -517,8 +559,8 @@ spk_session* spk_open(spk_engine* engine, const spk_image* input, const char* pa
     if (!session->pipeline->build(session->params, error)) { g_error = error; return nullptr; }
 
     Json meta = Json::object();
-    meta.set("width", Json(double(input->width)));
-    meta.set("height", Json(double(input->height)));
+    meta.set("width", Json(double(frame.width)));
+    meta.set("height", Json(double(frame.height)));
     meta.set("megapixels", Json(std::round(mp * 100.0) / 100.0));
     meta.set("source", Json(std::string("<in-process>")));
 
@@ -545,6 +587,30 @@ spk_session* spk_open(spk_engine* engine, const spk_image* input, const char* pa
         engine->sessions.push_back(raw);
     }
     return raw;
+}
+
+}  // namespace
+
+spk_session* spk_open(spk_engine* engine, const spk_image* input, const char* params_delta_json,
+                      char** out_json) {
+    if (!engine || !input || !input->data) { g_error = "engine or image is null"; return nullptr; }
+    FrameIn frame;
+    frame.host = input->data;
+    frame.width = input->width;
+    frame.height = input->height;
+    frame.channels = input->channels;
+    return open_frame(engine, frame, params_delta_json, out_json);
+}
+
+spk_session* spk_open_device(spk_engine* engine, const spk_device_image* input,
+                             const char* params_delta_json, char** out_json) {
+    if (!engine || !input || !input->buffer) { g_error = "engine or buffer is null"; return nullptr; }
+    FrameIn frame;
+    frame.device = input->buffer;
+    frame.width = input->width;
+    frame.height = input->height;
+    frame.channels = input->channels;
+    return open_frame(engine, frame, params_delta_json, out_json);
 }
 
 namespace {
@@ -709,6 +775,224 @@ spk_status spk_reprint(spk_session* session, const char* tier, spk_result* out) 
 
 spk_status spk_render(spk_session* session, const char* tier, spk_result* out) {
     return render_tier(session, tier, /*use_reprint=*/false, out);
+}
+
+}  // extern "C"
+
+// The LUT methods' helpers, outside the C block: they take and return C++
+// types, and a C-linkage function that returns a `Json` is a warning today
+// and a collision the first time two translation units agree on a name.
+namespace {
+
+// One stock's table on the device, uploaded on first use and kept for the
+// engine's lifetime. Persistent rather than pooled: 431 kB that every
+// subsequent flip reads, in a pool sized for full-frame buffers.
+bool lut_buffer_for(spk_engine* engine, const PrintLut& lut, gpu::BufferRef& out,
+                    std::string& error) {
+    auto it = engine->print_lut_buffers.find(lut.stock);
+    if (it != engine->print_lut_buffers.end()) { out = it->second; return true; }
+    gpu::BufferRef buffer = engine->gpu->upload_persistent(
+        lut.table.data(), lut.table.size() * sizeof(float), error);
+    if (!buffer) return false;
+    engine->print_lut_buffers[lut.stock] = buffer;
+    out = buffer;
+    return true;
+}
+
+// The mismatch warning PRD §7.3 requires. The table is baked through a
+// specific negative's dye spectra as well as through the paper, so a session
+// on a different film is an approximation whose error nobody has measured --
+// which is worth saying rather than silently answering.
+Json film_mismatch_warning(const PrintLut& lut, const std::string& film) {
+    if (lut.paired_film == film) return Json();
+    return Json("LUT was baked against film '" + lut.paired_film + "' but the session uses '" +
+                film + "'; the print+scan chain is coupled to the negative's dye spectra, so "
+                "this is an approximation with unmeasured error");
+}
+
+// The half both LUT methods share: resolve the stock, take the session's
+// negative for `tier`, and leave the table on the device ready to index.
+const PrintLut* prepare_lut(spk_session* session, const char* print_stock, const Tier& tier,
+                            Image& negative, gpu::BufferRef& table, std::string& error) {
+    spk_engine* engine = session->engine;
+    const std::string stock = (print_stock && *print_stock) ? print_stock
+                                                            : session->params.print_stock;
+    const PrintLut* lut = engine->print_luts.get(engine->blob, stock, error);
+    if (!lut) return nullptr;
+    if (!lut_buffer_for(engine, *lut, table, error)) return nullptr;
+
+    Image tier_source;
+    if (!tier_image(session, tier, tier_source, error)) return nullptr;
+    // The same ordering `render_tier` uses, and for the same reason: the film
+    // side needs the frame's pixel pitch, and a pipeline rebuilt by a
+    // print-layer edit has never seen one.
+    session->pipeline->set_source_long_edge(std::max(tier_source.h, tier_source.w));
+    if (!negative_for(session, tier, &session->progress, negative, error)) return nullptr;
+    return lut;
+}
+
+}  // namespace
+
+extern "C" {
+
+const char* spk_print_lut_catalog(spk_engine* engine) {
+    if (!engine) return "{}";
+    const std::string& catalog = engine->print_luts.catalog_json();
+    return catalog.empty() ? "{}" : catalog.c_str();
+}
+
+spk_status spk_print_lut_table(spk_engine* engine, const char* print_stock,
+                               const float** out_table, uint32_t* out_size) {
+    if (!engine || !print_stock || !out_table || !out_size) {
+        g_error = "engine, print_stock, out_table and out_size are all required";
+        return SPK_ERR_INVALID_ARG;
+    }
+    g_error.clear();
+    std::lock_guard<std::mutex> guard(engine->lock);
+    std::string error;
+    const PrintLut* lut = engine->print_luts.get(engine->blob, print_stock, error);
+    if (!lut) { g_error = error; return SPK_ERR_USER; }
+    *out_table = lut->table.data();
+    *out_size = lut->size;
+    return SPK_OK;
+}
+
+spk_status spk_preview_stock_lut(spk_session* session, const char* print_stock,
+                                 const char* tier_name, spk_result* out, char** out_json) {
+    if (!session || !out) { g_error = "session or result is null"; return SPK_ERR_INVALID_ARG; }
+    const Tier* tier = find_tier(tier_name ? tier_name : "live");
+    if (!tier) {
+        g_error = std::string("unknown tier '") + tier_name + "'; expected live, preview or full";
+        return SPK_ERR_INVALID_ARG;
+    }
+    std::lock_guard<std::mutex> guard(session->lock);
+    g_error.clear();
+    std::memset(out, 0, sizeof *out);
+
+    gpu::Gpu* gpu = session->engine->gpu;
+    const auto started = std::chrono::steady_clock::now();
+    session->progress = Progress{};
+    session->progress.progress_id = "p" + std::to_string(next_id());
+
+    gpu->begin_frame();
+    std::string error;
+    Image negative, rgb;
+    gpu::BufferRef table;
+    const PrintLut* lut = prepare_lut(session, print_stock, *tier, negative, table, error);
+    bool ok = lut != nullptr;
+
+    // The apply itself is timed on its own, because that is the number the
+    // path exists for and the negative in front of it may or may not have
+    // been cached. 24 ms at 45 MP; a cold negative is seconds.
+    double apply_ms = 0.0;
+    if (ok) {
+        const auto apply_started = std::chrono::steady_clock::now();
+        rgb.h = negative.h; rgb.w = negative.w; rgb.c = 3;
+        rgb.buf = gpu->alloc(rgb.bytes(), error);
+        ok = static_cast<bool>(rgb.buf);
+        if (ok) {
+            const uint32_t meta[2] = {uint32_t(rgb.pixels()), lut->size};
+            ok = gpu->dispatch("spk_lut3d_trilinear",
+                               {gpu::Arg::buf(negative.buf), gpu::Arg::buf(table),
+                                gpu::Arg::inline_bytes(lut->lo, 3),
+                                gpu::Arg::inline_bytes(lut->inv_span, 3),
+                                gpu::Arg::inline_bytes(meta, 2), gpu::Arg::buf(rgb.buf)},
+                               rgb.pixels(), error) && gpu->flush(error);
+        }
+        apply_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - apply_started).count();
+    }
+    if (ok) ok = materialise(session, rgb, out, error);
+    gpu->end_frame();
+    if (!ok) {
+        g_error = error;
+        return lut ? SPK_ERR_GPU : SPK_ERR_USER;
+    }
+
+    out->elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - started).count();
+    // Reported as a reprint because that is what it is -- the negative was
+    // reused and only the print side was replaced.
+    out->reprint = 1;
+    out->negative_was_cached = 1;
+    std::snprintf(out->progress_id, sizeof out->progress_id, "%s",
+                  session->progress.progress_id.c_str());
+    session->progress.done = true;
+
+    if (out_json) {
+        Json reply = Json::object();
+        reply.set("print_stock", Json(lut->stock));
+        reply.set("tier", Json(std::string(tier->name)));
+        reply.set("apply_ms", Json(apply_ms));
+        reply.set("apply_backend", Json(std::string("native-metal")));
+        reply.set("lut_source", Json(std::string("shipped")));
+        reply.set("paired_film", Json(lut->paired_film));
+        reply.set("declared_pairing", Json(lut->declared_pairing));
+        Json warning = film_mismatch_warning(*lut, session->params.film_stock);
+        if (!warning.is_null()) reply.set("warning", std::move(warning));
+        *out_json = dup_json(reply);
+    }
+    return SPK_OK;
+}
+
+spk_status spk_export_di(spk_session* session, const char* print_stock, spk_result* out,
+                         char** out_json) {
+    if (!session || !out) { g_error = "session or result is null"; return SPK_ERR_INVALID_ARG; }
+    std::lock_guard<std::mutex> guard(session->lock);
+    g_error.clear();
+    std::memset(out, 0, sizeof *out);
+
+    gpu::Gpu* gpu = session->engine->gpu;
+    const auto started = std::chrono::steady_clock::now();
+    session->progress = Progress{};
+    session->progress.progress_id = "p" + std::to_string(next_id());
+
+    gpu->begin_frame();
+    std::string error;
+    Image negative, di;
+    gpu::BufferRef table;
+    // Full tier: the DI file is the deliverable, not a preview.
+    const PrintLut* lut = prepare_lut(session, print_stock, kTiers[2], negative, table, error);
+    bool ok = lut != nullptr;
+    if (ok) {
+        di.h = negative.h; di.w = negative.w; di.c = 3;
+        di.buf = gpu->alloc(di.bytes(), error);
+        ok = static_cast<bool>(di.buf);
+    }
+    if (ok) {
+        const uint32_t n = uint32_t(di.elements());
+        ok = gpu->dispatch("spk_di_normalise",
+                           {gpu::Arg::buf(negative.buf), gpu::Arg::inline_bytes(lut->lo, 3),
+                            gpu::Arg::inline_bytes(lut->inv_span, 3),
+                            gpu::Arg::inline_bytes(&n, 1), gpu::Arg::buf(di.buf)},
+                           di.elements(), error) && gpu->flush(error);
+    }
+    if (ok) ok = materialise(session, di, out, error);
+    gpu->end_frame();
+    if (!ok) {
+        g_error = error;
+        return lut ? SPK_ERR_GPU : SPK_ERR_USER;
+    }
+
+    out->elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - started).count();
+    out->reprint = 1;
+    out->negative_was_cached = 1;
+    std::snprintf(out->progress_id, sizeof out->progress_id, "%s",
+                  session->progress.progress_id.c_str());
+    session->progress.done = true;
+
+    if (out_json) {
+        Json reply = Json::object();
+        reply.set("print_stock", Json(lut->stock));
+        reply.set("lut_size", Json(double(lut->size)));
+        reply.set("paired_film", Json(lut->paired_film));
+        reply.set("declared_pairing", Json(lut->declared_pairing));
+        Json warning = film_mismatch_warning(*lut, session->params.film_stock);
+        if (!warning.is_null()) reply.set("warning", std::move(warning));
+        *out_json = dup_json(reply);
+    }
+    return SPK_OK;
 }
 
 spk_status spk_set_params(spk_session* session, const char* params_delta_json, char** out_json) {

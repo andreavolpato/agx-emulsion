@@ -2,10 +2,28 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- App Sandbox is OFF on purpose: the app spawns a Python subprocess
-	     (the render service) and reads arbitrary folders. -->
-	<key>com.apple.security.app-sandbox</key><false/>
-	<key>com.apple.security.cs.allow-jit</key><true/>
-	<key>com.apple.security.cs.disable-library-validation</key><true/>
+	<!-- Nothing. This file is deliberately an empty entitlement set, and the
+	     emptiness is the point.
+
+	     It used to carry `cs.allow-jit` and `cs.disable-library-validation`,
+	     with a comment explaining that the app "spawns a Python subprocess
+	     (the render service) and reads arbitrary folders". Every clause of
+	     that was true and none of it is: RFC-014 linked a C++ engine into
+	     the binary and there is no subprocess, no interpreter, no numba to
+	     JIT and no MLX dylibs to load. `allow-jit` was for numba and
+	     `disable-library-validation` for MLX; both weaken the hardened
+	     runtime that notarisation is about, and a self-contained Metal app
+	     needs neither.
+
+	     App Sandbox is off, which is allowed for Developer ID distribution
+	     and required only for the Mac App Store. It is now *possible* for
+	     the first time — the only thing that read arbitrary paths was the
+	     service — but turning it on is not free: `NSOpenPanel` access stops
+	     surviving a relaunch, and `Library.chooseFilesOrFolder` would need
+	     security-scoped bookmarks, which nothing in the app writes today.
+
+	     `ENABLE_HARDENED_RUNTIME = YES` lives in Tools/gen-project.py.
+	     Adding an entitlement back here is adding a hole to it, so say what
+	     it is for and what stops working without it. -->
 </dict>
 </plist>

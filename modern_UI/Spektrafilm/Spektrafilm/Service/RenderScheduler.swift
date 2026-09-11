@@ -21,7 +21,11 @@ final class RenderScheduler {
     private var generation = 0
     private var sessionID: String?
     var onResult: (@MainActor (RenderOutcome, Int) -> Void)?
-    var onError: (@MainActor (String) -> Void)?
+    /// The error itself, not a string. It used to hand over `"\(error)"`,
+    /// which meant the only place that could rewrite the engine's
+    /// developer-facing text for a user was too late to know what the failure
+    /// was (`EngineMessage`).
+    var onError: (@MainActor (Error) -> Void)?
     var onBusy: (@MainActor (Bool) -> Void)?
 
     init(client: EngineClient) { self.client = client }
@@ -83,7 +87,7 @@ final class RenderScheduler {
                 }
             } catch {
                 if gen == generation {
-                    onError?("\(error)")
+                    onError?(error)
                     // Do not spin on a failing delta: accept it as sent.
                     sent = target
                 }

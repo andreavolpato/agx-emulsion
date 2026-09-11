@@ -22,10 +22,13 @@
 //    `RenderOutcome` carrying the `MTLTexture` the engine rendered into. The
 //    old path wrote a raw rgba16 file and the client read it back — 10 ms of a
 //    30.6 ms reprint, and a 364 MB file at the full tier. That file is gone.
-//  - **`open` reads the frame here.** The engine takes pixels, not a path, so
-//    the linear ProPhoto TIFF the importer already writes is decoded on this
-//    side and passed as a buffer. `OpenRequest` is unchanged, so nothing above
-//    this class had to learn about it.
+//  - **`open` takes pixels, not a path.** `open(_:paramsDelta:)` hands the
+//    engine an `EngineFrame` — the decode rendered into a shared `MTLBuffer`
+//    — and the engine borrows it for the call (`spk_open_device`). There used
+//    to be a file here: the importer wrote a 364 MB linear TIFF and this class
+//    read it back, 6.4–7.1 s of a 45 MP open against a 47 ms render
+//    (HANDOFF-OPEN-PATH). `call(.open, …)` is refused by name, like the
+//    render methods, because what it needs does not fit through JSON.
 //
 //  Still an `actor`, but for a different reason than before. The stdio client
 //  had to be serial because the wire was one request at a time and numba's
@@ -34,7 +37,6 @@
 //  to keep one engine handle's lifecycle simple, and could be relaxed with
 //  measurement behind it.
 
-import CoreImage
 import Foundation
 import Metal
 
@@ -169,7 +171,7 @@ actor EngineClient {
 
     enum ClientError: Error, CustomStringConvertible {
         case noResources(String), notRunning, engine(String), rpc(ServiceError)
-        case badResponse(String), needsRenderPath(Method)
+        case badResponse(String), needsRenderPath(Method), needsFrame
         var description: String {
             switch self {
             case .noResources(let p): "the engine's resources are missing at \(p)"
@@ -179,6 +181,8 @@ actor EngineClient {
             case .badResponse(let s): "bad response: \(s)"
             case .needsRenderPath(let m):
                 "\(m.rawValue) returns a texture; call EngineClient.render(_:_:) instead"
+            case .needsFrame:
+                "open takes pixels; call EngineClient.open(_:paramsDelta:) with an EngineFrame"
             }
         }
     }
@@ -223,10 +227,7 @@ actor EngineClient {
             return try decode(out, as: R.self)
 
         case .open:
-            guard let req = params as? OpenRequest else {
-                throw ClientError.badResponse("open needs an OpenRequest")
-            }
-            return try openFrame(req, as: R.self)
+            throw ClientError.needsFrame
 
         case .getParams:
             var out: UnsafeMutablePointer<CChar>?
@@ -384,39 +385,38 @@ actor EngineClient {
         catch { throw ClientError.badResponse(String(json.prefix(400))) }
     }
 
-    private func openFrame<R: Decodable>(_ request: OpenRequest, as: R.Type) throws -> R {
+    /// Open one frame: the engine borrows `frame`'s buffer for this call, runs
+    /// `spk_take_rgb` into its own source, and keeps nothing of the caller's —
+    /// so the caller can (and should) drop `frame` as soon as this returns.
+    ///
+    /// One session at a time, matching the engine's own shape and the
+    /// frontend's: `open` on a new frame replaces the old one.
+    func open(_ frame: EngineFrame, paramsDelta: [String: ParamValue]?) throws -> OpenResponse {
+        if state != .running { try start() }
         guard let engine else { throw ClientError.notRunning }
-        let url = URL(fileURLWithPath: request.imagePath)
-        let frame = try EngineClient.readLinearRGB(url)
-
-        // One session at a time, matching the engine's own shape and the
-        // frontend's: `open` on a new frame replaces the old one.
         releaseSession()
 
         var reply: UnsafeMutablePointer<CChar>?
-        let delta = try encode(request.paramsDelta ?? [:])
-        let uploadStarted = Date()
-        let handle: OpaquePointer? = frame.pixels.withUnsafeBufferPointer { buffer in
-            var image = spk_image(data: buffer.baseAddress,
-                                  width: UInt32(frame.width),
-                                  height: UInt32(frame.height),
-                                  channels: UInt32(frame.channels))
-            return delta.withCString { deltaPtr in
-                withUnsafePointer(to: &image) { imagePtr in
-                    spk_open(engine, imagePtr, deltaPtr, &reply)
-                }
-            }
+        let delta = try encode(paramsDelta ?? [:])
+        let started = Date()
+        var image = spk_device_image(buffer: Unmanaged.passUnretained(frame.buffer).toOpaque(),
+                                     width: UInt32(frame.width),
+                                     height: UInt32(frame.height),
+                                     channels: UInt32(frame.channels))
+        let handle: OpaquePointer? = delta.withCString { deltaPtr in
+            withUnsafePointer(to: &image) { spk_open_device(engine, $0, deltaPtr, &reply) }
         }
-        // What the engine does with the buffer: upload it and build the
-        // session's tiers. Small next to the read above, and worth separating
-        // from it — a slow upload would mean a slow GPU path, not a slow file.
-        EngineClient.logFrameRead(String(format: "frame upload to the engine (%.0f MB): %.0f ms",
-                                         Double(frame.width * frame.height * 16) / 1e6,
-                                         Date().timeIntervalSince(uploadStarted) * 1000))
+        // What the engine does with the buffer: one kernel to its own
+        // three-channel source, and the pipeline for the stock pair. There is
+        // no host copy left to time — that was 235 ms of 727 MB at 45 MP.
+        EngineClient.logOpen(String(format: "engine.open: %d×%d, %.0f MB borrowed, %.0f ms",
+                                    frame.width, frame.height,
+                                    Double(frame.buffer.length) / 1e6,
+                                    Date().timeIntervalSince(started) * 1000))
         guard let handle else { throw ClientError.engine(lastError()) }
         session = handle
-        let decoded: R = try decode(reply, as: R.self)
-        if let open = decoded as? OpenResponse { sessionID = open.sessionID }
+        let decoded: OpenResponse = try decode(reply, as: OpenResponse.self)
+        sessionID = decoded.sessionID
         return decoded
     }
 
@@ -466,106 +466,23 @@ actor EngineClient {
         return RenderOutcome(response: response, texture: texture)
     }
 
-    // MARK: - the frame
+    // MARK: - the open-path log
 
-    struct Frame {
-        let pixels: [Float]
-        let width: Int
-        let height: Int
-        let channels: Int
-    }
-
-    /// Read the importer's linear ProPhoto TIFF into tightly packed float32
-    /// RGB, top row first.
+    /// On the same switch the canvas and the session read
+    /// (`SPEKTRAFILM_CANVAS_LOG=1`), so that one run prints one story.
     ///
-    /// The engine takes pixels rather than a path, so this is where the file
-    /// stops being the interface. Two details are load-bearing:
+    /// Kept after the file handoff it was written to expose had gone, for the
+    /// reason it was written: `Session`'s clock once called 6.2 s of reading a
+    /// TIFF back `service.open`, a name that sounded like the engine working,
+    /// and it took two sessions to notice (HANDOFF-OPEN-PATH §7). A number
+    /// that names its cause is the cheap defence against that happening again.
     ///
-    /// - **No vertical flip.** `CIContext.render(_:toBitmap:...)` already
-    ///   writes the buffer top row first, unlike `render(_:to:)` into a Metal
-    ///   texture, which needs one (see `ImageDecoder.makePreviewTexture`).
-    ///   Adding one here on the strength of "Core Image's origin is
-    ///   bottom-left" produced a correctly developed, upside-down photograph
-    ///   -- no crash, nothing in a log, and it survived a 27-case parity suite
-    ///   because that suite hands the engine an array and never comes through
-    ///   this function. `testTheFrameIsReadTopRowFirst` pins it.
-    /// - **The bitmap is requested in linear ProPhoto**, the space the
-    ///   importer wrote and the space `io.input_color_space` names. Asking
-    ///   Core Image for the working space instead would apply a conversion the
-    ///   engine then applies again.
-    static func readLinearRGB(_ url: URL) throws -> Frame {
-        let readStarted = Date()
-        guard let image = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
-            throw ImageDecoder.Failure.unsupported(url)
-        }
-        guard let space = ImageDecoder.linearProPhoto else { throw ImageDecoder.Failure.noColorSpace }
-        let opened = Date()
-        let extent = image.extent.integral
-        let width = Int(extent.width), height = Int(extent.height)
-        guard width > 0, height > 0 else { throw ImageDecoder.Failure.unsupported(url) }
-
-        let placed = image.transformed(by: .init(translationX: -extent.origin.x,
-                                                 y: -extent.origin.y))
-
-        var rgba = [Float](repeating: 0, count: width * height * 4)
-        rgba.withUnsafeMutableBytes { raw in
-            ImageDecoder.context.render(placed,
-                                        toBitmap: raw.baseAddress!,
-                                        rowBytes: width * 16,
-                                        bounds: CGRect(x: 0, y: 0, width: width, height: height),
-                                        format: .RGBAf,
-                                        colorSpace: space)
-        }
-        // Handed over with its alpha still on. `.RGBAf` is the only float
-        // format Core Image will render, and the engine drops the fourth
-        // channel on the GPU (`spk_take_rgb`, which is the first node anyway).
-        // Stripping it here instead was a per-pixel Swift loop over the whole
-        // frame -- at -Onone, which is what a Debug build compiles, it was
-        // most of a 5.1 s `open` on a 24 MP RAW.
-        let rendered = Date()
-        let megabytes = Double(width * height * 16) / 1e6
-        let renderSeconds = rendered.timeIntervalSince(opened)
-        logFrameRead(String(format: "frame read: tiff %d×%d %.0f MB on disk · decode %.0f ms"
-                            + " · ci-render-to-bitmap %.0f ms (%.0f MB float RGBA, %.0f MB/s)",
-                            width, height, Double((try? FileManager.default
-                                .attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0) / 1e6,
-                            opened.timeIntervalSince(readStarted) * 1000,
-                            renderSeconds * 1000, megabytes,
-                            renderSeconds > 0 ? megabytes / renderSeconds : 0))
-        return Frame(pixels: rgba, width: width, height: height, channels: 4)
-    }
-
-    /// The frame's own timing, on the same switch the canvas and the session
-    /// read (`SPEKTRAFILM_CANVAS_LOG=1`), so that one run prints one story.
-    ///
-    /// `Session`'s clock calls all of this `service.open`, and on a 45 MP RAW
-    /// that number is almost entirely this function. Measured on
-    /// `_DSC2439.NEF` (5504×8256, 364 MB handoff TIFF, 727 MB float RGBA out):
-    ///
-    ///     decode 2 ms · ci-render-to-bitmap 6151 ms (118 MB/s) · upload 235 ms
-    ///
-    /// and the render behind it is 46 ms. So it is neither the engine nor the
-    /// scheduler: it is Core Image rasterising the handoff TIFF, once per
-    /// *image* and not once per launch — a second, different TIFF in the same
-    /// process pays it again (5490 ms, then 5518 ms). Nor is it the write
-    /// side, the disk, or the output format: the file mmaps in 0 ms and
-    /// ImageIO hands it over in 1 ms, and rendering it to `.RGBAh`, or to
-    /// `extendedLinearDisplayP3`, or through a context whose working space is
-    /// the destination, all produce the *same* 5.5 s. What is fast is the
-    /// frame we started with: the same decode rendered straight into the same
-    /// buffer is **241 ms**, and 181 ms warm.
-    ///
-    /// That is the shape of the answer to "why is the first frame of a session
-    /// slow" — the frame is handed to a process that shares its address space
-    /// through a file, and the file costs 20× the decode it came from.
-    ///
-    /// The switch is read here rather than borrowed from `Renderer.logDraws`,
-    /// which is main-actor-isolated and out of reach from this actor: same
-    /// environment variable, same prefix, same run.
+    /// Read here rather than borrowed from `Renderer.logDraws`, which is
+    /// main-actor-isolated and out of reach from this actor.
     private nonisolated static let logsOpenPath =
         ProcessInfo.processInfo.environment["SPEKTRAFILM_CANVAS_LOG"] == "1"
 
-    private nonisolated static func logFrameRead(_ message: String) {
+    private nonisolated static func logOpen(_ message: String) {
         guard logsOpenPath else { return }
         FileHandle.standardError.write(Data("session: \(message)\n".utf8))
     }

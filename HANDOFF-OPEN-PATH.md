@@ -4,7 +4,7 @@
 |---|---|
 | **For** | the next session. Frontend (`modern_UI/**`), unless you take the engine-side route in §5.2. |
 | **From** | 2026-09-11, the session that fixed the Solve/Original row and the decode-first open (§0) and then measured this. |
-| **Status** | **Diagnosed and measured. Not fixed.** One code change landed — the instrument in §2.1. The fix is §5 and it needs a decision that was deliberately not taken here. |
+| **Status** | **Fixed 2026-09-11 — §8.** §5.1 and §5.2 both landed (variant C of §8.1, not §5.2's texture): 45 MP open 6926 → ~1130 ms. Everything above §8 is the diagnosis as it stood, kept because its numbers are why the fix is shaped the way it is. |
 | **Read first** | `AGENTS.md` traps 17 and 23, then §3.1.3 of `HANDOFF-FRONTEND-POLISH.md` (the decision that a full-resolution handoff TIFF is what makes detail renders and export possible — this file asks whether that decision is still worth its price), then `ARCHITECTURE.md` §8.8. |
 | **Audience** | a session that knows this repo. Nothing here re-explains what the pipeline is, and where a number was not measured it says so; §3.3 and §5 are the parts that need judgement rather than reading. |
 | **Numbers** | every figure below was measured on this checkout, on this machine, on 2026-09-11. Commands in §2.3. |
@@ -439,3 +439,107 @@ will pay ~6.9 s per frame before they pay the 1 s per edit.
   Nikon `_DSC0897.NEF` (51 MB, whose sidecar was written the same day) is the
   obvious second sample; so is a 24 MP A7m3 frame, which should show whether
   the 118 MB/s is a pixel-rate or a per-tile constant.
+
+---
+
+## 8. What landed (2026-09-11, the session after)
+
+### 8.1 The premise, re-measured first
+
+§5.1's estimate rested on a 241 ms direct render, and §3.4 is a warning
+about exactly that kind of number. Re-measured one variant per **fresh
+process**, first render, the app's order (1600 px preview first), 45 MP
+`_DSC2439.NEF`, two interleaved rounds, load 5.4:
+
+| variant | frame to float RGBA | pixels vs B |
+|---|---|---|
+| A — today: read the handoff TIFF | 7079 / 6351 ms | max \|Δ\| 5.9e-4, mean 1.8e-5 |
+| B — decode → `toBitmap` into `[Float]` | 226 / 239 ms | — |
+| **C — decode → `toBitmap` into a shared `MTLBuffer`** | 236 / 239 ms | **bit-identical** |
+| D — `render(to:)` a linear rgba32Float texture over the buffer | 187 / 190 ms | max \|Δ\| 2.5e-4 |
+
+C was chosen: the same pixels as B, and the engine can borrow the memory.
+D is 40 ms faster, not identical, and needs the vertical flip trap 23 is
+about. A vs B also says the file was the *less* faithful path.
+
+### 8.2 The change
+
+- **Engine (additive):** `spk_open_device` + `spk_device_image` borrow a
+  caller's `id<MTLBuffer>` for the length of the call; `Gpu::borrow` wraps it
+  without a copy (retained, never pooled). `spk_open` and `spk_open_device`
+  share one body (`open_frame`) and differ only in how the frame reaches the
+  device; a device frame always goes through `spk_take_rgb`, which is the copy
+  that ends the borrow. `spk_ctypes.py` is untouched.
+- **Frontend:** a RAW is decoded **twice** (`ImageDecoder` header).
+  `DecodedImage.linear` (Apple's tone rendering off) is the only thing
+  `ImageDecoder.engineFrame` renders for the engine; `DecodedImage.display`
+  (Apple's default) is what the canvas shows before a develop, under Space and
+  left of the split. Same geometry in both — **lens correction off in both**:
+  Apple's default corrects the Z7 II's lens, which keeps the extent and moves
+  the picture, so a literal default would be misregistered against the print.
+  White balance follows the user's in both.
+- **Deleted:** `LinearCache`, `Session.linearTIFF`, `writeLinearTIFF`,
+  `readLinearRGB`, `OpenRequest`, `TIFFHandoffTests`. `Session` removes the old
+  `Caches/…/linear` directory at launch (it held 4.2 GB here). `call(.open, …)`
+  is refused by name; `EngineClient.open(_:paramsDelta:)` takes an `EngineFrame`.
+- **The comparison, which was wrong at zoom before any of this:** the
+  "before" was the 1600 px decode stretched against a native-resolution print
+  at 200 %, so the left half was soft and the right half grainy. The renderer
+  now compares against `before` — the original at the detail print's
+  resolution, rendered only while a comparison is up (`Session.
+  ensureOriginalDetail`). The "After" label also sat under the tier badge once
+  the picture reached the canvas edge; the badges are one list
+  (`Session.canvasBadges`) the overlay steps around. `renderOffscreen` now
+  honours "show original" like `draw` does, and `--original` captures it.
+
+### 8.3 Measured after (Debug build, load 2.6–2.7)
+
+```text
+open path (ms): decode 183 · preview-texture 238 · warm-up 30 · frame 282
+               · engine.open 203 · solve 137 · reprint 47 · TOTAL 1128
+```
+
+Three launches: 1125–1140 ms (a first launch with a cold disk read the NEF in
+924 ms and totalled 1964). `reprint` is unchanged at 46–49 ms.
+
+**What §5.2 actually bought** — interleaved A/B in one build, the borrow
+against a host `spk_open` of the same buffer: `spk_open` 202–204 ms vs
+257–281 ms, peak RSS 1.66–1.70 GB vs 3.02–3.15 GB (the host arm carried one
+extra `[Float]` copy, so the fair saving is ~55–75 ms and ≥ 0.6 GB). *Not*
+the 235 ms §5.2 implied: most of that phase was never the copy.
+
+### 8.4 Two traps this session paid for
+
+- **`-[MTLBuffer contents]` autoreleases the buffer.** It returns an inner
+  pointer, and Swift (like ARC) retains and autoreleases the receiver to keep
+  it valid. `engineFrame` therefore parked the 727 MB frame in whatever pool
+  the calling thread drained next, after every owner had dropped it —
+  `testTheEngineKeepsNothingOfTheCallersBuffer` saw it alive after `open`. The
+  render is wrapped in `autoreleasepool`. A first guess (the engine's
+  autoreleased command buffers) was tested by removing it and was *not* the
+  holder; that change was reverted rather than kept on suspicion.
+- **The frame is now ~50 ms slower than §8.1's B** (≈280 ms, which matches
+  B with no preview in front of it): the preview warms the *display*
+  decode's demosaic, not the linear one's. That is the price of the two
+  decodes being separate objects, and it was paid deliberately.
+
+### 8.5 Where the open's time is now, and the next lever
+
+`engine.open` is 30 ms of upload and `spk_take_rgb`, and **~170 ms of
+`Pipeline::build`** — after `warm_up` has already built the same stock pair,
+with `1 hit / 3 miss` on the setup cache in every open's log line. That is
+the next thing to read (`core/setup_cache.hpp`: which key differs between
+`warm_up` and `open`), and Debug's `-O0` engine (trap 18 §2) is part of it.
+After that: `decode` + `preview-texture` (~420 ms) is time to first picture
+and is Core Image's; `solve` is 137 ms.
+
+### 8.6 Tests
+
+124 Swift tests (was 119): `DecodeSeparationTests` (the routing with solids
+that cannot be confused; both RAW filters' geometry and white balance on the
+Z7 II; the original vs the print end to end — grid correlation 0.996, 0.06
+against the flipped print as the control), three `spk_open_device` tests in
+`EngineClientTests` (byte-identical live print to `spk_open` with grain and
+glare off; a short buffer refused; the caller's buffer not kept), and the
+`before` rule in `CompareAndFlagsTests`. All six parity harnesses,
+`gpu_smoke` and the math guard: green, exit 0.

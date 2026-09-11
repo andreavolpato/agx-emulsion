@@ -1,0 +1,57 @@
+Changes to the spektrafilm profiles and LUTs in this application
+================================================================
+
+Required by SPEKTRAFILM_LICENSE.txt ("Changes to profiles and LUTs should be
+tracked in a separate CHANGELOG.txt file shipped with them").
+
+Original author:  Andrea Volpato
+Canonical source: https://github.com/andreavolpato/spektrafilm
+Licence:          CC BY-SA 4.0
+
+
+The 28 film and paper profiles  --  UNMODIFIED
+----------------------------------------------
+
+`Resources/engine/profiles/*.json` are byte-for-byte copies of
+`src/spektrafilm/data/profiles/*.json` from the upstream project. Nothing in
+this application edits them; `engine/tools/bake_resources.py` copies them and
+`engine/src/core/profile.cpp` reads them.
+
+
+The 8 baked print-preview LUTs  --  DERIVED
+-------------------------------------------
+
+Inside `Resources/engine/spektrafilm_constants.bin`, as `print_lut/<stock>`
+and `print_lut_axes/<stock>`: one 33x33x33x3 float32 table per print stock,
+plus its per-channel density axes.
+
+These are derivatives of the profiles, and the licence is explicit that they
+are ("LUTs and similar artifacts are interpreted as direct encodings of the
+information in the original profiles"). How they were made:
+
+  - `scripts/bake_all_print_luts.py` evaluated this project's own physical
+    print+scan simulation over a 33^3 grid of film densities, for each print
+    stock paired with one film stock. The pairing is recorded per stock in
+    `Resources/engine/print_luts.json` as `paired_film`, along with whether
+    the profile data declared that pairing or the bake chose a default
+    (`declared_pairing`).
+  - `scanning.glare` is deliberately excluded. It is a spatial, stochastic
+    veiling field and cannot be represented in a pointwise table.
+  - The output is Display P3 with its transfer function applied, stored
+    unclamped -- so a print colour outside P3's gamut is a negative
+    coordinate rather than a clipped one.
+
+They are not a scanned reference print. They are this simulation's output.
+
+Distributed under CC BY-SA 4.0, the same licence as the profiles they derive
+from, as the share-alike condition requires.
+
+
+The constants that are not derived from the profiles
+----------------------------------------------------
+
+The rest of `spektrafilm_constants.bin` -- the 1931 standard observer, the
+illuminant SDs, the colourspace primaries and matrices, the CAT cone
+matrices, the Mallett basis, the Hanatos irradiance spectra, and the measured
+KG3 and lens filter curves -- is published colour-science data, not Andrea
+Volpato's profile work, and is not covered by this file.

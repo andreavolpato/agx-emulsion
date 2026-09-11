@@ -101,6 +101,39 @@ final class CompareAndFlagsTests: XCTestCase {
         XCTAssertEqual(renderer.compareMode, .off, "nothing to compare against")
     }
 
+    /// What the canvas compares against follows the resolution it is showing.
+    ///
+    /// At 200 % the print is the native-resolution render, and comparing it
+    /// with the 1600 px original stretched to match made the left half soft
+    /// and the right half grainy — a difference the eye reads as the film's.
+    /// The high-resolution original is only ever a picture of *one* original
+    /// at *one* detail print, so it goes when either does.
+    func testTheBeforeFollowsTheDetailPrintAndIsDroppedWithIt() throws {
+        let renderer = try XCTUnwrap(Renderer())
+        let original = try XCTUnwrap(renderer.store.makeWritable(width: 16, height: 24))
+        let detail = try XCTUnwrap(renderer.store.makeWritable(width: 64, height: 96))
+        let sharp = try XCTUnwrap(renderer.store.makeWritable(width: 64, height: 96))
+        renderer.original = original
+        XCTAssertTrue(renderer.before === original, "at the live tier the before is the live-tier original")
+
+        renderer.setDetail(detail)
+        XCTAssertTrue(renderer.before === original, "until a sharper one exists, the live-tier one stands in")
+        renderer.setOriginalDetail(sharp)
+        XCTAssertTrue(renderer.before === sharp, "zoomed in, the before is the original at the detail's resolution")
+
+        renderer.hideDetail()
+        XCTAssertTrue(renderer.before === original, "zoomed back out, the live tier again")
+        renderer.setDetail(detail)
+        XCTAssertTrue(renderer.before === sharp, "and a swap back in keeps it, like the detail print itself")
+
+        renderer.dropDetail()
+        XCTAssertNil(renderer.originalDetail, "a dropped detail print takes its original with it")
+        renderer.setDetail(detail)
+        renderer.setOriginalDetail(sharp)
+        renderer.original = try XCTUnwrap(renderer.store.makeWritable(width: 16, height: 24))
+        XCTAssertNil(renderer.originalDetail, "a new original (a new frame, a new white balance) invalidates it")
+    }
+
     // MARK: the crop keys
 
     func testReturnKeepsTheCropAndEscPutsItBack() {

@@ -4,14 +4,15 @@
 //  the wire names. Additions made to the service for this client (all
 //  additive, all optional on the wire) are marked `[client-added]`:
 //
-//    - `output: "rgba16"` on reprint / preview_render / preview_stock_lut
-//      writes a raw 16-bit RGBA dump next to the TIFF, so the client uploads
-//      it straight into a texture instead of decoding a TIFF whose colour
-//      tags it must not trust.
-//    - unique output filenames per call (a counter), so a result cannot be
-//      overwritten by the next request before it is read.
-//    - `export_di` — the DI package: normalised-density negative TIFF plus
-//      the print stock's `.cube`.
+//    - `export_di` — the DI package: normalised-density negative plus the
+//      print stock's `.cube`.
+//
+//  Every reply that used to carry a *path* no longer does. The engine renders
+//  into an `MTLTexture` in this process (RFC-014), so `reprint`,
+//  `preview_render`, `export`, `preview_stock_lut` and `export_di` all return
+//  pixels through `RenderOutcome` and leave only metadata in these types. The
+//  `output: "rgba16"` field and the workspace filename counter it needed are
+//  gone with the file they described.
 
 import Foundation
 
@@ -118,12 +119,6 @@ struct Capabilities: Decodable, Sendable {
     }
 }
 
-struct OpenRequest: Encodable, Sendable {
-    let imagePath: String
-    var paramsDelta: [String: ParamValue]?
-    enum CodingKeys: String, CodingKey { case imagePath = "image_path", paramsDelta = "params_delta" }
-}
-
 struct OpenResponse: Decodable, Sendable {
     let sessionID: String
     let meta: Meta
@@ -204,26 +199,39 @@ struct RenderResponse: Decodable, Sendable {
     }
 }
 
-struct StockLUTRequest: Encodable, Sendable {
-    let sessionID: String
-    let printStock: String
-    var tier = "live"
-    var output = "rgba16"
-    enum CodingKeys: String, CodingKey { case sessionID = "session_id", printStock = "print_stock", tier, output }
-}
-
+/// `preview_stock_lut`'s reply, pixels aside.
+///
+/// No paths any more: the engine hands back a texture the way every other
+/// render does, so what is left here is the metadata — how long the table
+/// lookup took, which film the table was baked against, and whether that is
+/// the film this session is using.
 struct StockLUTResponse: Decodable, Sendable {
-    let previewPath: String
+    let printStock: String
+    let tier: String
     let applyMs: Double
+    let applyBackend: String
+    let lutSource: String
     let pairedFilm: String
     let declaredPairing: Bool
+    /// Present exactly when the session's film is not `pairedFilm`. The table
+    /// is baked through a specific negative's dye spectra as well as through
+    /// the paper, so a mismatched film is an approximation whose error nobody
+    /// has measured (PRD §7.3) — which is worth saying rather than hiding.
     let warning: String?
-    let rawPath: String?
-    let width: Int?
-    let height: Int?
     enum CodingKeys: String, CodingKey {
-        case previewPath = "preview_path", applyMs = "apply_ms", pairedFilm = "paired_film"
-        case declaredPairing = "declared_pairing", warning, rawPath = "raw_path", width, height
+        case tier, warning
+        case printStock = "print_stock", applyMs = "apply_ms", applyBackend = "apply_backend"
+        case lutSource = "lut_source", pairedFilm = "paired_film", declaredPairing = "declared_pairing"
+    }
+}
+
+/// One print stock's entry in `spk_print_lut_catalog`.
+struct PrintLUTEntry: Decodable, Sendable {
+    let pairedFilm: String
+    let declaredPairing: Bool
+    let lutSize: Int
+    enum CodingKeys: String, CodingKey {
+        case pairedFilm = "paired_film", declaredPairing = "declared_pairing", lutSize = "lut_size"
     }
 }
 
@@ -235,20 +243,22 @@ struct ExportRequest: Encodable, Sendable {
     enum CodingKeys: String, CodingKey { case sessionID = "session_id", format, bitDepth = "bit_depth", output }
 }
 
-struct ExportDIRequest: Encodable, Sendable {
-    let sessionID: String
-    let outDir: String
-    let baseName: String
-    enum CodingKeys: String, CodingKey { case sessionID = "session_id", outDir = "out_dir", baseName = "base_name" }
-}
-
+/// `export_di`'s reply, pixels aside.
+///
+/// The three files are the client's business now, so no paths cross: the
+/// engine returns the normalised-density picture as a texture and the LUT as
+/// a pointer (`spk_print_lut_table`), and `Exporter` writes the TIFF, the
+/// `.cube` and the optional print preview from those.
 struct ExportDIResponse: Decodable, Sendable {
-    let diPath: String
-    let cubePath: String
-    let printPreviewPath: String?
+    let printStock: String
+    let lutSize: Int
+    let pairedFilm: String
+    let declaredPairing: Bool
     let warning: String?
     enum CodingKeys: String, CodingKey {
-        case diPath = "di_path", cubePath = "cube_path", printPreviewPath = "print_preview_path", warning
+        case warning
+        case printStock = "print_stock", lutSize = "lut_size"
+        case pairedFilm = "paired_film", declaredPairing = "declared_pairing"
     }
 }
 

@@ -52,7 +52,7 @@ struct CompareOverlay: View {
                     let right = min(v.offset.x + v.image.width * v.scale, geo.size.width) - 34
                     let labelY = max(y0, 0) + 16
                     if x - left > 24 { label("Before").position(x: left, y: labelY) }
-                    if right - x > 24 { label("After").position(x: right, y: labelY) }
+                    if right - x > 24 { label("After").position(x: right, y: afterY(labelY, right: right, width: geo.size.width)) }
                 }
                 .contentShape(Rectangle())
                 .gesture(drag(in: v, width: geo.size.width))
@@ -62,6 +62,16 @@ struct CompareOverlay: View {
         // the handle is the control. The gesture is attached above rather
         // than here so the rest of the canvas keeps its pan.
         .allowsHitTesting(session.comparing)
+    }
+
+    /// Where "After" goes: its corner, unless the canvas's status badges are
+    /// there too — which they are whenever the picture reaches the canvas's
+    /// right edge, i.e. at any zoom past fit. Then it sits below them.
+    private func afterY(_ y: CGFloat, right: CGFloat, width: CGFloat) -> CGFloat {
+        let badges = session.canvasBadges.count
+        guard badges > 0, width - right < CanvasBadges.reservedWidth else { return y }
+        let stack = CanvasBadges.inset + CGFloat(badges) * (CanvasBadges.height + CanvasBadges.spacing)
+        return max(y, stack + CanvasBadges.height / 2 + CanvasBadges.spacing)
     }
 
     /// The split's x in view points.
@@ -104,4 +114,16 @@ struct CompareOverlay: View {
                 session.comparePosition = Double((g.location.x - v.offset.x) / span)
             }
     }
+}
+
+/// The geometry of the canvas's top-right badge stack (`EditorWindow`), shared
+/// with the one overlay that has to stay out of its way.
+enum CanvasBadges {
+    static let inset: CGFloat = 8
+    static let spacing: CGFloat = 4
+    /// A caption-size capsule: the font's line plus 2 pt above and below.
+    static let height: CGFloat = 18
+    /// How far in from the canvas's right edge the stack can reach — its
+    /// widest badge, "full resolution…", plus the inset, with a margin.
+    static let reservedWidth: CGFloat = 150
 }

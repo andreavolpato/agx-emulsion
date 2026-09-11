@@ -1,8 +1,30 @@
 # Handoff: `preview_stock_lut` implementation (for a fresh session)
 
-**Status:** prototyped, measured, and shipped as data assets. Not yet wired
-into an actual running service — this session built and validated the
-mechanism, not the service endpoint.
+**Status (revised 2026-09-10): shipped.** `preview_stock_lut` and the DI
+package are implemented in the native C++ engine, the eight LUTs are baked
+into the app bundle, and `engine/tests/parity_lut.py` holds all of it against
+this file's own Python reference. See `ARCHITECTURE.md` §8.8 for the C++/Swift
+split and §8.7 for the re-measured speed.
+
+Two corrections to what follows, both about numbers this file states
+correctly and which are easy to carry into the wrong comparison:
+
+- **§3.1's 190× is against scipy on the CPU.** Against a *reprint on the
+  GPU* — which is what a user would otherwise have got — the flip is about
+  4×: 2.0 ms vs 9 ms at the live tier, 47 vs 167 at full, on a 45 MP frame.
+  Still worth having; not two orders of magnitude.
+- **§3's open items 2 and 3.** Item 2 (wire it into a service) is done, in the
+  engine rather than a service, because there is no service any more
+  (RFC-014). Item 3 — the film-mismatch question — is **still open and was
+  not decided**: the engine takes option (b)+(c)'s honest middle, answering
+  the mismatched pair and *warning* that the table is coupled to the paired
+  film's dye spectra with unmeasured error. Nobody has baked the film×print
+  cross product or measured the approximation, which is exactly what §3.3
+  says to do rather than guess.
+
+The original status line, for the record: *prototyped, measured, and shipped
+as data assets. Not yet wired into an actual running service — this session
+built and validated the mechanism, not the service endpoint.*
 
 **Context you need first:** `PRD-callable-render-api.md` §7.3 (the
 `preview_stock_lut` contract box) and `API-SPEC-callable-render-service.md`

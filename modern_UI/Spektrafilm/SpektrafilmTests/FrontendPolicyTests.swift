@@ -2,7 +2,7 @@
 //
 //  These are not coverage for its own sake. Each one pins a rule whose wrong
 //  value is invisible in a screenshot: which tier a zoom asks for, whether two
-//  files share a sidecar, and which cache entry is evicted first.
+//  files share a sidecar, and whether a detail render is still the truth.
 
 import Metal
 import XCTest
@@ -98,21 +98,5 @@ final class FrontendPolicyTests: XCTestCase {
         XCTAssertNotEqual(nef, tif)
         XCTAssertEqual(Sidecar.legacyURL(for: dir.appending(path: "a.NEF")).lastPathComponent,
                        "a.spektra.json")
-    }
-
-    /// HANDOFF §3.1.1: the cache is bounded and evicts least-recently-used.
-    func testLinearCacheEvictsTheOldestFirst() throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: "linearcache-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        for (i, bytes) in [100, 100, 100].enumerated() {
-            let url = dir.appending(path: "f\(i).tif")
-            try Data(count: bytes).write(to: url)
-            try FileManager.default.setAttributes(
-                [.modificationDate: Date(timeIntervalSince1970: Double(i))], ofItemAtPath: url.path)
-        }
-        LinearCache.prune(in: dir, limit: 250)
-        let left = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
-        XCTAssertEqual(left, ["f1.tif", "f2.tif"], "the least recently used entry goes first")
     }
 }

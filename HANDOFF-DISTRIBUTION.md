@@ -1,9 +1,14 @@
 # HANDOFF-DISTRIBUTION.md — what ships, what is still machine-bound, what is missing
 
-Written 2026-09-10, after RFC-014 linked the render engine into the app. It
-answers one question first — **does the app carry its own data, or is it still
-tied to this machine?** — and then lists what stands between the current build
-and something a stranger can download and run.
+Written 2026-09-10 after RFC-014 linked the render engine into the app, and
+**revised the same day** once the packaging, licensing and configuration work
+in §2 was done and the last three unported methods were ported. §3's
+checklist is the current state; where a section describes what *was* wrong,
+it now says what replaced it.
+
+It answers one question first — **does the app carry its own data, or is it
+still tied to this machine?** — and then lists what stands between the current
+build and something a stranger can download and run.
 
 Everything below was measured on this checkout, not inferred. Where a claim is
 a *test*, the command is given.
@@ -43,9 +48,10 @@ handed to `spk_engine_create`:
 
 | what | path | size | contents |
 |---|---|---|---|
-| baked constants | `spektrafilm_constants.bin` | 6.0 MB | 55 entries: the 1931 CMFS, illuminant SDs, colourspace primaries and matrices, the CAT cone matrices, the Mallett basis, the measured KG3 and lens filter curves, and **the Hanatos irradiance spectra LUT** (192×192×81, float16, 5.97 MB of the 6.0) |
+| baked constants | `spektrafilm_constants.bin` | 9.45 MB | 71 entries: the 1931 CMFS, illuminant SDs, colourspace primaries and matrices, the CAT cone matrices, the Mallett basis, the measured KG3 and lens filter curves, **the Hanatos irradiance spectra LUT** (192×192×81, float16, 5.97 MB) and **the 8 print-preview LUTs** (33³×3 float32 plus axes, 3.45 MB) |
 | film + paper profiles | `profiles/<stock>.json` | 5.8 MB | all 28 stocks |
 | neutral filter database | `neutral_print_filters.json` | small | the (paper, illuminant, film) filter packs `solve` reads |
+| print-LUT metadata | `print_luts.json` | small | per stock: `paired_film`, `declared_pairing`, `lut_size` |
 | the kernels | `spektrafilm.metallib` | small | compiled by `engine/build.sh` with the safe-math flags |
 
 Nothing else. `grep -rn "resources_dir\|ifstream\|fopen" engine/src` is the
@@ -81,46 +87,116 @@ changing anything under `engine/resources`.
 | the user's photographs | `NSOpenPanel`, chosen at run time | no — user data, correctly |
 | decoded-TIFF cache, sidecars, thumbnails | `~/Library/Caches/com.hanze.spektrafilm` | no — per-user, correct |
 
-### What is deliberately *not* bundled
+### The print-preview LUTs — bundled, as this section predicted
 
-`src/spektrafilm/data/luts/print_preview/` (5.9 MB of `.npz` print-preview
-LUTs) is **not** in the app, because the only three methods that read it —
-`export_di`, `preview_stock_lut`, and the DI package — are not ported and are
-refused by name (`ARCHITECTURE.md` §8.8). **When those land, these LUTs become
-a bundling requirement**, and `engine/tools/bake_resources.py` is where they
-should go.
+This section used to say the 8 `.npz` print-preview LUTs were deliberately
+absent, because the only three methods that read them were unported, and that
+**"when those land, these LUTs become a bundling requirement"**. Those methods
+landed. So did the requirement.
+
+`bake_resources.bake_print_luts` now writes them into the constants blob as
+`print_lut/<stock>` (33³×3 float32) and `print_lut_axes/<stock>` (3×33), with
+`print_luts.json` as the metadata index — 3.45 MB, which is why the blob is
+9.45 MB rather than 6.0. `engine/tests/parity_lut.py` reads them back out of
+the *shipping dylib* and holds them bit-exact against the `.npz`.
+
+Two things fell out of it that were not obvious:
+
+- **The bake checks its own assumption.** The trilinear kernel maps a density
+  to a grid coordinate with one subtract and one multiply, which is only the
+  same interpolation the scipy reference does when the axis is uniformly
+  spaced. It is, on all eight shipped assets — but that is a property of the
+  bake, not a guarantee, so `bake_print_luts` verifies it at bake time, where
+  a future re-bake would trip it, rather than in a kernel that cannot report
+  anything.
+- **They are CC BY-SA 4.0 derivatives**, not neutral data. The licence is
+  explicit that a LUT is "a direct encoding of the information in the original
+  profiles". Bundling them is what made §2.3's licence work mandatory rather
+  than tidy.
 
 ---
 
-## 2. What is missing before this can be distributed
+## 2. Signing, licensing and packaging
 
-Ordered by what blocks a download working at all.
+Everything below has been done except the one step that needs a certificate
+this repository must not contain. §2.1 is now the only real blocker, and it is
+a purchase rather than a piece of work.
 
-### 2.1 Signing and notarisation — blocks everything
+### 2.1 Signing and notarisation — the one remaining blocker
 
-Measured on a Release build:
+**Done:** the pipeline. `modern_UI/Spektrafilm/Tools/package.sh` is
+archive → export → verify → DMG → notarise → staple → `spctl`, and it runs.
+Measured on this machine:
 
 ```
-$ codesign -dv …/Release/Spektrafilm.app
-Signature=adhoc
-$ spctl -a -vv …/Release/Spektrafilm.app
-…/Spektrafilm.app: rejected
+$ Tools/package.sh
+** ARCHIVE SUCCEEDED **   ** EXPORT SUCCEEDED **
+  CodeDirectory v=20500 … flags=0x10002(adhoc,runtime)
+  …/Spektrafilm.app: valid on disk
+  …/Spektrafilm.app: satisfies its Designated Requirement
+  …/Spektrafilm-0.3-arm64.dmg (10M)
+=== notarisation
+  skipped: no Developer ID. Gatekeeper will refuse this on any other Mac.
+=== gatekeeper
+  …/Spektrafilm-0.3-arm64.dmg: rejected
+  source=no usable signature
 ```
 
-`Tools/gen-project.py` sets `CODE_SIGN_IDENTITY = "-"` (ad-hoc),
-`DEVELOPMENT_TEAM = ""`, and **`ENABLE_HARDENED_RUNTIME = NO`**. An ad-hoc
-signature is fine on the machine that made it and is refused by Gatekeeper
-everywhere else. Distribution needs, in order:
+`flags=…,runtime` is the change that mattered:
+**`ENABLE_HARDENED_RUNTIME` is `YES`** now, in both configurations, so a Debug
+build exercises the same hardening the release ships with. `spctl` still says
+*rejected*, correctly, and the script says why rather than exiting 0 on an
+unshippable artefact.
 
-1. a Developer ID Application certificate and a team id;
-2. `ENABLE_HARDENED_RUNTIME = YES` — **required** for notarisation;
-3. `codesign --options runtime --timestamp` over the bundle;
-4. `notarytool submit --wait` then `stapler staple`;
-5. `spctl -a -vv` returning *accepted*, on a machine that has never seen the
-   source.
+**Not done, and cannot be here:** the Developer ID Application certificate.
+Once you have one:
 
-All five settings live in `gen-project.py`, which is generated — change them
-there, not in Xcode, or the next `gen-project.py` run reverts them.
+```bash
+export SPEKTRAFILM_SIGN_IDENTITY="Developer ID Application: NAME (TEAMID)"
+export SPEKTRAFILM_TEAM_ID=TEAMID
+xcrun notarytool store-credentials SPEKTRAFILM_NOTARY \
+    --apple-id you@example.com --team-id TEAMID --password <app-specific>
+export SPEKTRAFILM_NOTARY_PROFILE=SPEKTRAFILM_NOTARY
+modern_UI/Spektrafilm/Tools/package.sh
+```
+
+`gen-project.py` reads those two variables, so the identity lands in the
+generated pbxproj rather than being passed to `xcodebuild` and lost on the
+next generator run — which is the trap this section originally warned about.
+The last step is still the one that counts: **`spctl -a -vv` on a machine that
+has never seen this source.**
+
+### 2.2 The entitlements — done
+
+They said this:
+
+```xml
+<!-- App Sandbox is OFF on purpose: the app spawns a Python subprocess
+     (the render service) and reads arbitrary folders. -->
+<key>com.apple.security.cs.allow-jit</key><true/>
+<key>com.apple.security.cs.disable-library-validation</key><true/>
+```
+
+Every clause of that comment was false — no subprocess, no Python, no numba to
+JIT, no MLX dylibs to load — and both entitlements weakened the hardened
+runtime notarisation is about. **They are gone.** The Release bundle's
+entitlement set is now empty:
+
+```
+$ codesign -d --entitlements - …/Release/Spektrafilm.app
+[Dict]
+```
+
+and the app still renders — verified by the relocation test in §1, on the
+Release build, with `.venv` and `engine/resources` renamed away.
+`Tools/package.sh` greps for both clauses and fails the release if either
+comes back.
+
+Sandboxing is still *possible* and still not done. It is not required for
+Developer ID distribution, only for the Mac App Store. **If you ever turn it
+on, `NSOpenPanel` access stops surviving a relaunch** and
+`Library.chooseFilesOrFolder` will need security-scoped bookmarks — nothing in
+the app persists a chosen folder today.
 
 ### 2.2 The entitlements describe an app that no longer exists
 
@@ -145,94 +221,164 @@ it on, `NSOpenPanel` access stops surviving a relaunch** and
 `Library.chooseFilesOrFolder` will need security-scoped bookmarks — nothing in
 the app persists a chosen folder today.
 
-### 2.3 Licence obligations — the part with legal weight
+### 2.3 Licence obligations — done, with one question left for you
 
-The app is GPL-3.0-or-later and **the bundle currently contains no licence file
-at all**:
+The bundle used to contain no licence file at all. It now carries four, in
+`Contents/Resources/Resources/Licenses/`, written by
+`Tools/bundle-licenses.sh` from their canonical copies rather than retyped:
 
-```bash
-$ find …/Spektrafilm.app -iname "*licen*" -o -iname "*COPYING*"     # empty
+| file | covers |
+|---|---|
+| `Spektrafilm-GPL-3.0.txt` | the application and the C++ engine |
+| `Profiles-and-LUTs-CC-BY-SA-4.0.txt` | the 28 profiles and the 8 baked print LUTs |
+| `Profiles-and-LUTs-CHANGELOG.txt` | what this build changed about them |
+| `metal-cpp-Apache-2.0.txt` | the vendored metal-cpp compiled into the binary |
+
+Three things back this up rather than leaving it to a checklist:
+
+- **`Tools/check-bundle-resources.sh`** is the app target's pre-build phase
+  and fails the build when any of them is missing.
+- **`LicensingTests`** asserts each file is present, readable *through the
+  same accessor the About panel uses*, and is the licence it claims to be — a
+  build that shipped the GPL four times would pass a mere existence check.
+- **`AboutWindow`** shows the credit and serves the full texts. That is not
+  decoration: the CC BY-SA preamble names "an app's About screen" by example
+  as a place the attribution must survive, and the GPL wants a route to the
+  corresponding source. Both are on the panel, reached from
+  **Spektrafilm → About Spektrafilm**.
+
+The share-alike reading this section asked for was made and is recorded in
+`Profiles-and-LUTs-CHANGELOG.txt`: the profiles ship **unmodified**, the 8
+LUTs are **derivatives** (the licence says so explicitly — "LUTs and similar
+artifacts are interpreted as direct encodings of the information in the
+original profiles"), and they are therefore distributed under the same
+CC BY-SA 4.0 as the share-alike condition requires. The changelog also records
+*how* they were baked, which pairing each used, and that glare is excluded.
+
+**The one thing left is yours to decide, not mine.** The same licence says:
+
+> Don't use "spektrafilm" or my name in product branding without asking. The
+> license covers the files; the name is not part of that grant. Factual
+> reference is welcome and even encouraged, for example "graded with
+> spektrafilm", or "this app uses spektrafilm LUTs".
+
+This application is *named* Spektrafilm, with `com.hanze.spektrafilm` as its
+bundle id. That is product branding using the name, and it is outside what
+the file licence grants — the licence asks you to ask. It is a two-line email
+(`andrea.volpato@outlook.com`) and it is worth sending before a public
+release, or renaming the product and keeping the factual reference. Nothing in
+the code depends on the answer; this is here so it is a decision rather than
+an oversight.
+
+### 2.4 Release configuration — verified
+
+All three of this section's items are done, and one of them turned out to be
+a check on the harness rather than on Release:
+
+- **`SpektrafilmTests` against Release: 117 tests, 0 failures**, 4.2 s (the
+  same 117 pass in Debug in 6.7 s).
+- **All six parity harnesses pass**, plus `gpu_smoke` and
+  `check_math_guard.sh` (which builds a deliberately fast-math library to
+  prove the guard can fire, then confirms the shipped one is safe). These
+  already ran against `-O2`: `engine/build.sh` has always compiled the dylib
+  that way, so what this really checked is that Xcode's `-O` and
+  `build.sh`'s `-O2` agree, and the runtime probe is what proves the math
+  mode rather than either build flag.
+- **The tier timings were re-measured** and are in `ARCHITECTURE.md` §8.7,
+  now with a fourth column for the LUT flip the port added. The reprint
+  column reproduced (0.009 / 0.034 / 0.167 s at 45 MP), which is what makes
+  the new numbers comparable to the old ones.
+
+Also verified, and the stronger form of §1's test: the **Release** build,
+copied to `/tmp` with no repository above it and with both `.venv` and
+`engine/resources` renamed away, opened a frame and rendered it in 285 ms —
+and the LUT parity harness, pointed at the resources *inside that bundle*
+(`SPEKTRAFILM_ENGINE_RESOURCES=…/Spektrafilm.app/Contents/Resources/Resources/engine`)
+with `engine/resources` still hidden, passed bit-exact. That is the check
+worth having: `engine/build.sh bundle` is an rsync, and an rsync that did not
+run leaves a **stale** bundle rather than an empty one.
+
+### 2.5 Packaging — done
+
+`modern_UI/Spektrafilm/Tools/package.sh`, one script, the whole path:
+
+```
+resources and licences → project → archive → export → verify the signature
+→ DMG → notarise → staple → spctl
 ```
 
-Three obligations, and the second is the one that is easy to miss:
+It generates its own `exportOptions.plist`, reads the version out of
+`gen-project.py` so the DMG's name cannot disagree with the bundle's, copies
+the licence texts to the top of the disk image as well as inside the app, and
+**fails rather than succeeding quietly** when Gatekeeper says no. `--dry-run`
+prints the plan without building. Without a Developer ID it still archives,
+exports and builds the DMG, then says the result will be refused everywhere
+else and why — a script that refuses to run at all teaches nothing, and one
+that exits 0 on an unshippable artefact is worse.
 
-- **GPL-3.0-or-later** (the application and the engine). Distributing binaries
-  requires the licence text and a written offer of, or link to, the
-  corresponding source.
-- **CC BY-SA 4.0 — the 28 film and paper profiles.** They are Andrea Volpato's,
-  and their own `metadata.license` says: *"Redistribution and derivatives must
-  credit the author, link the project, preserve this license."* Until now they
-  lived only in a source checkout; **putting them inside the `.app` is
-  redistribution.** `SPEKTRAFILM_LICENSE.txt` and
-  `src/spektrafilm/data/license/` are the texts, and neither is bundled.
-- **Apache-2.0 — vendored metal-cpp** (`engine/third_party/metal-cpp/`),
-  compiled into the binary. Its `LICENSE.txt` must be reproduced.
+There is still **no CI**, and that is the remaining gap here.
 
-Minimum: ship a `Contents/Resources/Licenses/` directory with all three, and
-surface it from the app (an About panel or a menu item). Adding it to the
-`Resources/` folder reference is a one-line change to `engine/build.sh` or a
-copy phase.
-
-Note also that the profiles are CC BY-SA — a *share-alike* licence — which is
-worth a deliberate reading before shipping derivatives of them (a baked LUT
-derived from a profile is arguably one).
-
-### 2.4 Release configuration is unverified beyond "it builds"
-
-Release builds clean (17 MB, `Mach-O thin (arm64)`), but **every number in
-`ARCHITECTURE.md` §8.7 and every parity run was measured in Debug**, which
-compiles the engine at `-O0`. Before shipping:
-
-- run `SpektrafilmTests` against Release;
-- run the five parity harnesses against a Release-built `libspektrafilm_engine.dylib`
-  (`engine/build.sh` already builds with `-O2`, so this is really a check that
-  Xcode's `-O` and `build.sh`'s `-O2` agree — fast math is off in both, but the
-  runtime probe is what proves it);
-- re-measure the tier timings; they should only improve.
-
-### 2.5 Packaging
-
-There is no archive step, no `.dmg`, no `exportOptions.plist`, and no CI. The
-smallest honest path is `xcodebuild archive` → `-exportArchive` →
-`create-dmg`/`hdiutil` → notarise the DMG.
-
-`ARCHS = arm64` only. That is fine for an Apple-silicon-only release and should
-be *stated* in the release notes and `LSMinimumSystemVersion` (currently 15.0)
-rather than discovered.
+`ARCHS = arm64` only. That is fine for an Apple-silicon-only release and is
+now *stated* rather than discovered: the DMG is named
+`Spektrafilm-<version>-arm64.dmg`, and `LSMinimumSystemVersion` is 15.0. Put
+both in the release notes.
 
 ### 2.6 Smaller things
 
-- **Version strings** are `CFBundleShortVersionString = 0.2` / `CFBundleVersion = 2`
-  in a checked-in `Info.plist`. They are not derived from anything, so they will
-  silently stay at 0.2. `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in
-  `gen-project.py` would at least put them in one place.
-- **Bundle size is 17 MB Release / 20 MB Debug**, of which 11 MB is resources:
-  5.8 MB of profiles for all 28 stocks (the UI lists ~11) and 6.0 MB of
-  constants (5.97 MB of it the Hanatos spectra). Both are trimmable if size
-  ever matters; neither is code.
+- **Version strings — done.** `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`
+  in `gen-project.py` are the single place; `Info.plist` references them as
+  `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)`. Now 0.3 / 3, and
+  `LicensingTests.testTheVersionCameFromTheBuildSettings` fails if the plist
+  ever ships an unexpanded placeholder or drifts back to the hand-typed 0.2.
+  `NSHumanReadableCopyright` was added at the same time, since the About panel
+  is not the only place macOS shows a copyright line.
+- **Bundle size is 17 MB Release**, of which 15 MB is resources: 9.45 MB of
+  constants (5.97 MB Hanatos spectra + 3.45 MB print LUTs), 5.8 MB of profiles
+  for all 28 stocks (the UI lists ~11), 196 kB of cover art, 80 kB of licence
+  texts. The DMG is 10 MB. All trimmable if size ever matters; none of it code.
+- **`spk_last_error` — done.** `Service/EngineMessage.swift` rewrites the
+  classes that actually reach a user: an incomplete install no longer says
+  "run engine/build.sh bundle" to someone with no checkout, the fast-math
+  refusal says *this build* is wrong rather than the app, and a cancelled
+  render does not read as a failure. Two rules keep it honest — anything
+  unrecognised is **passed through** rather than replaced with a confident
+  guess, and the engine's own words are kept in parentheses (and in the
+  canvas log) so a bug report still carries them. `EngineMessageTests` pins
+  both.
 - **No update mechanism** (Sparkle or otherwise), and no crash reporting.
-- **`spk_last_error` messages surface to the user as-is.** They are written for
-  a developer ("run engine/build.sh bundle"), which is right for now and wrong
-  for a shipped build.
+  Still true, and still the largest thing this list does not cover.
 
 ---
 
 ## 3. Checklist
 
 ```
-[x] app renders with no repository, no venv, no engine/resources   (§1, tested)
+[x] app renders with no repository, no venv, no engine/resources   (§1, §2.4)
 [x] all engine inputs bundled and resolved from the bundle          (§1)
 [x] Release configuration builds                                    (§2.4)
-[ ] Developer ID signature + hardened runtime + notarisation        (§2.1)
-[ ] entitlements pruned to what a Metal-only app needs              (§2.2)
-[ ] GPL-3.0, CC BY-SA 4.0 and Apache-2.0 texts in the bundle        (§2.3)
-[ ] parity + Swift tests run against Release                        (§2.4)
-[ ] archive / DMG / notarised artefact                              (§2.5)
-[ ] version numbers derived rather than hand-edited                 (§2.6)
-[ ] export, export_di, preview_stock_lut ported                     (ARCH §8.8)
-[ ] print_preview LUTs bundled, once the above need them            (§1)
+[x] hardened runtime on, in both configurations                     (§2.1)
+[x] entitlements pruned to what a Metal-only app needs              (§2.2)
+[x] GPL-3.0, CC BY-SA 4.0 and Apache-2.0 texts in the bundle        (§2.3)
+[x] the licence obligations surfaced in the app (About panel)       (§2.3)
+[x] parity + Swift tests run against Release                        (§2.4)
+[x] archive / export / DMG, as one script                           (§2.5)
+[x] version numbers derived rather than hand-edited                 (§2.6)
+[x] engine errors rewritten for someone who did not build this      (§2.6)
+[x] export, export_di, preview_stock_lut ported                     (ARCH §8.8)
+[x] print_preview LUTs bundled                                      (§1)
+
+[ ] Developer ID Application certificate + notarised artefact       (§2.1)
+[ ] ask about the product name, or rename it                        (§2.3)
+[ ] spctl accepted on a machine that has never seen this source     (§2.1)
+[ ] CI                                                              (§2.5)
+[ ] update mechanism and crash reporting                            (§2.6)
 ```
 
-The first three are done. Nothing in the remaining list is blocked by the
-engine — they are packaging, legal and configuration, which is a different kind
-of work from the last session's and can be done in any order.
+**The three open items that block a public release are not code.** A
+certificate is a purchase; the name is a two-line email; the clean-machine
+`spctl` check needs the first one and a second Mac. Everything a build can do
+has been done and is tested, which is the difference between "not ready" and
+"waiting on you".
+
+CI and an update mechanism are real gaps but do not block a first release —
+someone can download a notarised DMG and use it without either.

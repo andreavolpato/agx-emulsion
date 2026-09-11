@@ -81,8 +81,29 @@ final class Renderer: NSObject {
     /// What the canvas draws: the detail print when one is shown, else the
     /// live print or decode preview.
     var base: MTLTexture? { showsDetail ? (detail ?? live) : live }
-    /// Shown instead of the adjusted image while Space is held.
-    var original: MTLTexture?
+    /// The display decode at the live tier — Apple's rendering of the RAW,
+    /// never the engine's input. Shown instead of the adjusted image while
+    /// Space is held, and left of the split.
+    var original: MTLTexture? {
+        didSet { if oldValue !== original { originalDetail = nil } }
+    }
+    /// The same decode at the resolution of the detail print on screen.
+    ///
+    /// Without it, the before/after at 200 % compared a 1600 px decode
+    /// stretched 5× against a native-resolution print: the left half soft,
+    /// the right half showing grain, and the difference read as the film's.
+    /// Set by `Session` only while a comparison is actually up (it is a
+    /// full-resolution texture at the full tier), and dropped with the detail
+    /// print and with any new original, since it is a picture of that one.
+    private(set) var originalDetail: MTLTexture?
+    /// What the canvas compares against: the original at the resolution of
+    /// whatever it is showing.
+    var before: MTLTexture? { showsDetail ? (originalDetail ?? original) : original }
+
+    func setOriginalDetail(_ texture: MTLTexture?) {
+        originalDetail = texture
+        needsDraw?()
+    }
     private var adjusted: MTLTexture?
     /// Rasterised coverage for the mask kinds that cannot be closed-form.
     /// Nothing writes it yet — brush and the Vision sources are the next
@@ -263,6 +284,7 @@ final class Renderer: NSObject {
     /// Discard the detail texture. Used when it can no longer be trusted:
     /// the parameters changed, or another frame is selected.
     func dropDetail() {
+        originalDetail = nil
         guard detail != nil || showsDetail else { return }
         detail = nil
         showsDetail = false
@@ -427,7 +449,7 @@ final class Renderer: NSObject {
         }
         var shown: MTLTexture? = nil
         if let base {
-            if showOriginal, let original { shown = original }
+            if showOriginal, let before { shown = before }
             else if let dst = ensureAdjusted(for: base) {
                 if layer2Dirty {
                     encodeLayer2(cb, src: base, dst: dst)
@@ -460,7 +482,7 @@ final class Renderer: NSObject {
             // fragment texture is a sampling of undefined memory the moment a
             // branch is mispredicted into, and "the compare flag is off" is
             // not a guarantee the GPU makes.
-            enc.setFragmentTexture(original ?? shown, index: 1)
+            enc.setFragmentTexture(before ?? shown, index: 1)
             enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         }
@@ -518,7 +540,10 @@ final class Renderer: NSObject {
         guard w > 0, h > 0, let target = store.makeWritable(width: w, height: h, format: Renderer.offscreenFormat),
               let cb = queue.makeCommandBuffer() else { return nil }
         var shown: MTLTexture? = nil
-        if let base, let dst = ensureAdjusted(for: base) {
+        // The same swap `draw` makes while Space is held, so a capture of
+        // "show original" shows the original rather than the print.
+        if base != nil, showOriginal, let before { shown = before }
+        else if let base, let dst = ensureAdjusted(for: base) {
             encodeLayer2(cb, src: base, dst: dst)
             layer2Dirty = false
             encodeHistogram(cb, src: dst)
@@ -534,14 +559,14 @@ final class Renderer: NSObject {
         if let shown {
             enc.setRenderPipelineState(quadPipelineOffscreen)
             enc.setFragmentTexture(shown, index: 0)
-            enc.setFragmentTexture(original ?? shown, index: 1)
+            enc.setFragmentTexture(before ?? shown, index: 1)
             enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         }
         enc.endEncoding()
         cb.commit()
         cb.waitUntilCompleted()
-        if shown != nil { publishHistogram() }
+        if shown != nil, !showOriginal { publishHistogram() }
         return target
     }
 }
@@ -549,7 +574,11 @@ final class Renderer: NSObject {
 extension MTLTexture {
     /// Read an rgba16Unorm texture back as a CGImage in Display P3 (no
     /// conversion — the bytes are P3-encoded already; the tag says so).
-    func makeCGImage() -> CGImage? {
+    /// `space` defaults to Display P3, which is what every *print* this app
+    /// produces is in. The DI package passes device RGB instead, because its
+    /// pixels are normalised film densities rather than colours and a
+    /// rendering tag would invite a host to convert them (see `Exporter`).
+    func makeCGImage(space: CGColorSpace = ImageDecoder.displayP3) -> CGImage? {
         guard pixelFormat == .rgba16Unorm else { return nil }
         let bpr = width * 8
         var data = Data(count: bpr * height)
@@ -558,7 +587,7 @@ extension MTLTexture {
         }
         guard let provider = CGDataProvider(data: data as CFData) else { return nil }
         return CGImage(width: width, height: height, bitsPerComponent: 16, bitsPerPixel: 64, bytesPerRow: bpr,
-                       space: ImageDecoder.displayP3,
+                       space: space,
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }

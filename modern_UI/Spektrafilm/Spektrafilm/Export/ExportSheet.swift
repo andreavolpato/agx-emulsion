@@ -52,7 +52,7 @@ struct ExportSheet: View {
                 NSWorkspace.shared.activateFileViewerSelecting(r.urls)
             } catch {
                 session.exportProgress = nil
-                result = "\(error)"
+                result = EngineMessage.userFacing(error)
             }
         }
     }

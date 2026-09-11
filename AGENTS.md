@@ -12,7 +12,7 @@ before touching the pipeline.
 render engine (`engine/`) compiled into it and reached through a hand-written
 `extern "C"` surface; it renders into an `MTLTexture` the canvas draws. The
 Python engine under `src/` is a **development dependency that never ships** —
-it is the reference and the oracle for five parity harnesses.
+it is the reference and the oracle for six parity harnesses.
 `ARCHITECTURE.md` §0 is the map and §8 is the engine. RFC-014 §8 is the
 after-the-fact record: what parity measures, why each bar is where it is, and
 the bugs already found.
@@ -35,10 +35,13 @@ read, and `git stash` / `git clean -fdx` / `git checkout -- .` at the repo root.
 the stdio proxy host and its verification spike, from before the engine
 existed. Nothing references either; they should be deleted (RFC-014 §6 step 6).
 
-**Three wire methods are not ported** and the engine refuses them by name:
-`export`, `export_di`, `preview_stock_lut`. Each is a subsystem (file writers,
-the DI package, the `.cube` machinery), none is on the path from opening a
-frame to seeing it. `Exporter.swift` will surface the refusal.
+**The whole method surface is ported** as of 2026-09-10. `export`,
+`export_di` and `preview_stock_lut` were the last three refused by name; they
+are now `spk_reprint` at the full tier, `spk_export_di` +
+`spk_print_lut_table`, and `spk_preview_stock_lut`. **The engine gained no
+file writer**: it returns pixels and the baked table, and `Exporter.swift`
+writes the TIFF, the `.cube` and the print preview through ImageIO. See
+`ARCHITECTURE.md` §8.8 for where the boundary falls and why.
 
 **The engine's data comes from the app bundle**, not from a checkout above it.
 See trap 14.
@@ -168,7 +171,19 @@ engine/tests/check_math_guard.sh                                             # t
 `parity_render.py --size 180` uses a small synthetic frame and runs in
 seconds; with no `--size` it uses the 1 MP frame RFC-014 §3 prescribes.
 `ARCHITECTURE.md` §8.6 says what each holds and why the bars are where they
-are.
+are. There are **six** now; `parity_lut.py` is the newest and holds the print
+tables bit-exact, plus the LUT apply and the DI normalisation at
+`parity_render`'s bars.
+
+To run a harness against the resources **inside a built `.app`** rather than
+the checkout's — the only way to check that what shipped is what was tested,
+since `engine/build.sh bundle` is an rsync that leaves a *stale* bundle rather
+than an empty one when it does not run:
+
+```bash
+SPEKTRAFILM_ENGINE_RESOURCES=/path/to/Spektrafilm.app/Contents/Resources/Resources/engine \
+    PYTHONPATH=src .venv/bin/python engine/tests/parity_lut.py
+```
 
 ### The app
 
@@ -178,8 +193,22 @@ python3 Tools/gen-project.py        # REGENERATE after adding/removing any sourc
 xcodebuild -project Spektrafilm.xcodeproj -scheme Spektrafilm \
     -configuration Debug -derivedDataPath build/DerivedData build
 xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmTests \
-    -configuration Debug -derivedDataPath build/DerivedData test   # 99 tests, ~5 s
+    -configuration Debug -derivedDataPath build/DerivedData test   # 117 tests, ~7 s
 ```
+
+Two more scripts the app target depends on, both idempotent:
+
+```bash
+Tools/bundle-licenses.sh          # the GPL / CC BY-SA / Apache texts into Resources/Licenses
+Tools/check-bundle-resources.sh   # the app's own pre-build phase, runnable alone
+Tools/package.sh [--dry-run]      # archive -> export -> DMG -> notarise -> spctl
+```
+
+`check-bundle-resources.sh` fails the build when either the engine's baked
+resources or the licence texts are missing. The licences are **not optional
+decoration**: the bundle carries CC BY-SA profiles and GPL binaries, and
+`LicensingTests` asserts the texts are present *and readable through the same
+accessor the About panel uses*.
 
 `project.pbxproj` is **generated from the filesystem** by `Tools/gen-project.py`
 (ids are path hashes, so it is byte-stable). It also lists the engine's C++
@@ -429,7 +458,7 @@ out of the tree and it is the one that can lie: a build whose resources were
 never synced will happily render from whatever checkout is above it.
 
 - `engine/build.sh bundle` is what syncs them. The app target has a pre-build
-  phase (`Tools/check-engine-resources.sh`) that fails the build if they are
+  phase (`Tools/check-bundle-resources.sh`) that fails the build if they are
   missing, so the silent case is *stale*, not absent.
 - `EngineResourceOriginTests` asserts the resources resolve inside the bundle.
   It replaced `ServiceLaunchEnvironmentTests`, which guarded the `PYTHONPATH`

@@ -4,11 +4,12 @@
 //  This pins *when* the develop runs, which is a rule neither a screenshot nor
 //  a pixel comparison can see: the canvas shows a picture either way, and the
 //  difference is whether the engine has been asked for one yet. It is the
-//  shape the app is for — the decode lands in tens of milliseconds, the 364 MB
-//  linear TIFF and the `open` that reads it back cost a second or two on a
-//  real frame — and the failure it guards is the app starting that work the
-//  moment a frame is picked, which leaves the Solve pill with nothing to do
-//  and the user waiting for a print they did not ask for.
+//  shape the app is for — the decode lands in a few hundred milliseconds, the
+//  develop (the engine's frame, `open`, the solve and the first print) costs
+//  about as much again on a 45 MP frame — and the failure it guards is the
+//  app starting that work the moment a frame is picked, which leaves the
+//  Solve pill with nothing to do and the user waiting for a print they did
+//  not ask for.
 
 import Metal
 import XCTest

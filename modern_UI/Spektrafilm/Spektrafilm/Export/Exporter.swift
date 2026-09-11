@@ -2,13 +2,21 @@
 //
 //  Two routes (frontend SPEC §6):
 //    - finished: JPEG, PNG 8-bit, TIFF 16-bit — Display P3, Layer 2 baked in,
-//      cropped, straightened and turned. The service renders the print at
-//      full resolution; the client applies Layer 2 and the geometry in Metal
-//      and writes through ImageIO with a P3 tag.
+//      cropped, straightened and turned. The engine renders the print at full
+//      resolution into a texture; the client applies Layer 2 and the geometry
+//      in Metal and writes through ImageIO with a P3 tag.
 //    - DI package: the negative as normalised density (16-bit TIFF) plus the
 //      print stock's `.cube` — grade the flat file in Photoshop under a Color
 //      Lookup layer, or convert the cube to an ICC for Capture One. Layer 2
 //      does not apply; it is pre-print by definition.
+//
+//  **Both routes are native now.** They used to call a Python service that
+//  wrote files into a workspace and returned paths; the engine returns
+//  textures and a pointer to the LUT table, and the three files — the DI
+//  TIFF, the `.cube`, the optional print preview — are written here. That is
+//  where they belong: ImageIO is already how the finished formats are
+//  written, and `writeCube` is thirty lines of text formatting that no C++
+//  file writer needs to exist for.
 //
 //  Filenames: `<original>_<film>_<paper>.<ext>` in `<source dir>/_prints/`.
 
@@ -48,16 +56,13 @@ enum Exporter {
         guard let source = session.selection else { throw ExportError.nothingOpen }
         let params = session.params
         let out = destination(for: source, params: params, format: format)
-        if format == .di {
-            let req = ExportDIRequest(sessionID: sessionID, outDir: out.deletingLastPathComponent().path,
-                                      baseName: out.deletingPathExtension().lastPathComponent)
-            let r: ExportDIResponse = try await session.client.call(.exportDI, req)
-            return Result(urls: [URL(fileURLWithPath: r.diPath), URL(fileURLWithPath: r.cubePath)], note: r.warning)
-        }
-        let r: RenderResponse = try await session.client.call(.export, ExportRequest(sessionID: sessionID))
-        guard let raw = r.rawPath, let w = r.width, let h = r.height,
-              let full = session.renderer.store.uploadRGBA16(path: raw, width: w, height: h) else { throw ExportError.noPixels }
-        defer { try? FileManager.default.removeItem(atPath: raw) }
+        if format == .di { return try await exportDI(session: session, to: out) }
+
+        // `.export` is a full-tier reprint: the engine reuses the working
+        // negative when one is warm and runs the film side when it is not.
+        let outcome = try await session.client.render(
+            .export, RenderRequest(sessionID: sessionID, tier: "full"))
+        guard let full = outcome.texture else { throw ExportError.noPixels }
         guard let adjusted = session.renderer.applyLayer2(to: full, uniforms: session.adjustments.uniforms)
             else { throw ExportError.noPixels }
         // Crop, straighten, quarter turns and flips, through the same
@@ -71,7 +76,84 @@ enum Exporter {
         return Result(urls: [out], note: nil)
     }
 
-    static func write(_ image: CGImage, to url: URL, format: ExportFormat) throws {
+    // MARK: - the DI package
+
+    /// Three files: the normalised-density negative, the print stock's
+    /// `.cube`, and a print preview so the flat file can be checked against
+    /// what the LUT does to it.
+    ///
+    /// The geometry is already in the negative — `node_geometry` runs on the
+    /// film side, before the density curves — so the crop and the straighten
+    /// are baked in and nothing is applied here. Layer 2 is not, and must not
+    /// be: it lives after the print and the DI file is before it.
+    private static func exportDI(session: Session, to out: URL) async throws -> Result {
+        let di = try await session.client.exportDI()
+        guard let texture = di.texture else { throw ExportError.noPixels }
+        // Device RGB, not Display P3. These are not colours: each channel is
+        // a film density normalised by the LUT's own axis, and the `.cube`
+        // beside it indexes exactly those numbers. Tagging the file with a
+        // rendering space invites whatever opens it to convert the values and
+        // silently move the cube's domain out from under it, so this asks
+        // ImageIO for the most nearly untagged thing it will write.
+        guard let cg = texture.makeCGImage(space: CGColorSpaceCreateDeviceRGB())
+            else { throw ExportError.noPixels }
+        try write(cg, to: out, format: .tiff)
+
+        let base = out.deletingPathExtension()
+        let cube = base.deletingLastPathComponent()
+            .appending(path: "\(base.lastPathComponent)_\(di.meta.printStock).cube")
+        let table = try await session.client.printLUTTable(di.meta.printStock)
+        try writeCube(table.table, size: table.size, to: cube,
+                      title: "spektrafilm \(di.meta.printStock) print (from \(di.meta.pairedFilm))")
+
+        var urls = [out, cube]
+        // The print preview is the same table applied to the same negative,
+        // which is what `preview_stock_lut` is. It is written last and its
+        // failure is not the export's: the two files that carry the grade are
+        // already on disk.
+        if let preview = try? await session.client.previewStockLUT(di.meta.printStock, tier: "full"),
+           let tex = preview.texture, let cg = tex.makeCGImage() {
+            let path = base.deletingLastPathComponent()
+                .appending(path: "\(base.lastPathComponent)_print.tif")
+            if (try? write(cg, to: path, format: .tiff)) != nil { urls.append(path) }
+        }
+        return Result(urls: urls, note: di.meta.warning)
+    }
+
+    /// A plain 3D `.cube`: `LUT_3D_SIZE N`, domain 0..1, red fastest.
+    ///
+    /// `table` is (N, N, N, 3) indexed [r, g, b] — the bake's own axis order
+    /// — so iterating blue outermost and red innermost gives the cube's
+    /// ordering. The domain is 0..1 because the DI file beside it was
+    /// normalised by the same axes, which is what lets this carry no
+    /// `DOMAIN_MIN`/`DOMAIN_MAX` for a host to misread.
+    static func writeCube(_ table: [Float], size n: Int, to url: URL, title: String) throws {
+        guard table.count == n * n * n * 3 else { throw ExportError.noPixels }
+        var text = """
+        TITLE "\(title)"
+        LUT_3D_SIZE \(n)
+        DOMAIN_MIN 0.0 0.0 0.0
+        DOMAIN_MAX 1.0 1.0 1.0
+
+
+        """
+        text.reserveCapacity(n * n * n * 26 + 128)
+        for b in 0..<n {
+            for g in 0..<n {
+                for r in 0..<n {
+                    let i = ((r * n + g) * n + b) * 3
+                    text += String(format: "%.6f %.6f %.6f\n",
+                                   min(max(table[i], 0), 1),
+                                   min(max(table[i + 1], 0), 1),
+                                   min(max(table[i + 2], 0), 1))
+                }
+            }
+        }
+        try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    @discardableResult
+    static func write(_ image: CGImage, to url: URL, format: ExportFormat) throws -> URL {
         var cg = image
         if format == .jpeg || format == .png {
             // Down-convert to 8-bit in P3 (ImageIO would otherwise write 16-bit PNG).
@@ -89,6 +171,7 @@ enum Exporter {
         if format == .tiff { props[kCGImagePropertyTIFFDictionary] = [kCGImagePropertyTIFFCompression: 5] }
         CGImageDestinationAddImage(dest, cg, props as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { throw ExportError.write(url) }
+        return url
     }
 
     enum ExportError: Error, LocalizedError {

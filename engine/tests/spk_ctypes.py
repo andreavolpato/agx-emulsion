@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -50,7 +51,15 @@ class Engine:
     def __init__(self, dylib: Path | None = None, resources: Path | None = None):
         self._lib = ctypes.CDLL(str(dylib or ENGINE / "build" / "libspektrafilm_engine.dylib"))
         self._declare()
-        self._resources = str(resources or ENGINE / "resources")
+        # `SPEKTRAFILM_ENGINE_RESOURCES` is the same override `EngineClient`
+        # honours first, and it is here for the same reason: it is what lets a
+        # harness be pointed at the resources *inside a built .app* rather
+        # than at the checkout's. That is the only way to check that what
+        # shipped is what was tested -- `engine/build.sh bundle` is an rsync,
+        # and an rsync that did not run leaves a stale bundle rather than an
+        # empty one.
+        env = os.environ.get("SPEKTRAFILM_ENGINE_RESOURCES")
+        self._resources = str(resources or env or ENGINE / "resources")
         self._handle = self._lib.spk_engine_create(self._resources.encode(), None)
         if not self._handle:
             raise EngineError(self._last_error())
@@ -84,6 +93,20 @@ class Engine:
             fn = getattr(lib, name)
             fn.restype = ctypes.c_int32
             fn.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(SpkResult)]
+        lib.spk_print_lut_catalog.restype = ctypes.c_char_p
+        lib.spk_print_lut_catalog.argtypes = [ctypes.c_void_p]
+        lib.spk_print_lut_table.restype = ctypes.c_int32
+        lib.spk_print_lut_table.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                            ctypes.POINTER(ctypes.POINTER(ctypes.c_float)),
+                                            ctypes.POINTER(ctypes.c_uint32)]
+        lib.spk_preview_stock_lut.restype = ctypes.c_int32
+        lib.spk_preview_stock_lut.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
+                                              ctypes.POINTER(SpkResult),
+                                              ctypes.POINTER(ctypes.c_char_p)]
+        lib.spk_export_di.restype = ctypes.c_int32
+        lib.spk_export_di.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                      ctypes.POINTER(SpkResult),
+                                      ctypes.POINTER(ctypes.c_char_p)]
         lib.spk_progress.restype = ctypes.c_int32
         lib.spk_progress.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p)]
         lib.spk_session_release.argtypes = [ctypes.c_void_p]
@@ -119,6 +142,25 @@ class Engine:
                                  ctypes.byref(out)) != SPK_OK:
             raise EngineError(self._last_error())
         return self._take_json(out)
+
+    def print_lut_catalog(self) -> dict:
+        return json.loads((self._lib.spk_print_lut_catalog(self._handle) or b"{}").decode())
+
+    def print_lut_table(self, stock: str) -> np.ndarray:
+        """The (S, S, S, 3) float32 table, engine-owned -- copied out here.
+
+        The pointer stays valid for the engine's lifetime, but a harness that
+        held it across `close()` would be reading freed memory, so this copies
+        rather than wrapping.
+        """
+        table = ctypes.POINTER(ctypes.c_float)()
+        size = ctypes.c_uint32()
+        if self._lib.spk_print_lut_table(self._handle, stock.encode(), ctypes.byref(table),
+                                         ctypes.byref(size)) != SPK_OK:
+            raise EngineError(self._last_error())
+        n = size.value ** 3 * 3
+        flat = np.ctypeslib.as_array(table, shape=(n,))
+        return np.array(flat.reshape(size.value, size.value, size.value, 3), copy=True)
 
     def open(self, image: np.ndarray, delta: dict | None = None) -> "Session":
         array = np.ascontiguousarray(np.asarray(image, dtype=np.float32))
@@ -187,6 +229,29 @@ class Session:
         # a full-tier buffer per render.
         self._engine._lib.spk_result_free(ctypes.byref(result))
         return rgba, result
+
+    def _take_result(self, result: SpkResult) -> np.ndarray:
+        h, w, stride = result.height, result.width, result.row_stride_px
+        flat = np.ctypeslib.as_array(result.rgba16, shape=(h * stride * 4,))
+        rgba = np.array(flat.reshape(h, stride, 4)[:, :w, :], copy=True)
+        self._engine._lib.spk_result_free(ctypes.byref(result))
+        return rgba
+
+    def preview_stock_lut(self, print_stock: str, tier: str = "live") -> tuple[np.ndarray, dict]:
+        result, out = SpkResult(), ctypes.c_char_p()
+        if self._engine._lib.spk_preview_stock_lut(self._handle, print_stock.encode(),
+                                                   tier.encode(), ctypes.byref(result),
+                                                   ctypes.byref(out)) != SPK_OK:
+            raise EngineError(self._engine._last_error())
+        return self._take_result(result), self._engine._take_json(out)
+
+    def export_di(self, print_stock: str | None = None) -> tuple[np.ndarray, dict]:
+        result, out = SpkResult(), ctypes.c_char_p()
+        if self._engine._lib.spk_export_di(self._handle,
+                                           print_stock.encode() if print_stock else None,
+                                           ctypes.byref(result), ctypes.byref(out)) != SPK_OK:
+            raise EngineError(self._engine._last_error())
+        return self._take_result(result), self._engine._take_json(out)
 
     def progress(self) -> dict:
         out = ctypes.c_char_p()

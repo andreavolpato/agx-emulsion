@@ -158,6 +158,11 @@ struct SnapshotRequest {
     /// stands in for the Metal view — which is exactly the half that a test
     /// cannot otherwise see.
     var compare: Double?
+    /// `--original` — hold "show original" (Space, or the Original pill)
+    /// before capturing. Visible offscreen because `renderOffscreen` swaps in
+    /// the original exactly as `draw` does; it did not, until the display
+    /// decode made the original worth looking at.
+    var original = false
 
     static func parse(_ args: [String]) -> SnapshotRequest? {
         guard let i = args.firstIndex(of: "--snapshot"), args.count > i + 2 else { return nil }
@@ -173,6 +178,7 @@ struct SnapshotRequest {
                 r.mask = (kind, f.count > 1 ? Double(f[1]) ?? -1 : -1, f.count > 2 && f[2] == "overlay")
             }
         }
+        r.original = args.contains("--original")
         if let j = args.firstIndex(of: "--compare") {
             r.compare = args.count > j + 1 ? (Double(args[j + 1]) ?? 0.5) : 0.5
         }
@@ -298,6 +304,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let position = req.compare {
             session.comparePosition = position
             session.comparing = true
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        if req.original {
+            session.toggledOriginal(true)
             try? await Task.sleep(for: .milliseconds(300))
         }
         if let zoom = req.zoom {

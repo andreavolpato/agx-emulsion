@@ -115,19 +115,10 @@ struct CanvasArea: View {
         .overlay(alignment: .top) { CollapseTab(edge: .top, collapsed: $session.topCollapsed).padding(.top, 4) }
         .overlay(alignment: .bottom) { CollapseTab(edge: .bottom, collapsed: $session.filmstripCollapsed).padding(.bottom, 4) }
         .overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 4) {
-                // Space is a decode-vs-print comparison, and the spec's "show
-                // original" was ambiguous about which; the label says which
-                // (HANDOFF §6).
-                if session.showingOriginal { badge("original · decode") }
-                if session.detailPending {
-                    badge(session.detailTier == .full ? "full resolution…" : "detail…")
-                } else if session.detailTier != .live {
-                    badge(session.detailTier == .full ? "full" : "detail")
-                }
-                if session.previewSoft && session.selection != nil { badge("preview") }
+            VStack(alignment: .trailing, spacing: CanvasBadges.spacing) {
+                ForEach(session.canvasBadges, id: \.self) { badge($0) }
             }
-            .padding(8)
+            .padding(CanvasBadges.inset)
         }
         // Contract §2's "a visible error rather than a blank canvas". Centred
         // and opaque, not a corner badge: the app is not going to render, and

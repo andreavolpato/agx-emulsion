@@ -144,6 +144,18 @@ public:
     virtual BufferRef upload_persistent_f32(const double* data, size_t count, std::string& error) = 0;
     virtual BufferRef upload_persistent_u32(const uint32_t* data, size_t count, std::string& error) = 0;
 
+    // A caller's `id<MTLBuffer>`, wrapped without a copy. Retained while a
+    // handle exists and released -- never pooled -- when the last one drops,
+    // which is the persistent lifetime above with somebody else's memory in
+    // it. Refused if the buffer belongs to another device or holds fewer
+    // than `bytes`.
+    //
+    // For `spk_open_device` only, and only for the length of that call: the
+    // frame goes through `spk_take_rgb` into the engine's own buffer and the
+    // borrow ends when the call returns. Nothing may keep the handle, because
+    // the caller reuses or frees the memory the moment it gets control back.
+    virtual BufferRef borrow(void* mtl_buffer, size_t bytes, std::string& error) = 0;
+
     virtual void* contents(Buffer* b) = 0;
     virtual size_t size_bytes(Buffer* b) const = 0;
 

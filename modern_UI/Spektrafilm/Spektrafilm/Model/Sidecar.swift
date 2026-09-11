@@ -23,8 +23,6 @@ struct DecodeSettings: Codable, Equatable, Sendable {
     /// the camera's, filled in after the first decode; for presets the preset's.
     var temperature: Double = 5500
     var tint: Double = 0
-    /// Only the decode-affecting fields matter for the cache key.
-    var cacheKey: String { "\(whiteBalance.rawValue)-\(Int(temperature))-\(Int(tint * 10))" }
 }
 
 struct CropRect: Codable, Equatable, Sendable {

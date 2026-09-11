@@ -19,9 +19,9 @@ final class EngineClientTests: XCTestCase {
         try XCTUnwrap(MTLCreateSystemDefaultDevice(), "no Metal device")
     }
 
-    /// The importer's own output: a linear ProPhoto TIFF, which is what
-    /// `open` takes on the wire and what `EngineClient` decodes.
-    private func writeFrame(_ size: Int = 96) throws -> URL {
+    /// A frame exactly as the app hands one over: a linear ProPhoto image,
+    /// rendered by `ImageDecoder.engineFrame` into a buffer on `device`.
+    private func makeFrame(_ size: Int = 96, device: MTLDevice) throws -> EngineFrame {
         let width = size * 4 / 3
         var rgba = [Float](repeating: 0, count: width * size * 4)
         for y in 0..<size {
@@ -35,26 +35,20 @@ final class EngineClientTests: XCTestCase {
         }
         let space = try XCTUnwrap(ImageDecoder.linearProPhoto)
         let image = try XCTUnwrap(rgba.withUnsafeBufferPointer { buffer in
-            CIImage(bitmapData: Data(buffer: buffer),
-                    bytesPerRow: width * 16,
-                    size: CGSize(width: width, height: size),
-                    format: .RGBAf,
-                    colorSpace: space)
+            CIImage(bitmapData: Data(buffer: buffer), bytesPerRow: width * 16,
+                    size: CGSize(width: width, height: size), format: .RGBAf, colorSpace: space)
         })
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "spk-engine-test-\(UUID().uuidString).tiff")
-        try ImageDecoder.context.writeTIFFRepresentation(
-            of: image, to: url, format: .RGBAh, colorSpace: space, options: [:])
-        return url
+        return try ImageDecoder.engineFrame(from: image, device: device)
     }
 
     /// The orientation of the frame the engine is handed.
     ///
     /// This exists because getting it wrong is invisible to every other test:
     /// the C++ parity suite hands the engine a numpy array and never goes
-    /// through `readLinearRGB`, so a vertical flip here produced a correctly
-    /// developed, upside-down photograph with 27 of 27 parity cases green.
-    func testTheFrameIsReadTopRowFirst() throws {
+    /// through `ImageDecoder.engineFrame`, so a vertical flip here produced a
+    /// correctly developed, upside-down photograph with 27 of 27 parity cases
+    /// green.
+    func testTheEngineFrameIsTopRowFirst() throws {
         // Top half bright, bottom half dark -- an asymmetry no amount of film
         // simulation can hide.
         let width = 40, height = 24
@@ -71,26 +65,116 @@ final class EngineClientTests: XCTestCase {
             CIImage(bitmapData: Data(buffer: buffer), bytesPerRow: width * 16,
                     size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: space)
         })
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "spk-orientation-\(UUID().uuidString).tiff")
-        defer { try? FileManager.default.removeItem(at: url) }
-        try ImageDecoder.context.writeTIFFRepresentation(
-            of: image, to: url, format: .RGBAh, colorSpace: space, options: [:])
-
-        let frame = try EngineClient.readLinearRGB(url)
+        let frame = try ImageDecoder.engineFrame(from: image, device: try device())
         XCTAssertEqual(frame.width, width)
         XCTAssertEqual(frame.height, height)
-        // The frame is handed over with whatever channel count Core Image
-        // rendered (4 today -- the engine drops alpha on the GPU), so index by
-        // the count the frame reports rather than assuming three.
-        XCTAssertEqual(frame.pixels.count, width * height * frame.channels)
+        // Handed over with whatever channel count Core Image rendered (4 --
+        // the engine drops alpha on the GPU), so index by what the frame says.
+        XCTAssertEqual(frame.buffer.length, width * height * frame.channels * 4)
+        let pixels = frame.buffer.contents().assumingMemoryBound(to: Float.self)
         func rowMean(_ y: Int) -> Float {
             var sum: Float = 0
-            for x in 0..<width { sum += frame.pixels[(y * width + x) * frame.channels + 1] }
+            for x in 0..<width { sum += pixels[(y * width + x) * frame.channels + 1] }
             return sum / Float(width)
         }
         XCTAssertGreaterThan(rowMean(1), 0.5, "row 1 should be the image's bright top")
         XCTAssertLessThan(rowMean(height - 2), 0.2, "the last row should be the dark bottom")
+    }
+
+    // MARK: - spk_open_device
+
+    /// The borrowed-buffer open and the host-array open are the same session.
+    ///
+    /// Held at the only bar that means "nothing changed": the live print's
+    /// bytes, with the two stochastic stages off (grain and glare are redrawn
+    /// on every render by design, so leaving them on measures noise and
+    /// reports a defect). The two entry points share every line after the
+    /// upload, so what this pins is the upload -- that the borrow, the
+    /// `spk_take_rgb` copy and its end are the same pixels `spk_open` gets
+    /// from a `memcpy`.
+    func testTheDeviceOpenIsTheHostOpen() throws {
+        let gpu = try device()
+        let frame = try makeFrame(120, device: gpu)
+        let resources = EngineClient.defaultResources().path
+        let engine = try XCTUnwrap(resources.withCString {
+            spk_engine_create($0, Unmanaged.passUnretained(gpu).toOpaque())
+        }, "no engine: \(String(cString: spk_last_error(nil)))")
+        defer { spk_engine_destroy(engine) }
+        let delta = #"{"grain_active":false,"grain_sublayers_active":false,"glare_active":false}"#
+
+        func livePrint(_ open: (UnsafePointer<CChar>, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> OpaquePointer?) throws -> [UInt16] {
+            var reply: UnsafeMutablePointer<CChar>?
+            let session = try XCTUnwrap(delta.withCString { open($0, &reply) },
+                                        String(cString: spk_last_error(engine)))
+            defer { spk_session_release(session) }
+            if let reply { spk_string_free(reply) }
+            var result = spk_result()
+            let status = "live".withCString { spk_reprint(session, $0, &result) }
+            XCTAssertTrue(status == SPK_OK, String(cString: spk_last_error(engine)))
+            defer { spk_result_free(&result) }
+            let rgba16 = try XCTUnwrap(result.rgba16)
+            var rows: [UInt16] = []
+            for y in 0..<Int(result.height) {
+                let row = rgba16 + y * Int(result.row_stride_px) * 4
+                rows.append(contentsOf: UnsafeBufferPointer(start: row, count: Int(result.width) * 4))
+            }
+            return rows
+        }
+
+        let host = try livePrint { deltaPtr, reply in
+            var image = spk_image(data: frame.buffer.contents().assumingMemoryBound(to: Float.self),
+                                  width: UInt32(frame.width), height: UInt32(frame.height),
+                                  channels: UInt32(frame.channels))
+            return spk_open(engine, &image, deltaPtr, reply)
+        }
+        let device = try livePrint { deltaPtr, reply in
+            var image = spk_device_image(buffer: Unmanaged.passUnretained(frame.buffer).toOpaque(),
+                                         width: UInt32(frame.width), height: UInt32(frame.height),
+                                         channels: UInt32(frame.channels))
+            return spk_open_device(engine, &image, deltaPtr, reply)
+        }
+        XCTAssertFalse(host.isEmpty)
+        XCTAssertEqual(host.count, device.count)
+        let differing = zip(host, device).filter { $0 != $1 }.count
+        XCTAssertEqual(differing, 0, "\(differing) of \(host.count) samples differ between the two opens")
+    }
+
+
+    /// A buffer too short for the image it claims to be is refused by name
+    /// rather than read past its end.
+    func testAShortBufferIsRefused() async throws {
+        let gpu = try device()
+        let short = try XCTUnwrap(gpu.makeBuffer(length: 64 * 48 * 16 - 16, options: .storageModeShared))
+        let client = EngineClient(device: gpu)
+        do {
+            _ = try await client.open(EngineFrame(buffer: short, width: 64, height: 48, channels: 4),
+                                      paramsDelta: nil)
+            XCTFail("the engine opened a frame from a buffer shorter than the frame")
+        } catch {
+            XCTAssertTrue("\(error)".contains("bytes"), "unhelpful error: \(error)")
+        }
+        await client.stop()
+    }
+
+    /// The borrow ends with the call. The engine keeps its own copy of the
+    /// source, and a retained caller's buffer would be 727 MB at 45 MP that
+    /// nobody could free -- the frame is dropped straight after `open` for
+    /// exactly this reason.
+    func testTheEngineKeepsNothingOfTheCallersBuffer() async throws {
+        let gpu = try device()
+        let client = EngineClient(device: gpu)
+        weak var borrowed: MTLBuffer?
+        let sessionID: String
+        do {
+            let frame = try makeFrame(96, device: gpu)
+            borrowed = frame.buffer
+            sessionID = try await client.open(frame, paramsDelta: nil).sessionID
+        }
+        XCTAssertNil(borrowed, "the engine (or something on the open path) kept the caller's buffer")
+        // And the session it made still renders: it did not depend on it.
+        let outcome = try await client.render(.reprint, RenderRequest(sessionID: sessionID))
+        XCTAssertNotNil(outcome.texture)
+        await client.stop()
     }
 
     func testCapabilitiesReportTheNativeCore() async throws {
@@ -129,11 +213,10 @@ final class EngineClientTests: XCTestCase {
     }
 
     func testOpenAndRenderProduceATexture() async throws {
-        let url = try writeFrame()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let client = EngineClient(device: try device())
-        let open: OpenResponse = try await client.call(
-            .open, OpenRequest(imagePath: url.path, paramsDelta: nil))
+        let frameSize = 96
+        let gpu = try device()
+        let client = EngineClient(device: gpu)
+        let open = try await client.open(try makeFrame(frameSize, device: gpu), paramsDelta: nil)
         XCTAssertFalse(open.sessionID.isEmpty)
         XCTAssertGreaterThan(open.meta.megapixels, 0)
 
@@ -150,11 +233,10 @@ final class EngineClientTests: XCTestCase {
     }
 
     func testAReprintReusesTheNegative() async throws {
-        let url = try writeFrame()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let client = EngineClient(device: try device())
-        let open: OpenResponse = try await client.call(
-            .open, OpenRequest(imagePath: url.path, paramsDelta: nil))
+        let frameSize = 96
+        let gpu = try device()
+        let client = EngineClient(device: gpu)
+        let open = try await client.open(try makeFrame(frameSize, device: gpu), paramsDelta: nil)
         _ = try await client.render(.reprint, RenderRequest(sessionID: open.sessionID))
         let second = try await client.render(.reprint, RenderRequest(sessionID: open.sessionID))
         // The whole reason the two tiers cache a negative: a print-side edit
@@ -164,11 +246,10 @@ final class EngineClientTests: XCTestCase {
     }
 
     func testAPrintSideEditChangesThePictureAndAShootSideOneReRenders() async throws {
-        let url = try writeFrame()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let client = EngineClient(device: try device())
-        let open: OpenResponse = try await client.call(
-            .open, OpenRequest(imagePath: url.path, paramsDelta: nil))
+        let frameSize = 96
+        let gpu = try device()
+        let client = EngineClient(device: gpu)
+        let open = try await client.open(try makeFrame(frameSize, device: gpu), paramsDelta: nil)
         _ = try await client.render(.reprint, RenderRequest(sessionID: open.sessionID))
 
         let print: SetParamsResponse = try await client.call(
@@ -199,11 +280,10 @@ final class EngineClientTests: XCTestCase {
     /// was sharp. The tiers must also be ordered: live <= preview <= full.
     func testEachTierRendersAtItsOwnResolution() async throws {
         // Above the live tier's 1600 px, so the three tiers are distinct.
-        let url = try writeFrame(1800)
-        defer { try? FileManager.default.removeItem(at: url) }
-        let client = EngineClient(device: try device())
-        let open: OpenResponse = try await client.call(
-            .open, OpenRequest(imagePath: url.path, paramsDelta: nil))
+        let frameSize = 1800
+        let gpu = try device()
+        let client = EngineClient(device: gpu)
+        let open = try await client.open(try makeFrame(frameSize, device: gpu), paramsDelta: nil)
         let sourceWidth = open.meta.width, sourceHeight = open.meta.height
 
         var sizes: [String: (Int, Int)] = [:]
@@ -223,11 +303,10 @@ final class EngineClientTests: XCTestCase {
     }
 
     func testAnUnknownParameterIsRefused() async throws {
-        let url = try writeFrame()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let client = EngineClient(device: try device())
-        let open: OpenResponse = try await client.call(
-            .open, OpenRequest(imagePath: url.path, paramsDelta: nil))
+        let frameSize = 96
+        let gpu = try device()
+        let client = EngineClient(device: gpu)
+        let open = try await client.open(try makeFrame(frameSize, device: gpu), paramsDelta: nil)
         do {
             let _: SetParamsResponse = try await client.call(
                 .setParams, SetParamsRequest(sessionID: open.sessionID,

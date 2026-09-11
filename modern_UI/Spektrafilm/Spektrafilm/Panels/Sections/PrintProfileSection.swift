@@ -89,7 +89,7 @@ struct PrintProfileSection: View {
                  active: false, enabled: session.canSolve) {
                 session.solveNow()
             }
-            pill("Original", help: "Show the decoded frame before any simulation (Space does the same, while held).",
+            pill("Original", help: "Show the RAW as Apple's decoder renders it, before any film simulation (Space does the same, while held).",
                  active: session.showingOriginal, enabled: session.selection != nil) {
                 session.toggledOriginal(!session.showingOriginal)
             }

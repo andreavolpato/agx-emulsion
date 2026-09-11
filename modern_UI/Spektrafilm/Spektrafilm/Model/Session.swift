@@ -4,25 +4,25 @@
 //  the renderer, the service client and the scheduler, and it is the only
 //  thing views bind to. The flows worth knowing:
 //
-//    select(frame)  →  decode (Core Image, off main)  →  the decode on canvas
+//    select(frame)  →  decode (Core Image, off main)  →  the display decode on canvas
 //
 //  Opening stops at the decode. The develop is the slow half of the path —
-//  the 364 MB linear TIFF and the `open` that reads it back — and it happens
-//  when someone asks for the print, not when they ask to look at the frame:
+//  the *linear* decode rendered for the engine and the `open` that borrows
+//  it — and it happens when someone asks for the print, not when they ask to
+//  look at the frame. The display decode never reaches the engine:
 //
-//    Solve          →  linear TIFF in the cache        →  engine open
+//    Solve          →  linear decode → EngineFrame     →  engine open
 //                   →  solve(exposure)                 →  the Exp. Comp. baseline
 //                   →  solve(both)                     →  the enlarger filter pack
 //                   →  reprint(live)                   →  print on canvas
 //    params edit    →  the develop if the engine does not hold the frame yet,
 //                      else scheduler.request         →  reprint/preview_render
 //    adjustments    →  renderer.layer2 (no service)    →  redraw
-//    decode edit    →  re-decode → new TIFF → reopen
+//    decode edit    →  re-decode (both looks)          →  reopen
 //    zoom ≥ 100 %   →  reprint(preview/full)           →  detail texture swapped in
 //    open(folder)   →  Browse, nothing rendered        →  select() enters Print
 
 import AppKit
-import CryptoKit
 import Foundation
 import Observation
 import SwiftUI
@@ -296,6 +296,28 @@ final class Session: CanvasHost {
     /// renderer is a plain class, not `@Observable`.
     var showingOriginal = false
 
+    /// The status badges in the canvas's top-right corner, top to bottom.
+    ///
+    /// One list rather than conditions written into the view, because two
+    /// things need it: the badge stack draws it, and `CompareOverlay` moves
+    /// its "After" label out from under it — at 200 % the picture fills the
+    /// canvas, its top-right corner *is* the canvas's, and "After" and "full"
+    /// were drawn on top of each other.
+    var canvasBadges: [String] {
+        var badges: [String] = []
+        // Space is a decode-vs-print comparison, and the spec's "show
+        // original" was ambiguous about which; the label says which
+        // (HANDOFF §6) — and that the decode is Apple's rendering of it.
+        if showingOriginal { badges.append("original · decode") }
+        if detailPending {
+            badges.append(detailTier == .full ? "full resolution…" : "detail…")
+        } else if detailTier != .live {
+            badges.append(detailTier == .full ? "full" : "detail")
+        }
+        if previewSoft && selection != nil { badges.append("preview") }
+        return badges
+    }
+
     // MARK: before / after
     //
     // Capture One's split: the decoded frame on the left of a draggable line,
@@ -311,6 +333,7 @@ final class Session: CanvasHost {
         didSet {
             guard oldValue != comparing else { return }
             renderer.compareSplit = comparing
+            if comparing { ensureOriginalDetail() }
         }
     }
     /// 0…1 across the output. Stored here so the overlay can bind to it.
@@ -423,14 +446,15 @@ final class Session: CanvasHost {
 
     // MARK: the develop, on request
     //
-    // A frame opens onto its *decode*. It is what the user asked to look at,
-    // it lands in a few hundred milliseconds, and it is the picture the frame
-    // actually is — where the develop is a 364 MB TIFF and an `open` that
-    // reads it back (~2 s on a 24 MP RAW, HANDOFF-DISTRIBUTION §1). So the
-    // develop happens when someone asks for the *print*: Solve, an edit, an
-    // export, a capture. `wantsDevelop` is that request, and it survives a
-    // re-decode because a white-balance change is also a request to see the
-    // result.
+    // A frame opens onto its *decode* — the display decode, Apple's own
+    // rendering of the RAW (`DecodedImage.display`). It is what the user asked
+    // to look at, it lands in a few hundred milliseconds, and it is the
+    // picture the frame actually is. The develop — the linear decode rendered
+    // for the engine, `open`, the solve and the first print, about half a
+    // second at 45 MP — happens when someone asks for the *print*: Solve, an
+    // edit, an export, a capture. `wantsDevelop` is that request, and it
+    // survives a re-decode because a white-balance change is also a request
+    // to see the result.
 
     /// Whether this frame's develop has been asked for.
     private var wantsDevelop = false
@@ -438,11 +462,8 @@ final class Session: CanvasHost {
     /// the frame awaits it rather than starting a second one — which is what
     /// Solve pressed while the decode is still landing turns into.
     private var developTask: Task<String?, Never>?
-    /// The decode settings the image on the canvas was decoded with. The linear
-    /// TIFF is *written* from those pixels and *cached* under those settings, so
-    /// a develop that read today's settings and wrote yesterday's pixels would
-    /// poison the entry for both.
-    private var decodedSettings = DecodeSettings()
+    /// The long edge of an original-at-detail render in flight, if any.
+    private var originalDetailEdge: Int?
 
     private var loadTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -478,10 +499,7 @@ final class Session: CanvasHost {
         renderer.onHistogram = { [weak self] h in self?.histogram = h }
         renderer.onViewportChanged = { [weak self] in self?.viewportChanged() }
         renderer.layer2 = sidecar.adjustments.uniforms
-        // Enforce the cache ceiling once at launch, so a directory left over
-        // from a build that had no bound is trimmed even if nothing is written
-        // this session.
-        LinearCache.prepare()
+        Session.removeLegacyLinearCache()
         Task { await client.set(onTermination: { [weak self] reason in
             Task { @MainActor in self?.serviceReady = false; self?.status = reason; self?.lastError = reason }
         }) }
@@ -834,7 +852,6 @@ final class Session: CanvasHost {
         }
         guard !Task.isCancelled, selection == url else { return }
         decoded = d
-        decodedSettings = settings
         sourceLongEdge = max(d.pixelSize.width, d.pixelSize.height)
         if sidecar.decode.whiteBalance == .asShot, let t = d.asShotTemperature, let tn = d.asShotTint,
            (sidecar.decode.temperature != t || sidecar.decode.tint != tn) {
@@ -856,28 +873,19 @@ final class Session: CanvasHost {
         }
         // Handed the clock so the develop continues the same line: the decode
         // and the preview it lapped are the first half of *this* open, and a
-        // summary that starts at `linear-tiff` would hide them.
+        // summary that starts at `frame` would hide them.
         await ensureDeveloped(clock: clock)
     }
 
-    /// The develop: the linear TIFF in the cache, the engine's session for the
-    /// frame, and the print that replaces the decode on the canvas.
+    /// The develop: the *linear* decode rendered for the engine, the engine's
+    /// session for the frame, and the print that replaces the decode on the
+    /// canvas. The display decode on the canvas plays no part in it.
     ///
     /// This is the slow half of the open path and it is deliberately not on
-    /// it. The TIFF is written after the cancellation guards, so a superseded
-    /// white-balance value never leaves a file behind (HANDOFF §3.1.2).
+    /// it.
     @discardableResult
     private func develop(_ url: URL, _ d: DecodedImage, clock: LoadClock) async -> String? {
-        var clock = clock
-        let settings = decodedSettings
-        let tiff: URL? = await Task.detached(priority: .userInitiated) {
-            try? Session.linearTIFF(for: d, settings: settings)
-        }.value
-        clock.lap("linear-tiff")
-        guard !Task.isCancelled, selection == url, let tiff else {
-            status = "Could not decode \(url.lastPathComponent)."; return nil
-        }
-        return await openInService(tiff: tiff, for: url, clock: clock)
+        await openInService(d, for: url, clock: clock)
     }
 
     /// The develop, as something every caller can await.
@@ -919,7 +927,7 @@ final class Session: CanvasHost {
         Task { await ensureDeveloped() }
     }
 
-    private func openInService(tiff: URL, for url: URL, clock: LoadClock) async -> String? {
+    private func openInService(_ d: DecodedImage, for url: URL, clock: LoadClock) async -> String? {
         var clock = clock
         // The gate, not a race (RFC-013 §2.2). Costs nothing once boot has
         // been paid, and on the path that matters — a frame restored at launch
@@ -941,9 +949,21 @@ final class Session: CanvasHost {
         startClock()
         defer { busy = wasBusy }
         do {
-            let req = OpenRequest(imagePath: tiff.path, paramsDelta: sidecar.params.fullDelta)
-            let r: OpenResponse = try await client.call(.open, req)
-            clock.lap("service.open")
+            let r: OpenResponse
+            do {
+                // Its own scope, so the 727 MB buffer is gone before the solve
+                // and the first render run — at -Onone too, where a value is
+                // otherwise kept to the end of the function. The engine keeps
+                // nothing of it (`spk_open_device` borrows for the call).
+                let device = renderer.device
+                let frame = try await Task.detached(priority: .userInitiated) {
+                    try ImageDecoder.engineFrame(from: d, device: device)
+                }.value
+                clock.lap("frame")
+                guard selection == url, !Task.isCancelled else { return nil }
+                r = try await client.open(frame, paramsDelta: sidecar.params.fullDelta)
+            }
+            clock.lap("engine.open")
             // `open` echoes the whole block, so the check happens here too:
             // a service can be restarted under a running app.
             if let caps = r.capabilities {
@@ -1022,6 +1042,7 @@ final class Session: CanvasHost {
             if let resident = renderer.store.detail(for: url, stamp: stamp, atLeast: detailTier.rank) {
                 detailTier = DetailTier(rawValue: resident.tier) ?? detailTier
                 renderer.setDetail(resident.texture)
+                ensureOriginalDetail()
             } else {
                 renderer.dropDetail()
                 renderer.store.dropDetail(unless: stamp, for: url)
@@ -1052,29 +1073,26 @@ final class Session: CanvasHost {
         }
     }
 
-    // MARK: - decode cache
+    // MARK: - the retired decode cache
 
-    nonisolated static func linearTIFF(for d: DecodedImage, settings: DecodeSettings) throws -> URL {
-        let key = Session.contentKey(d.sourceURL) + "-" + settings.cacheKey
-        let dir = LinearCache.directory
-        let url = dir.appending(path: key + ".tif")
-        if FileManager.default.fileExists(atPath: url.path) {
-            LinearCache.touch(url)
-            return url
+    /// Where the linear-TIFF handoff cache used to live.
+    nonisolated static var legacyLinearCache: URL { cacheRoot.appending(path: "linear") }
+
+    /// Delete what the linear-TIFF cache left behind.
+    ///
+    /// The cache existed because the engine once lived in another process and
+    /// took a file. Since RFC-014 it has taken pixels, so every entry was a
+    /// file this process wrote only to read back, at 6.4–7.1 s per 45 MP
+    /// frame; the frame now goes to the engine straight from the decode, and
+    /// nothing reads these files. They were up to 4 GB (a 4 GB LRU, 363 MB an
+    /// entry), which is the user's disk, not ours to keep. Off the main
+    /// thread, and quiet on failure: a directory that is already gone is the
+    /// normal case after the first launch.
+    nonisolated static func removeLegacyLinearCache() {
+        let dir = legacyLinearCache
+        Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: dir)
         }
-        LinearCache.prepare()
-        try ImageDecoder.writeLinearTIFF(d, to: url)
-        LinearCache.touch(url)
-        return url
-    }
-
-    /// File size + mtime + path hash: cheap and good enough for a cache key.
-    nonisolated static func contentKey(_ url: URL) -> String {
-        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
-        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-        let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let digest = SHA256.hash(data: Data("\(url.path)|\(size)|\(mtime)".utf8))
-        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
     private func prefetchNeighbours(of url: URL) {
@@ -1217,7 +1235,43 @@ final class Session: CanvasHost {
     func geometryChanged(_ g: Geometry) { geometry = g }
     func straightenPreview(_ line: StraightenLine?) { straightenPreview = line }
     func stepFrame(_ delta: Int) { selectRelative(delta) }
-    func toggledOriginal(_ on: Bool) { renderer.showOriginal = on; showingOriginal = on }
+    func toggledOriginal(_ on: Bool) {
+        renderer.showOriginal = on
+        showingOriginal = on
+        if on { ensureOriginalDetail() }
+    }
+
+    /// The original at the resolution of the detail print on screen, so that a
+    /// comparison at zoom compares the film against the decode — not against
+    /// a 1600 px decode stretched to 200 % (see `Renderer.originalDetail`).
+    ///
+    /// Only while a comparison is up: at the full tier this is another
+    /// full-resolution texture (~360 MB at 45 MP), and a user who never
+    /// compares at zoom should not pay for it. Rendered from the *display*
+    /// decode, like the live-tier original, at the detail print's long edge.
+    private func ensureOriginalDetail() {
+        guard comparing || showingOriginal, renderer.showsDetail, let detail = renderer.detail,
+              let url = selection, let d = decoded, let original = renderer.original else { return }
+        let edge = max(detail.width, detail.height)
+        if let have = renderer.originalDetail, max(have.width, have.height) == edge { return }
+        guard originalDetailEdge != edge else { return }   // already on its way
+        originalDetailEdge = edge
+        let device = renderer.device
+        Task { [weak self] in
+            let box = await Task.detached(priority: .userInitiated) {
+                TextureBox(ImageDecoder.makePreviewTexture(d, device: device, maxEdge: edge))
+            }.value
+            guard let self else { return }
+            if self.originalDetailEdge == edge { self.originalDetailEdge = nil }
+            // Still the same frame, the same decode and the same detail size:
+            // anything else and this is a picture of something no longer shown.
+            guard self.selection == url, self.renderer.original === original,
+                  let shown = self.renderer.detail, max(shown.width, shown.height) == edge,
+                  let tex = box.texture else { return }
+            self.renderer.setOriginalDetail(tex)
+            canvasLog("original at \(tex.width)x\(tex.height) for the comparison")
+        }
+    }
     func hovered(normalised n: CGPoint?) {
         guard let n, let base = renderer.base else { hoverValue = nil; return }
         hoverValue = Session.sample(base, at: n)
@@ -1384,6 +1438,7 @@ final class Session: CanvasHost {
             detailPending = false
             detailTier = DetailTier(rawValue: resident.tier) ?? want
             renderer.setDetail(resident.texture)
+            ensureOriginalDetail()
             return
         }
 
@@ -1441,6 +1496,7 @@ final class Session: CanvasHost {
                   let tex = outcome.texture, let w = r.width, let h = r.height else { return }
             renderer.store.setDetail(tex, tier: tier.rawValue, rank: tier.rank, stamp: stamp, for: url)
             renderer.setDetail(tex)
+            ensureOriginalDetail()
             canvasLog("detail \(tier.rawValue) \(w)x\(h) landed in \(Int(r.elapsedMs)) ms")
             if let base = statusBase { status = base }
         } catch {

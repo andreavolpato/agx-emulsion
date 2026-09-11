@@ -137,6 +137,59 @@ def bake_filters(blob: Blob) -> None:
     blob.add("filters/dichroic_custom_ref", custom_dichroic_filters.filters, dtype=np.float64)
 
 
+def bake_print_luts(blob: Blob, out: Path) -> tuple[int, int]:
+    """The 8 shipped print-preview LUTs, plus one metadata index.
+
+    `preview_stock_lut` and the DI package are the only two callers, and both
+    need the same three things per print stock: a (33, 33, 33, 3) table, the
+    (3, 33) per-channel density axes it is indexed by, and the film the bake
+    was paired with. The tables go in the blob as **float32** -- which is how
+    `bake_all_print_luts.py` wrote them and how the Metal kernel reads them,
+    so widening here would be more bits than the asset has -- and the
+    metadata goes in one `print_luts.json` index rather than eight sidecars,
+    because the engine reads it once at startup and a per-stock file would
+    add a second path built from a name off the wire.
+
+    3.45 MB for the eight. HANDOFF-DISTRIBUTION §1 named this as the
+    bundling requirement the port would create; this is it being met.
+    """
+    src = Path(__import__("spektrafilm").__file__).parent / "data/luts/print_preview"
+    index = {}
+    n = 0
+    for npz_path in sorted(src.glob("*.npz")):
+        stock = npz_path.stem
+        meta = json.loads((src / f"{stock}.json").read_text())
+        with np.load(npz_path, allow_pickle=False) as z:
+            lut, axes = z["lut"], z["axes"]
+        size = lut.shape[0]
+        if lut.shape != (size, size, size, 3) or axes.shape != (3, size):
+            raise SystemExit(f"{stock}: unexpected LUT shape {lut.shape} / {axes.shape}")
+        # The Metal kernel maps a density to a grid coordinate with one
+        # subtract and one multiply, which is only the same interpolation the
+        # scipy reference does when the axis is uniform. It is, on every
+        # shipped asset (to 2.4e-7) -- but that is a property of the bake, not
+        # a guarantee, so it is checked here where a future re-bake would
+        # trip it rather than in a kernel that cannot report anything.
+        for c in range(3):
+            step = np.diff(axes[c].astype(np.float64))
+            if not np.allclose(step, step[0], rtol=0, atol=1e-6):
+                raise SystemExit(f"{stock}: axis {c} is not uniformly spaced; "
+                                 "the trilinear kernel assumes it is")
+        blob.add(f"print_lut/{stock}", lut, dtype=np.float32)
+        blob.add(f"print_lut_axes/{stock}", axes, dtype=np.float32)
+        index[stock] = {
+            "paired_film": meta["paired_film"],
+            "declared_pairing": bool(meta["declared_pairing"]),
+            "lut_size": int(size),
+            "output_color_space": meta.get("output_color_space", "Display P3"),
+            "output_cctf_encoding": bool(meta.get("output_cctf_encoding", True)),
+        }
+        n += 1
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "print_luts.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
+    return n, int(sum(v["lut_size"] ** 3 * 3 * 4 for v in index.values()))
+
+
 def bake_shape(blob: Blob) -> None:
     from spektrafilm.config import SPECTRAL_SHAPE
     blob.add("spectral/wavelengths", SPECTRAL_SHAPE.wavelengths, dtype=np.float64)
@@ -164,6 +217,7 @@ def main() -> int:
     bake_colour(blob)
     bake_spectra(blob)
     bake_filters(blob)
+    n_luts, lut_bytes = bake_print_luts(blob, out)
     size = blob.write(out / "spektrafilm_constants.bin")
 
     data = Path(__import__("spektrafilm").__file__).parent / "data"
@@ -171,6 +225,7 @@ def main() -> int:
     shutil.copy2(data / "filters/neutral_print_filters.json", out / "neutral_print_filters.json")
 
     print(f"constants  {size/1e6:7.3f} MB")
+    print(f"print LUTs {n_luts} stocks, {lut_bytes/1e6:.3f} MB (inside the constants blob)")
     print(f"profiles   {n_profiles} JSON files, "
           f"{sum(p.stat().st_size for p in (out/'profiles').glob('*.json'))/1e6:.3f} MB")
     print(f"-> {out}")

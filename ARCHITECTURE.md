@@ -63,7 +63,7 @@ is added. Renders are the one exception and go through
 `Decodable`.
 
 **What is still Python.** `src/spektrafilm` is the reference implementation and
-the oracle for five parity harnesses (§8.6). It is a development dependency. It
+the oracle for six parity harnesses (§8.6). It is a development dependency. It
 is also still the *only* implementation of three wire methods — `export`,
 `export_di`, `preview_stock_lut` — which the engine refuses by name rather than
 answering wrongly (§8.7).
@@ -433,12 +433,12 @@ why each bar is where it is, and the bugs already found.
 engine/include/spektrafilm/spk_engine.h   the whole C ABI
 engine/src/core/        setup maths — no GPU, no pixels, testable on its own
       blob, json, colour, spectral, profile, params, curves, cam16,
-      hanatos, printing, setup_cache
+      hanatos, printing, print_lut, setup_cache
 engine/src/gpu/         gpu.hpp (the interface) + metal_gpu.cpp (metal-cpp)
 engine/src/shaders/     the kernels; built by build.sh, not by Xcode
 engine/src/pipeline/    image, blur, pipeline (21 nodes), engine (the C ABI)
 engine/tools/           bake_resources.py
-engine/tests/           five parity harnesses + two C++ drivers
+engine/tests/           six parity harnesses + two C++ drivers
 engine/build.sh         lib | dylib | metallib | tests | bundle | all
 ```
 
@@ -462,6 +462,13 @@ Three rules, and they are the ones to keep:
    different photograph. Swift takes it with `takeRetainedValue()`; C calls
    `spk_result_free`.
 3. **Parameters are JSON.**
+
+The one place rule 3 does not reach is `spk_print_lut_table`, which hands out
+a pointer to 431 kB of float32 rather than a number: the `.cube` writer needs
+the table itself, and 107,811 values as JSON text would be a megabyte of
+string to parse back into the array it started as. The pointer is engine-owned
+and valid for the engine's lifetime, which keeps rule 2 — nothing crosses that
+the caller then has to free.
 
 A C ABI rather than Swift's C++ interop (which Xcode 26.6 supports and which
 works): it is ABI-stable across toolchains, it keeps the boundary narrow, and
@@ -533,7 +540,7 @@ cached negative and a `shoot`-layer edit must not.
 
 ### 8.6 Parity: what is actually measured
 
-Python stays the oracle. All five drive the shipping binary.
+Python stays the oracle. All six drive the shipping binary.
 
 | harness | holds | result |
 |---|---|---|
@@ -542,6 +549,7 @@ Python stays the oracle. All five drive the shipping binary.
 | `parity_render.py` | the picture, 27 configurations, 1 MP frame, vs numba | 0 failed, max 2.3e-5 |
 | `parity_session.py` | all 39 wire fields applied to a *live* session | 0 failed |
 | `parity_grain.py` | grain's mean/std/skew at 9 densities | 0 failed |
+| `parity_lut.py` | the 8 print tables, the LUT apply, the DI normalisation | 0 failed, tables bit-exact, max 8.0e-6 |
 
 Plus `gpu_smoke` (the boundary) and `check_math_guard.sh` (that the guard
 fires).
@@ -557,40 +565,90 @@ systematic shift cannot hide under the absolute one.
 case and so never took the path a user takes: open once, then move sliders.
 That gap hid a bug that broke twelve print-layer fields outright.
 
+`parity_lut.py` holds three bars, because three different things can go wrong
+in the LUT path. The **tables** are bit-exact against the shipped `.npz`,
+because nothing between the asset and the pointer the C ABI hands out is
+arithmetic — a table that arrived transposed would still make a plausible
+photograph, which is RFC-012 §4.1's named failure mode. The **apply** and the
+**DI normalisation** carry `parity_render`'s bars, because both sides read
+their own negative, so what is measured is the film side's accumulated
+float32 error plus one trilinear sample rather than the kernel's own (which
+agreed with scipy at 2.4e-7 when both read the *same* negative). And the
+**film-mismatch warning** is asserted present when the films differ and
+absent when they do not: a warning that always fires trains the user to
+ignore the one that matters.
+
 ### 8.7 Speed and size, measured
 
 45 MP, warm, on an M3 Max:
 
-| tier | first | reprint |
-|---|---|---|
-| live 1600 px | 0.13 s | 0.01 s |
-| preview 3400 px | 0.25 s | 0.04 s |
-| full 7800×5800 | 0.87 s | 0.17 s |
+| tier | first | reprint | LUT flip |
+|---|---|---|---|
+| live 1600 px | 0.13 s | 0.01 s | 2.0 ms |
+| preview 3400 px | 0.25 s | 0.04 s | 9.5 ms |
+| full 7800×5800 | 0.87 s | 0.17 s | 47 ms |
+
+The **LUT flip** column is `spk_preview_stock_lut`: the cached negative
+through one trilinear sample instead of the print chain. Re-measured
+2026-09-10 on a synthetic 45 MP frame, which reproduced the reprint column to
+0.009 / 0.034 / 0.167 s in the same run — that agreement is what makes the
+new column comparable to the two beside it. **About 4× a reprint, not the
+190× in HANDOFF-PRINT-LUT §3.1**: that figure was this kernel against *scipy
+on the CPU*, which is the wrong comparison for a user who would otherwise
+have got a real reprint on the GPU. `spk_export_di` is 51 ms at the full
+tier, nearly all of it the rgba16 conversion.
 
 A non-live slider is 0.2–3.4 ms of `set_params` plus a reprint. Opening a
 24 MP RAW through the app is ~2.0 s, of which ~1.6 s is Core Image rendering
 the linear TIFF to a float bitmap — now the largest single cost on that path.
 
-Bundle **20 MB**, of which 11 MB is baked resources (6.0 MB of colour
-constants, of which 5.97 MB is the Hanatos irradiance spectra kept float16 as
-the reference stores them; 5.8 MB of profiles for all 28 stocks). Both are
-data, both are trimmable, neither is code.
+Bundle **17 MB Release**, of which 15 MB is resources: 9.45 MB of constants
+(5.97 MB of it the Hanatos irradiance spectra, kept float16 as the reference
+stores them, plus the 3.45 MB of print-preview LUTs the LUT port added),
+5.8 MB of profiles for all 28 stocks, 196 kB of film cover art and 80 kB of
+licence texts. All data, all trimmable, none of it code. The DMG is 10 MB.
 
-### 8.8 What is not ported
+### 8.8 The three methods that used to be refused
 
-The engine refuses these **by name** rather than answering wrongly:
+`export`, `export_di` and `preview_stock_lut` were refused **by name** until
+2026-09-10, when they were ported. They are now the whole of the method
+surface, and the split between C++ and Swift is worth stating because it is
+not the obvious one:
 
-- `export` — the render exists, the file writer does not;
-- `export_di` — three files plus the shipped print-preview LUTs;
-- `preview_stock_lut` — needs the `.cube` machinery.
+| method | the engine does | Swift does |
+|---|---|---|
+| `export` | `spk_reprint` at the full tier | Layer 2, the geometry, and the file (ImageIO) |
+| `preview_stock_lut` | `spk_preview_stock_lut` — the negative through the trilinear kernel, into a texture | draws it, or writes it |
+| `export_di` | `spk_export_di` — the negative normalised by the LUT's axes; `spk_print_lut_table` — the table | the 16-bit TIFF, the `.cube`, the print preview |
 
-`Exporter.swift` still calls them and will surface the refusal. None is on the
-path from opening a frame to seeing it; each is a subsystem rather than a node.
+**No file writer was added to the engine**, and that is the design rather than
+a shortcut. ImageIO is already how the finished formats are written and it is
+where the colour tagging lives; `Exporter.writeCube` is thirty lines of text
+formatting. What the engine owns is the part only it can do — the pixels and
+the baked table. The reference put both halves in Python because Python had
+both; here the boundary falls where the platform's own libraries already are.
 
-Also open: `native/` (the stdio proxy host) and `scripts/gpu_native/native_host_spike/`
-are dead and should be deleted; per-node timings are off unless
-`SPEKTRAFILM_NODE_TIMINGS=1` (§8.9); Xcode's Debug configuration compiles the
-engine at `-O0`, which is ~1.7× on the setup maths and nothing on the kernels.
+Two consequences worth knowing:
+
+- **The print-preview LUTs are bundled now**, 3.45 MB inside
+  `spektrafilm_constants.bin` as `print_lut/<stock>` and
+  `print_lut_axes/<stock>`, with `print_luts.json` as the metadata index.
+  HANDOFF-DISTRIBUTION §1 named this as the bundling requirement the port
+  would create. They are CC BY-SA 4.0 derivatives of the profiles, which is
+  why the bundle now carries licence texts (§2.3 of that handoff).
+- **The DI TIFF is tagged device RGB, not Display P3.** Its channels are film
+  densities, and the `.cube` beside it indexes exactly those numbers — a host
+  that treats them as a colour and converts on open silently moves the cube's
+  domain out from under it. `PrintLUTTests` asserts the file carries no
+  profile.
+
+Still open: `native/` (the stdio proxy host) and
+`scripts/gpu_native/native_host_spike/` are dead and should be deleted;
+per-node timings are off unless `SPEKTRAFILM_NODE_TIMINGS=1` (§8.9); Xcode's
+Debug configuration compiles the engine at `-O0`, which is ~1.7× on the setup
+maths and nothing on the kernels. And baking a *ninth* print LUT is still
+Python's job — `engine/src/core/print_lut.cpp` reads tables and does not make
+them, because making one needs the whole print+scan chain over a 33³ grid.
 
 ### 8.9 Node timings measure encode time unless you ask
 

@@ -45,6 +45,32 @@ TESTS = "SpektrafilmTests"
 BUNDLE_ID = "com.hanze.spektrafilm"
 MACOS = "15.0"
 
+# The version, in one place.
+#
+# `Info.plist` used to carry the literal strings `0.2` and `2`, which is why
+# they were still `0.2` and `2` — nothing derived them and nothing noticed.
+# They are build settings now and the plist references them, so a release
+# bumps one line here (HANDOFF-DISTRIBUTION §2.6).
+MARKETING_VERSION = "0.3"
+BUILD_NUMBER = "3"
+
+# Signing, from the environment, because a Developer ID certificate is not in
+# this repository and must not be.
+#
+# The default is ad-hoc, which is what a development build has always used and
+# what Gatekeeper refuses everywhere except the machine that made it. A release
+# passes the real identity and team:
+#
+#     SPEKTRAFILM_SIGN_IDENTITY="Developer ID Application: NAME (TEAMID)" \
+#     SPEKTRAFILM_TEAM_ID=TEAMID Tools/gen-project.py
+#
+# `Tools/package.sh` does exactly that and then notarises. Hardened runtime is
+# on unconditionally: notarisation requires it, and a Debug build that differs
+# from the shipped one in *how it is hardened* is a Debug build that cannot
+# prove the release will launch (HANDOFF-DISTRIBUTION §2.1, §2.2).
+SIGN_IDENTITY = os.environ.get("SPEKTRAFILM_SIGN_IDENTITY", "-")
+TEAM_ID = os.environ.get("SPEKTRAFILM_TEAM_ID", "")
+
 
 def uid(key: str) -> str:
     return hashlib.sha1(key.encode()).hexdigest()[:24].upper()
@@ -197,11 +223,15 @@ def build() -> str:
         "SDKROOT": "macosx",
         "ARCHS": "arm64",
         "ONLY_ACTIVE_ARCH": "YES",
-        "CODE_SIGN_STYLE": "Automatic",
-        "CODE_SIGN_IDENTITY": '"-"',
-        "DEVELOPMENT_TEAM": '""',
+        "CODE_SIGN_STYLE": "Manual" if TEAM_ID else "Automatic",
+        "CODE_SIGN_IDENTITY": f'"{SIGN_IDENTITY}"',
+        "DEVELOPMENT_TEAM": f'"{TEAM_ID}"',
         "CLANG_ENABLE_MODULES": "YES",
-        "ENABLE_HARDENED_RUNTIME": "NO",
+        # Required for notarisation, and on in both configurations so a Debug
+        # build exercises the same hardening the release ships with.
+        "ENABLE_HARDENED_RUNTIME": "YES",
+        "MARKETING_VERSION": MARKETING_VERSION,
+        "CURRENT_PROJECT_VERSION": BUILD_NUMBER,
         "SWIFT_EMIT_LOC_STRINGS": "NO",
         "GENERATE_INFOPLIST_FILE": "NO",
         "MTL_ENABLE_DEBUG_INFO": "INCLUDE_SOURCE",
@@ -247,19 +277,20 @@ def build() -> str:
         p.add(lid, f"{{\n\t\t\tisa = XCConfigurationList;\n\t\t\tbuildConfigurations = (\n\t\t\t\t{d} /* Debug */,\n\t\t\t\t{r} /* Release */\n\t\t\t);\n\t\t\tdefaultConfigurationIsVisible = 0;\n\t\t\tdefaultConfigurationName = Release;\n\t\t}}", tag)
         return lid
 
-    # A pre-build check, not a build step -- see Tools/check-engine-resources.sh
+    # A pre-build check, not a build step -- see Tools/check-bundle-resources.sh
     # for why it only reports rather than bakes. Kept as a script *file* so the
     # pbxproj carries one line rather than an escaped shell program, and so the
-    # check can be run on its own.
+    # check can be run on its own. It covers the engine's baked resources and
+    # the licence texts the bundle is obliged to carry.
     check_script = uid("phase:app:check-resources")
     p.add(check_script,
           "{\n\t\t\tisa = PBXShellScriptBuildPhase;\n\t\t\tbuildActionMask = 2147483647;"
           "\n\t\t\tfiles = (\n\t\t\t);\n\t\t\tinputPaths = (\n\t\t\t);"
-          "\n\t\t\tname = \"Check engine resources\";\n\t\t\toutputPaths = (\n\t\t\t);"
+          "\n\t\t\tname = \"Check bundled resources\";\n\t\t\toutputPaths = (\n\t\t\t);"
           "\n\t\t\trunOnlyForDeploymentPostprocessing = 0;"
           "\n\t\t\tshellPath = /bin/sh;"
-          "\n\t\t\tshellScript = \"\\\"$SRCROOT/Tools/check-engine-resources.sh\\\"\\n\";"
-          "\n\t\t}", "Check engine resources")
+          "\n\t\t\tshellScript = \"\\\"$SRCROOT/Tools/check-bundle-resources.sh\\\"\\n\";"
+          "\n\t\t}", "Check bundled resources")
 
     app_target = uid("target:app")
     test_target = uid("target:tests")

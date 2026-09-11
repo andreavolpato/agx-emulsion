@@ -230,6 +230,26 @@ public:
         return upload_persistent(data, count * sizeof(uint32_t), error);
     }
 
+    BufferRef borrow(void* mtl_buffer, size_t bytes, std::string& error) override {
+        auto* mtl = static_cast<MTL::Buffer*>(mtl_buffer);
+        if (!mtl) { error = "no buffer to borrow"; return {}; }
+        // A buffer from another device is not an error Metal reports: it is
+        // a GPU fault at the first dispatch that names it.
+        if (mtl->device() != device_) {
+            error = "the frame's MTLBuffer belongs to a different MTLDevice than the engine's";
+            return {};
+        }
+        if (mtl->length() < bytes) {
+            error = "the frame's MTLBuffer holds " + std::to_string(mtl->length()) +
+                    " bytes; the image needs " + std::to_string(bytes);
+            return {};
+        }
+        mtl->retain();
+        // `persistent`, so the last release gives the retain back and deletes
+        // the wrapper rather than putting the caller's memory in the pool.
+        return BufferRef(this, new Buffer{mtl, bytes, 1, false, true});
+    }
+
     void* contents(Buffer* b) override { return b->mtl->contents(); }
     size_t size_bytes(Buffer* b) const override { return b->bytes; }
 

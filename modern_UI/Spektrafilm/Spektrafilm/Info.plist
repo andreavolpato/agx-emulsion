@@ -8,8 +8,13 @@
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 	<key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>0.2</string>
-	<key>CFBundleVersion</key><string>2</string>
+	<!-- Derived from MARKETING_VERSION / CURRENT_PROJECT_VERSION in
+	     Tools/gen-project.py, which is the one place a release bumps.
+	     Literals here sat at 0.2 for every build because nothing derived
+	     them (HANDOFF-DISTRIBUTION §2.6). -->
+	<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSHumanReadableCopyright</key><string>Spektrafilm is free software under the GNU GPL v3 or later. Film and paper profiles © Andrea Volpato, CC BY-SA 4.0.</string>
 	<key>LSMinimumSystemVersion</key><string>15.0</string>
 	<key>NSHighResolutionCapable</key><true/>
 	<key>NSDocumentsFolderUsageDescription</key><string>Spektrafilm opens a folder of negatives to print from.</string>
