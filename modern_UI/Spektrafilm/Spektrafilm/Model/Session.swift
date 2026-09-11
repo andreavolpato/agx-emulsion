@@ -476,6 +476,16 @@ final class Session: CanvasHost {
 
     /// Whether this frame's develop has been asked for.
     private var wantsDevelop = false
+    /// What each of RFC-015 §2.3's four intents would choose for the frame on
+    /// screen, as the last develop's `solve` reported them.
+    ///
+    /// Per frame and not persisted, like the decode itself: the numbers are a
+    /// property of *this* frame's pixels, and a stale map would put another
+    /// frame's exposure under this one's Tone pill. It exists so the Exp.
+    /// Comp. sublabel can stay true across a Tone change without waiting for
+    /// the develop's round trip — which is the reason `solve` reports all four
+    /// at once.
+    private var exposureEvByMethod: [String: Double]?
     /// Whether `decoded` has been superseded by a re-decode that has not
     /// landed yet.
     ///
@@ -737,6 +747,7 @@ final class Session: CanvasHost {
         selection = nil
         decoded = nil
         decodeIsStale = false
+        exposureEvByMethod = nil
         wantsDevelop = false
         developTask?.cancel(); developTask = nil
         sourceLongEdge = 0
@@ -818,6 +829,7 @@ final class Session: CanvasHost {
         syncMasks()
         decoded = nil
         decodeIsStale = false
+        exposureEvByMethod = nil
         exif = EXIFReadout.read(url)
         stockWarning = nil
         // Show the last print of this frame instantly if it is resident.
@@ -1053,6 +1065,11 @@ final class Session: CanvasHost {
             if let solved = try? await client.call(.solve, SolveRequest(sessionID: r.sessionID, target: "exposure"), as: SolveResponse.self),
                let ev = solved.solvedParams["exposure_compensation_ev"] {
                 sidecar.solvedEV = ev
+                // And what the *other* three intents would have chosen, from
+                // the same sample. Kept for the Tone pill: switching intent is
+                // a shoot-layer edit, so the label would otherwise be a film
+                // render behind (RFC-015 §3).
+                exposureEvByMethod = solved.exposureEvByMethod
                 scheduleSave()
             }
             clock.lap("solve")
@@ -1198,6 +1215,11 @@ final class Session: CanvasHost {
             developTask?.cancel(); developTask = nil
             renderer.store.invalidatePrint(for: url)
             previewSoft = true
+            // The four intents' EVs belong to the decode being replaced, so
+            // they go with it: the label would otherwise be quoting the old
+            // exposure while the new decode is on its way. The develop that
+            // follows is what refills them.
+            exposureEvByMethod = nil
             // The engine keeps the frame the *previous* decode made, and it
             // has no idea a decode happened after it. Without this, `load`'s
             // tail would find that session already there, decide the frame was
@@ -1263,6 +1285,46 @@ final class Session: CanvasHost {
 
     // MARK: - white balance
 
+    /// The camera's own white balance for the frame on screen, or nil until a
+    /// decode has landed. Ticking an "As Shot" box means pinning to these, so
+    /// with nothing to pin to the boxes are disabled (`WhiteBalanceBoxes`).
+    var asShotWhiteBalance: WhiteBalanceBoxes.AsShot? {
+        guard let d = decoded, let t = d.asShotTemperature, let tn = d.asShotTint else { return nil }
+        return (t, tn)
+    }
+
+    /// What the two "As Shot" boxes read right now.
+    var whiteBalanceBoxes: WhiteBalanceBoxes {
+        WhiteBalanceBoxes(decode, asShot: asShotWhiteBalance)
+    }
+
+    func setTempAsShot(_ on: Bool) {
+        decode = whiteBalanceBoxes.applying(temp: on, tint: nil, to: decode, asShot: asShotWhiteBalance)
+    }
+
+    func setTintAsShot(_ on: Bool) {
+        decode = whiteBalanceBoxes.applying(temp: nil, tint: on, to: decode, asShot: asShotWhiteBalance)
+    }
+
+    /// Dragging the temperature slider. The axis is no longer the camera's, so
+    /// the decode becomes `.custom` at the value shown — and whether the
+    /// "As Shot" box then reads ticked is `WhiteBalanceBoxes`' question, not
+    /// this one's: dragging onto the camera's own value is the same picture as
+    /// `.asShot` and reads the same way.
+    func setTemperature(_ kelvin: Double) {
+        var d = decode
+        d.temperature = kelvin
+        d.whiteBalance = .custom
+        decode = d
+    }
+
+    func setTint(_ tint: Double) {
+        var d = decode
+        d.tint = tint
+        d.whiteBalance = .custom
+        decode = d
+    }
+
     func setWhiteBalance(_ mode: DecodeSettings.WhiteBalance) {
         var d = decode
         d.whiteBalance = mode
@@ -1327,6 +1389,32 @@ final class Session: CanvasHost {
         p.printStock = stock
         p.scanFilm = false
         params = p
+    }
+
+    /// The Camera section's Tone pill: which exposure intent the engine meters
+    /// with (RFC-015 §2.3).
+    ///
+    /// A shoot-layer edit, so it re-renders the negative — and the Exp. Comp.
+    /// sublabel ("auto +x EV") is a *report* of what the meter chose, so it has
+    /// to be the new intent's number the moment the pill moves rather than a
+    /// film render later. The EV comes from the map the last develop's `solve`
+    /// left behind, which is exactly why `solve` reports all four at once; if
+    /// the map is not there yet — a frame that has never been developed — the
+    /// label is left alone for the develop to fill in. A legacy sidecar has no
+    /// method at all, and `solve` reports `exposure_compensation_ev` for
+    /// whatever meter is running, so nothing here applies to it.
+    ///
+    /// `params`' setter is what pushes undo, requests the print and schedules
+    /// the save, so this must go through it rather than around it.
+    func setAutoExposureMethod(_ method: String?) {
+        guard method != params.autoExposureMethod else { return }
+        var p = params
+        p.autoExposureMethod = method
+        params = p
+        if let ev = method.flatMap({ exposureEvByMethod?[$0] }) {
+            sidecar.solvedEV = ev
+            scheduleSave()
+        }
     }
 
     private func startStockPreview(_ stock: String) {

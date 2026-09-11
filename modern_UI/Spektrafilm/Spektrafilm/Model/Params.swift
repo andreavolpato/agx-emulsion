@@ -67,12 +67,59 @@ struct FilmFormat: Identifiable, Hashable, Sendable {
     }
 }
 
+/// RFC-015 §2.3's four exposure intents, as the Camera section's Tone pill
+/// offers them. The case names are the wire values.
+enum ExposureMethod: String, CaseIterable, Identifiable, Sendable {
+    case balanced
+    case center
+    case protectHighlights = "protect_highlights"
+    case protectShadows = "protect_shadows"
+
+    var id: String { rawValue }
+
+    /// What the pill shows: lowercase, as the user's drawing has it.
+    var title: String {
+        switch self {
+        case .balanced: "balanced"
+        case .center: "center"
+        case .protectHighlights: "protect highlights"
+        case .protectShadows: "protect shadows"
+        }
+    }
+
+    /// The pill's text for a wire value.
+    ///
+    /// `nil` is a sidecar written before this field existed. It still meters
+    /// with the engine's `center_weighted`, so the pill says which meter is
+    /// actually running rather than pretending to be one of the four — and
+    /// that name is deliberately not in the menu, because choosing it is not a
+    /// thing a user can do.
+    static func title(forWire value: String?) -> String {
+        guard let value else { return "center-weighted (legacy)" }
+        return ExposureMethod(rawValue: value)?.title ?? value
+    }
+}
+
 struct FilmParams: Codable, Equatable, Sendable {
     // --- stock (shoot for film, print for paper) ---
     var filmStock: String = "kodak_portra_400"
     var printStock: String = "kodak_supra_endura"
     // --- shoot ---
     var exposureCompensationEV: Double = 0          // -8…8
+    /// Which exposure intent the engine's meter follows (RFC-015 §2.3),
+    /// as its wire name.
+    ///
+    /// **`nil` means "send nothing"**, and that is the whole legacy story: a
+    /// sidecar written before this field existed decodes to `nil` (the
+    /// synthesized `init(from:)` uses `decodeIfPresent`, which ignores the
+    /// default below), the wire carries no `auto_exposure_method`, and the
+    /// engine keeps its own default of `center_weighted`, so that edit renders
+    /// byte for byte as it always did. The four names are the intents:
+    /// `balanced`, `center`, `protect_highlights`, `protect_shadows`.
+    ///
+    /// The default is for *new* frames, which the user asked to start
+    /// `balanced`.
+    var autoExposureMethod: String? = "balanced"
     var filmFormatMM: Double = 36                    // 4…200
     var grainActive: Bool = true
     var halationActive: Bool = true
@@ -103,10 +150,18 @@ struct FilmParams: Codable, Equatable, Sendable {
 
     /// Wire representation of every field. Order is stable for tests.
     var wire: [(name: String, value: ParamValue, layer: ParamLayer)] {
-        [
+        var fields: [(name: String, value: ParamValue, layer: ParamLayer)] = [
             ("film_stock", .string(filmStock), .shoot),
             ("print_stock", .string(printStock), .print),
             ("exposure_compensation_ev", .double(exposureCompensationEV), .shoot),
+        ]
+        // Only when set. A legacy sidecar has no method, and sending one would
+        // change how it meters — the engine's default is what it has always
+        // rendered with (see `autoExposureMethod`).
+        if let method = autoExposureMethod {
+            fields.append(("auto_exposure_method", .string(method), .shoot))
+        }
+        fields += [
             ("film_format_mm", .double(filmFormatMM), .shoot),
             ("grain_active", .bool(grainActive), .shoot),
             ("grain_sublayers_active", .bool(grainActive), .shoot),
@@ -117,6 +172,7 @@ struct FilmParams: Codable, Equatable, Sendable {
             ("glare_active", .bool(glareActive), .print),
             ("scan_film", .bool(scanFilm), .print),
         ]
+        return fields
     }
 
     static func printExposure(stops: Double) -> Double {

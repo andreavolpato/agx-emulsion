@@ -25,6 +25,68 @@ struct DecodeSettings: Codable, Equatable, Sendable {
     var tint: Double = 0
 }
 
+/// The two "As Shot" checkboxes beside the white-balance sliders, as a value.
+///
+/// The design's rules, in one place so they can be tested without a decode, a
+/// window or an engine:
+///
+///  - A box is ticked when the decode is using the **camera's** value for that
+///    axis. That is `.asShot`, where the stored numbers are ignored outright —
+///    and it is also a `.custom` setting pinned exactly to the camera's value,
+///    which renders the same picture and so must read the same.
+///  - Ticking a box pins that axis to the camera's value. Both ticked is
+///    `.asShot`; one ticked is `.custom` with the other axis where it was.
+///  - Unticking a box, or dragging its slider, is `.custom` at the current
+///    value.
+///  - A preset sets the numbers itself, so both boxes untick — unless the
+///    preset's pair *is* the camera's, which is the same picture again and
+///    reads as both ticked.
+///
+/// `asShot` is nil until a decode has landed. Ticking a box means pinning to
+/// that pair, so with nothing to pin to the boxes are disabled and read
+/// unticked — which is what `WhiteBalanceBoxes(_:asShot:)` gives by default.
+struct WhiteBalanceBoxes: Equatable, Sendable {
+    /// The camera's own pair, as the decode reports it.
+    typealias AsShot = (temperature: Double, tint: Double)
+
+    var temp = false
+    var tint = false
+
+    init(temp: Bool = false, tint: Bool = false) {
+        self.temp = temp
+        self.tint = tint
+    }
+
+    init(_ d: DecodeSettings, asShot: AsShot?) {
+        guard let asShot else { return }
+        let following = d.whiteBalance == .asShot
+        temp = following || d.temperature == asShot.temperature
+        tint = following || d.tint == asShot.tint
+    }
+
+    /// The settings these boxes describe, keeping whatever the *unticked* axes
+    /// hold. With both ticked it is `.asShot` — the state where the decode
+    /// takes the camera's values rather than the stored ones.
+    func decode(from d: DecodeSettings, asShot: AsShot?) -> DecodeSettings {
+        guard let asShot else { return d }
+        var out = d
+        if temp { out.temperature = asShot.temperature }
+        if tint { out.tint = asShot.tint }
+        out.whiteBalance = (temp && tint) ? .asShot : .custom
+        return out
+    }
+
+    /// The same, with one box ticked or unticked. `nil` leaves a box alone, so
+    /// the Temp box's handler does not disturb the Tint box.
+    func applying(temp now: Bool?, tint tintNow: Bool?,
+                  to d: DecodeSettings, asShot: AsShot?) -> DecodeSettings {
+        var boxes = self
+        if let now { boxes.temp = now }
+        if let tintNow { boxes.tint = tintNow }
+        return boxes.decode(from: d, asShot: asShot)
+    }
+}
+
 struct CropRect: Codable, Equatable, Sendable {
     /// Normalised to the image, origin top-left.
     var x: Double = 0, y: Double = 0, width: Double = 1, height: Double = 1

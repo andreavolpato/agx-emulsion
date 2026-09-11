@@ -10,6 +10,10 @@ import SwiftUI
 struct ScrubSlider: View {
     let label: String
     var sublabel: String? = nil
+    /// A second label line that is a *view* rather than text — the white
+    /// balance rows put their "As Shot" checkbox there. Alternative to
+    /// `sublabel`, and it wins when both are set.
+    var sublabelView: AnyView? = nil
     @Binding var value: Double
     let range: ClosedRange<Double>
     var zero: Double = 0
@@ -25,11 +29,14 @@ struct ScrubSlider: View {
     @State private var text = ""
     @FocusState private var focused: Bool
 
+    private var hasSecondLine: Bool { sublabelView != nil || sublabel != nil }
+
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(label).font(Theme.Font.label)
-                if let sublabel { Text(sublabel).font(Theme.Font.sublabel).foregroundStyle(Theme.secondaryText) }
+                if let sublabelView { sublabelView }
+                else if let sublabel { Text(sublabel).font(Theme.Font.sublabel).foregroundStyle(Theme.secondaryText) }
             }
             .foregroundStyle(disabled ? Theme.dim : Theme.text)
             .frame(width: Theme.Metric.sliderLabelWidth, alignment: .leading)
@@ -38,7 +45,7 @@ struct ScrubSlider: View {
             valueField
                 .frame(width: Theme.Metric.sliderValueWidth, alignment: .trailing)
         }
-        .frame(height: sublabel == nil ? Theme.Metric.rowHeight + 4 : Theme.Metric.rowHeight + 14)
+        .frame(height: hasSecondLine ? Theme.Metric.rowHeight + 14 : Theme.Metric.rowHeight + 4)
         .opacity(disabled ? 0.6 : 1)
         .allowsHitTesting(!disabled)
     }

@@ -152,7 +152,19 @@ struct SolveRequest: Encodable, Sendable {
 
 struct SolveResponse: Decodable, Sendable {
     let solvedParams: [String: Double]
-    enum CodingKeys: String, CodingKey { case solvedParams = "solved_params" }
+    /// RFC-015 §3: what each of the four exposure intents would choose, all
+    /// from the one sample `solve` already took, keyed by wire name.
+    ///
+    /// A **sibling** of `solved_params`, never a member of it: that dictionary
+    /// is decoded as `[String: Double]`, so an object in there would throw and
+    /// take the develop's exposure solve down with it — which is every
+    /// develop. Optional, so a reply from an engine without the field (or from
+    /// `solve(target:"filter_pack")`, which does not meter) still decodes.
+    let exposureEvByMethod: [String: Double]?
+    enum CodingKeys: String, CodingKey {
+        case solvedParams = "solved_params"
+        case exposureEvByMethod = "exposure_ev_by_method"
+    }
 }
 
 struct SetParamsRequest: Encodable, Sendable {

@@ -34,7 +34,11 @@ final class ParamsTests: XCTestCase {
         // there must be mirrored here or the delta is rejected at runtime.
         let known: Set<String> = ["film_stock", "print_stock", "exposure_compensation_ev", "film_format_mm",
                                   "grain_active", "grain_sublayers_active", "halation_active", "print_exposure",
-                                  "y_filter_shift", "m_filter_shift", "glare_active", "scan_film"]
+                                  "y_filter_shift", "m_filter_shift", "glare_active", "scan_film",
+                                  // RFC-015 §3. Shoot layer; absent from a legacy
+                                  // frame's delta, which is why this list holds
+                                  // the name and `wire` only carries it when set.
+                                  "auto_exposure_method"]
         XCTAssertEqual(Set(FilmParams.default.wire.map(\.name)), known)
     }
 
