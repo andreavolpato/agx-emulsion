@@ -334,6 +334,30 @@ public:
         return px == 0 ? 1 : px;
     }
 
+    uint32_t max_texture_dimension_2d() const override {
+        // The largest texture side this device will make. It matters because
+        // the app draws the print and the original on `MTLTexture`s, so a
+        // frame whose long edge is past it renders and then cannot be shown.
+        //
+        // **Metal does not publish this.** There is `maxBufferLength` and
+        // `maxThreadsPerThreadgroup`; there is no `maxTextureDimension` in the
+        // SDK's `MTLDevice.h` at all (checked, not assumed — this first sent
+        // that selector and the device answered `unrecognized selector`).
+        // Neither can it be probed for: asking `newTexture` for a 32768-wide
+        // descriptor is not a nil return but `MTLTextureDescriptor`'s own
+        // assertion — "width (32768) greater than the maximum allowed size of
+        // 16384" — which takes the process with it.
+        //
+        // So the family is asked instead, and 16384 is the answer for every
+        // family that answers: Apple7 and up, and Mac2. That covers every
+        // Metal-capable Mac. A device that answers none of them is older than
+        // this build supports, and 16384 is still the safe reading there — the
+        // only thing it can do is refuse a frame too big to be drawn.
+        const bool known = device_->supportsFamily(MTL::GPUFamilyMac2) ||
+                           device_->supportsFamily(MTL::GPUFamilyApple7);
+        return known ? 16384u : 8192u;
+    }
+
 private:
     MTL::ComputePipelineState* pipeline(const char* name, std::string& error) {
         auto it = pipelines_.find(name);

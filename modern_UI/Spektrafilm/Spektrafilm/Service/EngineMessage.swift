@@ -61,9 +61,14 @@ enum EngineMessage {
             return "Spektrafilm needs a Metal-capable GPU and could not find one on this Mac."
         }
 
-        // The frame is bigger than the engine will accept.
+        // The frame is bigger than the engine will accept — either more pixels
+        // than the cap (a Phase One IQ4 150's 14204 x 10652) or a long edge the
+        // GPU cannot make a texture of. Both say so in the raw text, which is
+        // the half that tells the user how far over they are.
         if lower.contains("too large") || lower.contains("max_mp") || lower.contains("megapixel") {
-            return "This frame is larger than Spektrafilm can render. (\(raw))"
+            return "This frame is larger than Spektrafilm can render. The biggest it takes is a "
+                 + "150 MP camera's frame, and a very wide panorama can be refused for the GPU's "
+                 + "texture limit even when it is under that. (\(raw))"
         }
 
         // A print stock with no baked preview LUT. The engine's message

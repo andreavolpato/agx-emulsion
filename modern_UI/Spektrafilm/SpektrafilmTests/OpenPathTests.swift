@@ -362,6 +362,75 @@ final class OpenPathTests: XCTestCase {
                        "the viewport did not take the zoom")
     }
 
+    // MARK: - the frame that is too big
+
+    /// A 60 MP camera's frame develops.
+    ///
+    /// The A7R V's RAW decodes to 9504 × 6336 = **60.22 MP**, and the engine
+    /// refuses anything over `kMaxMP` = 60.0 (`engine.cpp`), so pressing Solve
+    /// on one of these frames fails — the develop's `open` is rejected and the
+    /// canvas keeps showing the decode. A camera that shipped in 2022 is
+    /// therefore outside the product, and the limit itself turns out to have
+    /// been inherited rather than measured.
+    func testAnA7RVFrameDevelops() async throws {
+        let url = try rawFrame("A7RV/DSC00185.ARW")
+        let session = Session()
+        session.open(urls: [url])
+        try await waitUntil("the frame to decode", timeout: 180) { session.decoded != nil }
+        XCTAssertGreaterThan(session.decoded?.pixelSize.width ?? 0, 9000,
+                             "this frame is not the 60 MP one the test is about")
+        try await waitUntil("the engine to warm up", timeout: 180) { session.serviceReady }
+        session.solveNow()
+        try await waitUntil("the print to land", timeout: 300) {
+            session.serviceSessionIDForExport != nil && session.frameStates[url] == .processed && !session.busy
+        }
+        XCTAssertFalse(session.previewSoft, "the canvas is still showing the decode, not a print")
+        XCTAssertNil(session.lastError, "the develop reported \(session.lastError!)")
+    }
+
+    /// A frame past a limit says so, in words, rather than failing quietly.
+    ///
+    /// Two limits, both checked at `open`: the pixel count (a Phase One IQ4's
+    /// 14204 x 10652) and the device's texture edge, because the app draws the
+    /// print and the original on `MTLTexture`s. This tests the second — it is
+    /// one pixel over 16384 wide and 1.6 MP, so it costs nothing — and the
+    /// first is exercised at the C ABI, where a 151 MP frame costs 1.8 GB.
+    func testAnOverWideFrameSaysWhyItWillNotOpen() async throws {
+        let url = try wideFrame(width: 16385, height: 100)
+        let session = Session()
+        session.open(urls: [url])
+        try await waitUntil("the frame to decode", timeout: 120) { session.decoded != nil }
+        try await waitUntil("the engine to warm up", timeout: 120) { session.serviceReady }
+        // Opening only decodes; the engine sees the frame when someone asks for
+        // a print, which is where the limit is checked.
+        session.solveNow()
+        try await waitUntil("the frame to be refused", timeout: 120) { session.lastError != nil }
+        let message = try XCTUnwrap(session.lastError)
+        XCTAssertTrue(message.contains("larger than"), "the user is told: \(message)")
+        XCTAssertNil(session.serviceSessionIDForExport, "the engine opened a frame it cannot draw")
+    }
+
+    /// A 16-bit TIFF of the given size, in a directory of its own.
+    private func wideFrame(width: Int, height: Int) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "spk-wide-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appending(path: "wide-\(width)x\(height).tif")
+        let space = try XCTUnwrap(ImageDecoder.displayP3)
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height,
+                                              bitsPerComponent: 16, bytesPerRow: width * 8,
+                                              space: space,
+                                              bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                                                  | CGBitmapInfo.byteOrder16Little.rawValue))
+        context.setFillColor(CGColor(red: 0.4, green: 0.4, blue: 0.4, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.tiff" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return url
+    }
+
     // MARK: - reading the canvas back
 
     /// An rgba16Unorm texture's samples, whatever its storage mode. The print

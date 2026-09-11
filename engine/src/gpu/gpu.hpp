@@ -180,6 +180,11 @@ public:
     static void release_texture_static(void* texture);
     // The row alignment `texture` requires, in pixels of RGBA16.
     virtual uint32_t texture_row_alignment_px() const = 0;
+    // The largest 2D texture side this device will make. 16384 on Apple
+    // silicon today, but it is the device's answer rather than a constant:
+    // the app draws the print and the original on `MTLTexture`s, so a frame
+    // wider than this renders and then cannot be shown.
+    virtual uint32_t max_texture_dimension_2d() const = 0;
 };
 
 // --- BufferRef, once Gpu is complete ---------------------------------------

@@ -58,7 +58,19 @@ struct Tier {
     uint32_t long_edge;   // 0 = the frame's own resolution
 };
 constexpr Tier kTiers[] = {{"live", 1600}, {"preview", 3400}, {"full", 0}};
-constexpr double kMaxMP = 60.0;
+
+// The hard cap on a frame's size, as a **pixel count** rather than a
+// megapixel figure, because that is what memory scales with: the decoded
+// frame, the engine's own copy of it and the three tier images are all linear
+// in pixels, and a 3:1 panorama is three times a 1:1 frame at the same
+// megapixels.
+//
+// 14204 x 10652 is the Phase One IQ4 150, and the user set it as the wall:
+// "nobody will feed it anything larger". It was 60 MP before, which was a
+// number inherited from the Python service (`spektrafilm/service/engine.py`,
+// `MAX_MP`, added 2026-08-25) with nothing behind it — and it excluded a
+// camera that shipped in 2022 (the A7R V decodes to 60.22 MP).
+constexpr uint32_t kMaxFramePixels = 14204u * 10652u;   // 151,301,008 px
 
 const Tier* find_tier(const char* name) {
     if (!name) return nullptr;
@@ -197,7 +209,9 @@ struct spk_engine {
         Json out = Json::object();
         out.set("version", Json(std::string(spk_build_info())));
         out.set("engine", Json(std::string("spektrafilm.native")));
-        out.set("max_mp", Json(kMaxMP));
+        out.set("max_mp", Json(double(kMaxFramePixels) / 1e6));
+        out.set("max_pixels", Json(double(kMaxFramePixels)));
+        out.set("max_texture_dimension_2d", Json(double(gpu ? gpu->max_texture_dimension_2d() : 0)));
         Json tiers = Json::object();
         for (const Tier& t : kTiers) {
             if (t.long_edge) tiers.set(t.name, Json(double(t.long_edge)));
@@ -472,10 +486,24 @@ spk_session* open_frame(spk_engine* engine, const FrameIn& frame, const char* pa
         return nullptr;
     }
     if (frame.width == 0 || frame.height == 0) { g_error = "input image is empty"; return nullptr; }
-    const double mp = double(frame.width) * double(frame.height) / 1e6;
-    if (mp > kMaxMP) {
-        g_error = "image is " + std::to_string(mp) + " MP, above the engine limit of " +
-                  std::to_string(int(kMaxMP)) + " MP";
+    const uint64_t pixels = uint64_t(frame.width) * uint64_t(frame.height);
+    if (pixels > kMaxFramePixels) {
+        g_error = "frame is too large: " + std::to_string(pixels) + " px (" +
+                  std::to_string(frame.width) + " x " + std::to_string(frame.height) +
+                  "), above this build's limit of " + std::to_string(kMaxFramePixels) +
+                  " px — the largest frame it renders is a Phase One IQ4 150 (14204 x 10652)";
+        return nullptr;
+    }
+    // And the long edge against the device's own texture limit. The pixel cap
+    // above does not imply this one: a 20000 x 7000 panorama is 140 MP and
+    // would still be a texture the GPU cannot make, so the frame would render
+    // and then have nowhere to be drawn.
+    const uint32_t max_edge = engine->gpu ? engine->gpu->max_texture_dimension_2d() : 0;
+    const uint32_t long_edge = std::max(frame.width, frame.height);
+    if (max_edge && long_edge > max_edge) {
+        g_error = "frame is too large for this GPU: its " + std::to_string(long_edge) +
+                  " px long edge is above the device's " + std::to_string(max_edge) +
+                  " px texture limit";
         return nullptr;
     }
 
@@ -561,7 +589,7 @@ spk_session* open_frame(spk_engine* engine, const FrameIn& frame, const char* pa
     Json meta = Json::object();
     meta.set("width", Json(double(frame.width)));
     meta.set("height", Json(double(frame.height)));
-    meta.set("megapixels", Json(std::round(mp * 100.0) / 100.0));
+    meta.set("megapixels", Json(std::round(double(frame.width) * double(frame.height) / 1e4) / 100.0));
     meta.set("source", Json(std::string("<in-process>")));
 
     // `detected_input` is the service's file sniffing, and the engine no
