@@ -43,6 +43,9 @@ OVERRIDES: dict[str, object] = {
     "input_color_space": "sRGB",
     "output_color_space": "sRGB",
     "enlarger_illuminant": "D65",
+    # Not the default, and one of RFC-015 §2.3's four intents. A str field with
+    # no strategy used to stop the walk before the exposure comparison below.
+    "auto_exposure_method": "balanced",
 }
 
 

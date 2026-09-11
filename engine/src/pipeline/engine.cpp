@@ -1090,6 +1090,13 @@ spk_status spk_solve(spk_session* session, const char* target, char** out_json) 
     std::lock_guard<std::mutex> guard(session->lock);
     g_error.clear();
     Json solved = Json::object();
+    // RFC-015 §3: the four intents' EVs, a *sibling* of `solved_params` rather
+    // than a member of it. `solved_params` is decoded as a flat map of numbers
+    // by the client, so an object in there would throw — and it would take the
+    // develop's exposure solve down with it. Absent for `filter_pack`, which
+    // does not meter.
+    Json ev_by_method = Json::object();
+    bool metered = false;
 
     if (want == "exposure" || want == "both") {
         // The same measurement `preprocess.auto_exposure` makes, on the live
@@ -1099,15 +1106,24 @@ spk_status spk_solve(spk_session* session, const char* target, char** out_json) 
         gpu->begin_frame();
         Image live;
         std::string error;
-        double ev = 0.0;
+        ExposureEvs evs;
         // `RenderEngine.solve` meters the whole live tier, not the stride
         // sample the auto-exposure node uses. Same measurement, different
         // sampling, and they differ by ~3e-3 EV.
+        //
+        // One gather answers both halves: `current` is the session's own
+        // method, which is what `exposure_compensation_ev` has always been,
+        // and the other four are what each intent would choose.
         bool ok = tier_image(session, kTiers[0], live, error) &&
-                  session->pipeline->measure_exposure_ev(live, ev, error, /*stride=*/false);
+                  session->pipeline->measure_exposure_evs(live, evs, error, /*stride=*/false);
         gpu->end_frame();
         if (!ok) { g_error = error; return SPK_ERR_GPU; }
-        solved.set("exposure_compensation_ev", Json(ev));
+        solved.set("exposure_compensation_ev", Json(evs.current));
+        ev_by_method.set("balanced", Json(evs.balanced));
+        ev_by_method.set("center", Json(evs.center));
+        ev_by_method.set("protect_highlights", Json(evs.protect_highlights));
+        ev_by_method.set("protect_shadows", Json(evs.protect_shadows));
+        metered = true;
     }
     if (want == "filter_pack" || want == "both") {
         Params probe = session->params;
@@ -1123,6 +1139,7 @@ spk_status spk_solve(spk_session* session, const char* target, char** out_json) 
     }
     Json out = Json::object();
     out.set("solved_params", std::move(solved));
+    if (metered) out.set("exposure_ev_by_method", std::move(ev_by_method));
     if (out_json) *out_json = dup_json(out);
     return SPK_OK;
 }

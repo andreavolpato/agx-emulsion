@@ -68,6 +68,24 @@ struct Progress {
     std::unordered_map<std::string, double> node_ms;
 };
 
+// RFC-015 §2.3: what each of the four exposure intents would choose, all from
+// one sample. `solve` reports them together so a UI can show what each mode
+// does without four round trips, and they are computed from one Y vector
+// because the trim and the percentiles are shared.
+struct ExposureEvs {
+    double balanced = 0.0;
+    double center = 0.0;
+    double protect_highlights = 0.0;
+    double protect_shadows = 0.0;
+    /// The session's *own* method's EV: one of the four above for an intent,
+    /// the legacy meter's own number for `center_weighted`/`average`/`median`.
+    /// `solve` reports it as `exposure_compensation_ev`, which is what that
+    /// field has always been. It lives here because it comes from the same
+    /// gather — metering the live tier a second time for one number would cost
+    /// a full readback for no extra information.
+    double current = 0.0;
+};
+
 class Pipeline {
 public:
     Pipeline(gpu::Gpu* gpu, const Colour* colour, const Blob* blob, SetupCache* cache)
@@ -107,6 +125,11 @@ public:
     // caller stands in for is what keeps parity honest.
     bool measure_exposure_ev(const Image& in, double& ev, std::string& error, bool stride = true);
 
+    // The four intents of RFC-015 §2.3, from one sample. `solve` has to report
+    // all four *and* the session's own method, and metering the frame twice to
+    // do that would cost a second live-tier readback for no extra information.
+    bool measure_exposure_evs(const Image& in, ExposureEvs& out, std::string& error, bool stride = true);
+
     // The film's pixel pitch for the frame most recently run through
     // `run_film`, in micrometres. Grain, halation and the DIR-coupler
     // diffusion are all specified in micrometres and converted with it.
@@ -123,6 +146,18 @@ public:
 
 private:
     struct Timer;
+
+    // The meter's sample: the frame strided down, read back, and turned into
+    // luminance by the auto-exposure Y row. Shared so the three legacy meters
+    // and the four intents cannot disagree about what they are metering.
+    bool exposure_sample_y(const Image& in, bool stride, std::vector<double>& Y,
+                           uint32_t& sh, uint32_t& sw, std::string& error);
+    // The three legacy meters. This arithmetic is the Python reference's and
+    // does not change (RFC-015 §3) — the parity harnesses pin these three.
+    static bool legacy_exposure_ev(const std::vector<double>& Y, uint32_t sh, uint32_t sw,
+                                   const std::string& method, double& ev, std::string& error);
+    // RFC-015 §2.3's four intents, from one sample.
+    static ExposureEvs exposure_evs_from(const std::vector<double>& Y, uint32_t sh, uint32_t sw);
 
     // --- per-node bodies, in topology order -----------------------------
     bool node_input_cast(const Image& in, Image& out, std::string& error);

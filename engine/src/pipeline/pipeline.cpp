@@ -9,6 +9,17 @@ namespace spk {
 namespace {
 
 constexpr double kMidgray = 0.184;
+// RFC-015 §2.3's four intents. `s_hi` and `s_lo` are how far past mid-grey a
+// frame may sit before the protect modes act; §2.4 would take them from the
+// stock's own shoulder and toe, which needs a calibration set this RFC does
+// not have, so v1 uses fixed stops.
+constexpr double kProtectHighlightsStops = 2.5;
+constexpr double kProtectShadowsStops = 3.5;
+constexpr double kProtectHighlightsClampEv = 3.0;   // EV_h is at least EV_b - 3
+constexpr double kProtectShadowsClampEv = 2.0;      // EV_s is at most EV_b + 2
+// The floor under the sample before any logarithm: twelve stops below
+// mid-grey, which no real frame's shadow is and every black border is.
+constexpr double kMeterFloor = kMidgray / 4096.0;
 // `model/grain.MIN_EFFECTIVE_BLUR_SIGMA` -- a Gaussian narrower than this is
 // numerically the identity, so the pass is skipped rather than paid for.
 constexpr double kMinEffectiveBlurSigma = 0.4;
@@ -551,14 +562,8 @@ bool Pipeline::node_geometry(const Image& in, Image& out, std::string& error) {
                           out.pixels(), error);
 }
 
-bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& error, bool stride) {
-    const std::string& method = params_.camera.auto_exposure_method;
-    if (method != "center_weighted" && method != "average" && method != "median") {
-        error = "auto_exposure_method '" + method + "' is not implemented by the native engine "
-                "(center_weighted, average and median are)";
-        return false;
-    }
-
+bool Pipeline::exposure_sample_y(const Image& in, bool stride, std::vector<double>& Y,
+                                 uint32_t& sh, uint32_t& sw, std::string& error) {
     // A strided 256 px sample, gathered on device and read back small. A
     // full-resolution order-0 downscale cost 7.1 s at 45 MP against ~0 ms for
     // a stride, and the meter only ever wanted a sparse view of the frame
@@ -579,13 +584,17 @@ bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& err
     if (!read_back(small, host, error)) return false;
 
     // `autoexposure._luminance_y`: the Y row of RGB->XYZ, no adaptation.
-    const size_t sh = small.h, sw = small.w;
-    std::vector<double> Y(sh * sw);
-    for (size_t i = 0; i < sh * sw; ++i)
+    sh = small.h; sw = small.w;
+    Y.assign(size_t(sh) * size_t(sw), 0.0);
+    for (size_t i = 0; i < size_t(sh) * size_t(sw); ++i)
         Y[i] = rgb_to_xyz_ae_.m[1][0] * double(host[3 * i]) +
                rgb_to_xyz_ae_.m[1][1] * double(host[3 * i + 1]) +
                rgb_to_xyz_ae_.m[1][2] * double(host[3 * i + 2]);
+    return true;
+}
 
+bool Pipeline::legacy_exposure_ev(const std::vector<double>& Y, uint32_t sh, uint32_t sw,
+                                  const std::string& method, double& ev, std::string& error) {
     double exposure = 1.0;
     if (method == "average") {
         double sum = 0.0;
@@ -597,7 +606,7 @@ bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& err
         const size_t m = sorted.size();
         const double median = m % 2 ? sorted[m / 2] : 0.5 * (sorted[m / 2 - 1] + sorted[m / 2]);
         exposure = median / kMidgray;
-    } else {
+    } else if (method == "center_weighted") {
         // center_weighted: a Gaussian falloff from the centre, sigma 0.2 of
         // the long edge, normalised to sum 1.
         const double m_edge = double(std::max(sh, sw));
@@ -614,10 +623,131 @@ bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& err
                 weighted += Y[i * sw + j] * w;
             }
         exposure = (weighted / mass) / kMidgray;
+    } else {
+        // Unreachable through the wire (`validate_delta` rejects a name this
+        // is not) and kept as the meter's own backstop for a `Params` built in
+        // code, which is where an unknown name used to be caught.
+        error = "auto_exposure_method '" + method + "' is not implemented by the native engine";
+        return false;
     }
     ev = -std::log2(exposure);
     // The reference warns and falls back to 0 EV on an all-black frame.
     if (!std::isfinite(ev)) ev = 0.0;
+    return true;
+}
+
+ExposureEvs Pipeline::exposure_evs_from(const std::vector<double>& raw, uint32_t sh, uint32_t sw) {
+    const size_t n = raw.size();
+    // `n - 1` below is unsigned; an empty sample has no exposure to report,
+    // and the reference's own all-black answer is 0 EV.
+    if (n == 0) return ExposureEvs{};
+    // The floor is what keeps `ln` finite and stops a black border — the frame
+    // edge of a scan, the letterbox of a video grab — from running away with
+    // the mean. 0.184 * 2^-12 is twelve stops under mid-grey.
+    std::vector<double> y(n);
+    for (size_t i = 0; i < n; ++i) y[i] = std::max(raw[i], kMeterFloor);
+
+    // `P(q)`: the element at 0-based rank k of the sorted sample, **k in exact
+    // integer division**. Computing `q/100 * (n-1)` in floating point is the
+    // trap this avoids: 0.01 and 0.995 are not representable, and either can
+    // land one rank low, which the Python side will not do.
+    std::vector<double> sorted = y;
+    auto rank = [&](int q10) {
+        const size_t k = (size_t(q10) * (n - 1)) / 1000u;
+        std::nth_element(sorted.begin(), sorted.begin() + k, sorted.end());
+        return sorted[k];
+    };
+    const double p1 = rank(10), p5 = rank(50), p99 = rank(990), p995 = rank(995);
+
+    ExposureEvs out;
+    // The trim set: P(1)..P(99) inclusive, by rank. The log mean is what a
+    // mid-grey in *stops* means, so it is hardly moved by a small bright
+    // region and only needs the trim for the near-black one (RFC-015 §2.2).
+    double ln_sum = 0.0;
+    size_t count = 0;
+    for (size_t i = 0; i < n; ++i)
+        if (y[i] >= p1 && y[i] <= p99) { ln_sum += std::log(y[i]); ++count; }
+    out.balanced = -std::log2(std::exp(ln_sum / double(count)) / kMidgray);
+
+    // `center` is the same statistic through today's centre-weighted grid:
+    // the weights move *where* the mean is taken, not what is trimmed, and
+    // they are the same xs/ys and sigma `center_weighted` uses.
+    const double m_edge = double(std::max(sh, sw));
+    const double norm_h = double(sh) / m_edge, norm_w = double(sw) / m_edge;
+    constexpr double sigma = 0.2;
+    std::vector<double> xs(sw), ys(sh);
+    for (size_t j = 0; j < sw; ++j) xs[j] = (double(j) / double(sw) - 0.5) * norm_w;
+    for (size_t i = 0; i < sh; ++i) ys[i] = (double(i) / double(sh) - 0.5) * norm_h;
+    double mass = 0.0, weighted = 0.0;
+    for (size_t i = 0; i < sh; ++i)
+        for (size_t j = 0; j < sw; ++j) {
+            const double v = y[i * sw + j];
+            if (v < p1 || v > p99) continue;
+            const double w = std::exp(-(xs[j] * xs[j] + ys[i] * ys[i]) / (2.0 * sigma * sigma));
+            mass += w;
+            weighted += std::log(v) * w;
+        }
+    out.center = -std::log2(std::exp(weighted / mass) / kMidgray);
+
+    // The protect modes are **bounds on balanced, not meters of their own**:
+    // a frame with nothing at risk comes out at exactly `balanced`, and the
+    // clamps stop one specular highlight, or one black border, from deciding
+    // the exposure. Their percentiles are over every sample — protection is
+    // never trimmed and never centre-weighted (RFC-015 §2.3).
+    out.protect_highlights = std::clamp(
+        std::log2(kMidgray * std::pow(2.0, kProtectHighlightsStops) / p995),
+        out.balanced - kProtectHighlightsClampEv, out.balanced);
+    out.protect_shadows = std::clamp(
+        std::log2(kMidgray * std::pow(2.0, -kProtectShadowsStops) / p5),
+        out.balanced, out.balanced + kProtectShadowsClampEv);
+    return out;
+}
+
+bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& error, bool stride) {
+    const std::string& method = params_.camera.auto_exposure_method;
+    if (!is_known_exposure_method(method)) {
+        error = "auto_exposure_method '" + method + "' is not implemented by the native engine "
+                "(balanced, center, protect_highlights, protect_shadows, center_weighted, "
+                "average and median are)";
+        return false;
+    }
+
+    std::vector<double> Y;
+    uint32_t sh = 0, sw = 0;
+    if (!exposure_sample_y(in, stride, Y, sh, sw, error)) return false;
+    if (method == "center_weighted" || method == "average" || method == "median")
+        return legacy_exposure_ev(Y, sh, sw, method, ev, error);
+
+    // One sample, four answers. The node only needs the session's own intent,
+    // and computing all four costs one extra log2 and a clamp next to the
+    // readback that produced `Y`.
+    const ExposureEvs evs = exposure_evs_from(Y, sh, sw);
+    if (method == "balanced") ev = evs.balanced;
+    else if (method == "center") ev = evs.center;
+    else if (method == "protect_highlights") ev = evs.protect_highlights;
+    else ev = evs.protect_shadows;
+    return true;
+}
+
+bool Pipeline::measure_exposure_evs(const Image& in, ExposureEvs& out, std::string& error, bool stride) {
+    const std::string& method = params_.camera.auto_exposure_method;
+    if (!is_known_exposure_method(method)) {
+        error = "auto_exposure_method '" + method + "' is not implemented by the native engine";
+        return false;
+    }
+    std::vector<double> Y;
+    uint32_t sh = 0, sw = 0;
+    if (!exposure_sample_y(in, stride, Y, sh, sw, error)) return false;
+    out = exposure_evs_from(Y, sh, sw);
+    // The session's own method, from the sample already in hand. For one of
+    // the four that is one of the numbers just computed; for a legacy meter it
+    // is that meter's own arithmetic, which stays exactly as it was.
+    if (method == "center_weighted" || method == "average" || method == "median")
+        return legacy_exposure_ev(Y, sh, sw, method, out.current, error);
+    if (method == "balanced") out.current = out.balanced;
+    else if (method == "center") out.current = out.center;
+    else if (method == "protect_highlights") out.current = out.protect_highlights;
+    else out.current = out.protect_shadows;
     return true;
 }
 

@@ -30,6 +30,10 @@ const SchemaField kFields[] = {
     {"print_stock",              "print.info.stock",                      S, PRINT, false, 0, 0, false},
     {"exposure_compensation_ev", "camera.exposure_compensation_ev",       F, SHOOT, true, -8.0, 8.0, false},
     {"auto_exposure",            "camera.auto_exposure",                  B, SHOOT, false, 0, 0, false},
+    // RFC-015 §3. Immediately after `auto_exposure`, which is where the Python
+    // schema declares it too — `parity_schema.py` compares the two tables in
+    // order, not as sets.
+    {"auto_exposure_method",     "camera.auto_exposure_method",           S, SHOOT, false, 0, 0, false},
     {"film_format_mm",           "camera.film_format_mm",                 F, SHOOT, true, 4.0, 200.0, false},
     {"lens_blur_um",             "camera.lens_blur_um",                   F, SHOOT, true, 0.0, 200.0, false},
     {"halation_active",          "film_render.halation.active",           B, SHOOT, false, 0, 0, false},
@@ -125,6 +129,7 @@ std::string* str_slot(Params& p, const std::string& path) {
     if (path == "io.input_color_space") return &p.io.input_color_space;
     if (path == "enlarger.illuminant") return &p.enlarger.illuminant;
     if (path == "io.output_color_space") return &p.io.output_color_space;
+    if (path == "camera.auto_exposure_method") return &p.camera.auto_exposure_method;
     return nullptr;
 }
 
@@ -144,6 +149,14 @@ const char* type_name(FieldType t) {
 }
 
 }  // namespace
+
+bool is_known_exposure_method(const std::string& method) {
+    // The three legacy meters are the Python reference's own and their
+    // arithmetic does not change (RFC-015 §3); the four intents are §2.3.
+    return method == "center_weighted" || method == "average" || method == "median" ||
+           method == "balanced" || method == "center" ||
+           method == "protect_highlights" || method == "protect_shadows";
+}
 
 const std::vector<SchemaField>& schema_fields() {
     static const std::vector<SchemaField> v(std::begin(kFields), std::end(kFields));
@@ -197,6 +210,15 @@ bool validate_delta(const Json& delta, std::string& error, std::string& param) {
             (f->type == FieldType::Str && !v.is_string());
         if (wrong) {
             error = "'" + kv.first + "' expects " + type_name(f->type);
+            param = kv.first;
+            return false;
+        }
+        // A closed set of names is not a range, so `has_range` cannot express
+        // it; this is the one enumerated string on the wire.
+        if (kv.first == "auto_exposure_method" && !is_known_exposure_method(v.as_string())) {
+            error = "'auto_exposure_method' = '" + v.as_string() +
+                    "' is not an exposure method (balanced, center, protect_highlights, "
+                    "protect_shadows, center_weighted, average, median)";
             param = kv.first;
             return false;
         }
