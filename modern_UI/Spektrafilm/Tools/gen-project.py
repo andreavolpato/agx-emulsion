@@ -40,9 +40,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT.parents[1] / "engine"
+
+# `APP` is the *source directory and target name*, and it is deliberately still
+# "Spektrafilm": the target name is what `Spektrafilm.xcscheme` and
+# `SpektrafilmTests.xcscheme` reference by `BlueprintName`, the Swift module is
+# named from it, and renaming it buys nothing a user can see.
+#
+# `PRODUCT_NAME` is what the user sees: `Filmify.app`, the menu bar title, the
+# About panel, the DMG. The product was renamed to Filmify because
+# `SPEKTRAFILM_LICENSE.txt` asks that "spektrafilm" not be used in product
+# branding without asking first — this app links the spektrafilm engine and
+# ships its profiles, which the same licence explicitly welcomes as a factual
+# reference ("this app uses spektrafilm LUTs"). So: product renamed, engine and
+# profiles keep their name, and the About panel carries the credit
+# (HANDOFF-DISTRIBUTION §2.3).
 APP = "Spektrafilm"
+PRODUCT_NAME = "Filmify"
 TESTS = "SpektrafilmTests"
-BUNDLE_ID = "com.hanze.spektrafilm"
+BUNDLE_ID = "com.hanze.filmify"
 MACOS = "15.0"
 
 # The version, in one place.
@@ -160,7 +175,7 @@ def build() -> str:
 
     app_product = uid("product:app")
     test_product = uid("product:tests")
-    p.add(app_product, f"{{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = {APP}.app; sourceTree = BUILT_PRODUCTS_DIR; }}", f"{APP}.app")
+    p.add(app_product, f"{{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = {PRODUCT_NAME}.app; sourceTree = BUILT_PRODUCTS_DIR; }}", f"{PRODUCT_NAME}.app")
     p.add(test_product, f"{{isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = {TESTS}.xctest; sourceTree = BUILT_PRODUCTS_DIR; }}", f"{TESTS}.xctest")
     products = uid("group:products")
     p.add(products, f"{{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t{app_product},\n\t\t\t\t{test_product}\n\t\t\t);\n\t\t\tname = Products;\n\t\t\tsourceTree = \"<group>\";\n\t\t}}", "Products")
@@ -242,7 +257,7 @@ def build() -> str:
     }
     app_cfg = {
         **common,
-        "PRODUCT_NAME": APP,
+        "PRODUCT_NAME": PRODUCT_NAME,
         "PRODUCT_BUNDLE_IDENTIFIER": BUNDLE_ID,
         "INFOPLIST_FILE": f"{APP}/Info.plist",
         "CODE_SIGN_ENTITLEMENTS": f"{APP}/{APP}.entitlements",

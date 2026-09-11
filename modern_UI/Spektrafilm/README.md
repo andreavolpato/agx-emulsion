@@ -1,37 +1,49 @@
-# Spektrafilm Desktop — the SwiftUI frontend
+# Filmify — the SwiftUI frontend
+
+> **Read §1, §3, §4 and §7 with this one correction.** This document was
+> written 2026-09-08, when the app talked to a Python render service over
+> stdio. RFC-014 (2026-09-10) deleted that service: the C++ engine is compiled
+> into this target and reached through a hand-written C ABI, with no
+> subprocess, no `.venv` and no Python at run time. **Wherever this document
+> says "the service", read "the engine"; where it says `src/`, read
+> `engine/`.** The layout geometry, the buffer system, the white-balance
+> redesign and the defect table are all still accurate. The current map is
+> `../../ARCHITECTURE.md` §0 and `../../README.md`.
 
 | | |
 |---|---|
-| **What this is** | The native macOS app: the drawing in `modern_UI/reference_layout/` built to the pixel, wired to the render service in `src/spektrafilm/service/`. |
-| **State** | Builds, runs, renders real RAWs end to end **in the actual app** (`design/snapshots/live-window.png`). 38 Swift tests + 32 Python service tests pass. Layout measured within 2 pt of the drawing at 1920×1080; verified at 1512×982 and 3360×1418. |
-| **Governed by** | `../UI-GUIDELINE-swiftui.md` (how), `../../API-SPEC-callable-render-service.md` (the backend contract). |
+| **What this is** | The native macOS app: the drawing in `modern_UI/reference_layout/` built to the pixel, rendering through the C++ engine compiled into it. |
+| **State** | Builds, runs, renders real RAWs end to end **in the actual app** (`design/snapshots/live-window.png`). 139 Swift tests pass. Layout measured within 2 pt of the drawing at 1920×1080; verified at 1512×982 and 3360×1418. |
+| **Governed by** | `../UI-GUIDELINE-swiftui.md` (how), `../../API-SPEC-callable-render-service.md` (the method surface). |
 | **Layout of record** | `../frontend_architecture.md` — geometry, tokens, view tree, data path. |
-| **Open work** | `../../HANDOFF-FRONTEND-POLISH.md` |
-| **Date** | 2026-09-08 |
+| **Open work** | `../../HANDOFF-OPEN-PATH.md`, `../../HANDOFF-DISTRIBUTION.md` |
+| **Date** | 2026-09-08 · annotated 2026-09-11 |
 
 ```
 open Spektrafilm.xcodeproj                      # or:
 xcodebuild -project Spektrafilm.xcodeproj -scheme Spektrafilm -derivedDataPath build/DerivedData build
-xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmFrontend -derivedDataPath build/DerivedData test   # 37 tests, ~2 s, no render
-xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmTests -derivedDataPath build/DerivedData test      # 38 tests, includes the service
+xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmFrontend -derivedDataPath build/DerivedData test   # the non-rendering subset, ~2 s
+xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmTests -derivedDataPath build/DerivedData test      # 139 tests, includes the render
 Tools/snapshot.sh [image.NEF]                  # layout captures at three sizes (offscreen)
 Tools/capture-live.sh [image.NEF]              # the REAL window, through the window server
 Tools/compare-layout.py ../design/snapshots/window-16x9.png
 SPEKTRAFILM_CANVAS_LOG=1 …                     # one line per draw, and why a render was dropped
 ```
 
-**Two test schemes.** `SpektrafilmFrontend` runs everything except
-`ServiceIntegrationTests`, which is the only class that spawns the Python
-service and renders a real negative. Use it for UI, layout and behaviour
-changes — it finishes in about two seconds and generates no pixels. Run
-`SpektrafilmTests` when the change touches `Service/Methods.swift`,
-`Model/Params.swift`'s wire names, or anything under `src/spektrafilm/service/`:
-those are exactly what the skipped class guards, and a frontend edit can break
-them silently (the schema test is what catches a renamed field).
+**Two test schemes.** `SpektrafilmFrontend` runs the non-rendering subset — UI,
+layout and behaviour — finishing in about two seconds and generating no pixels.
+`SpektrafilmTests` is the full 139, including the classes that open a real
+negative and render it. Run the full one when the change touches
+`Service/Methods.swift`, `Model/Params.swift`'s wire names, or anything in
+`engine/`: a frontend edit can break those silently, and the schema parity
+harness is what catches a renamed field.
 
-The app finds the engine by walking up from its bundle to a directory that
-contains `src/spektrafilm`, or from `SPEKTRAFILM_REPO` / the `repoPath`
-default. It spawns `.venv/bin/python -m spektrafilm.service` once per launch.
+The app finds the engine's data in its own bundle, at `Resources/engine/`
+(`EngineClient.defaultResources()`). The environment override is
+`SPEKTRAFILM_ENGINE_RESOURCES`, and a checkout walk-up survives only as a
+developer convenience for a build run out of the tree. `engine/build.sh bundle`
+is what puts the resources there — a pre-build phase fails the build when they
+are missing.
 
 ---
 

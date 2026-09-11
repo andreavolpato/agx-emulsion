@@ -16,7 +16,7 @@ struct SpektrafilmApp: App {
     private let snapshot = SnapshotRequest.parse(CommandLine.arguments)
 
     var body: some Scene {
-        Window("Spektrafilm", id: "editor") {
+        Window("Filmify", id: "editor") {
             EditorWindow(session: session)
                 .environment(\.snapshotMode, snapshot != nil)
                 .frame(minWidth: Theme.Metric.minWindow.width, minHeight: Theme.Metric.minWindow.height)
@@ -30,7 +30,7 @@ struct SpektrafilmApp: App {
         // require something visible, and CC BY-SA 4.0 names an About screen
         // by example as a place the attribution has to survive. See
         // `AboutWindow`.
-        Window("About Spektrafilm", id: "about") {
+        Window("About Filmify", id: "about") {
             AboutWindow()
         }
         .windowResizability(.contentSize)
@@ -49,7 +49,7 @@ struct EditorCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
-            Button("About Spektrafilm") { openAbout() }
+            Button("About Filmify") { openAbout() }
         }
         CommandGroup(replacing: .newItem) {
             Button("Open…") { session.openPanel() }.keyboardShortcut("o")

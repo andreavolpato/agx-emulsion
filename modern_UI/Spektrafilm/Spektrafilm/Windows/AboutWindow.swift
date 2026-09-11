@@ -73,7 +73,7 @@ struct AboutWindow: View {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable().frame(width: 64, height: 64)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Spektrafilm").font(.system(size: 20, weight: .semibold))
+                Text("Filmify").font(.system(size: 20, weight: .semibold))
                 Text(AboutWindow.version).font(Theme.Font.sublabel).foregroundStyle(.secondary)
                 Text("A spectral film and print simulation for macOS.")
                     .font(Theme.Font.sublabel).foregroundStyle(.secondary)
@@ -85,6 +85,15 @@ struct AboutWindow: View {
 
     private var credits: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // The one line that says which name belongs to which thing. This
+            // app is Filmify; the engine, the profiles and the LUTs it uses
+            // are spektrafilm's, and `SPEKTRAFILM_LICENSE.txt` asks that the
+            // product branding be kept apart from the factual reference —
+            // which it welcomes. Saying so on the About panel is where that
+            // distinction is legible.
+            Text("Filmify uses the spektrafilm engine, film and paper profiles, and the print-preview LUTs baked from them.")
+                .font(Theme.Font.sublabel).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             // The attribution the CC BY-SA licence requires, in the form it
             // suggests: author, canonical source, licence.
             VStack(alignment: .leading, spacing: 2) {
@@ -96,15 +105,17 @@ struct AboutWindow: View {
                      "https://github.com/andreavolpato/spektrafilm")
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("This application and its render engine")
+                Text("Filmify and its render engine")
                     .font(Theme.Font.groupHeader).foregroundStyle(Theme.text)
                 // The GPL's written offer, and the only form of it that is
-                // any use: a place to get the code.
+                // any use: a place to get the code. It points at this
+                // application's own repository, which is the work the GPL
+                // covers — the upstream link above covers the profiles.
                 Text("Free software under the GNU GPL v3 or later. You have the right to the corresponding source.")
                     .font(Theme.Font.sublabel).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                link("github.com/andreavolpato/spektrafilm",
-                     "https://github.com/andreavolpato/spektrafilm")
+                link("github.com/JamesQiu2005/filmify",
+                     "https://github.com/JamesQiu2005/filmify")
             }
             Text("The 8 baked print-preview LUTs are derivatives of the profiles and carry the same CC BY-SA 4.0 licence. What was changed, and what was not, is in the changelog below.")
                 .font(Theme.Font.caption).foregroundStyle(.secondary)

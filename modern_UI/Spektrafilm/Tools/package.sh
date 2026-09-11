@@ -1,5 +1,5 @@
 #!/bin/bash
-# package.sh -- build, sign, notarise and wrap Spektrafilm in a DMG.
+# package.sh -- build, sign, notarise and wrap Filmify in a DMG.
 #
 # HANDOFF-DISTRIBUTION §2.1 and §2.5: there was no archive step, no `.dmg`, no
 # `exportOptions.plist` and no notarisation, and an ad-hoc signature is refused
@@ -55,7 +55,7 @@ if [[ -z "$version" ]]; then
   echo "error: could not read MARKETING_VERSION from $here/gen-project.py" >&2
   exit 1
 fi
-dmg="$out/Spektrafilm-$version-arm64.dmg"
+dmg="$out/Filmify-$version-arm64.dmg"
 
 say() { printf '\n=== %s\n' "$*"; }
 run() { if $dry; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
@@ -88,7 +88,7 @@ run python3 "$here/gen-project.py"
 # --- 2. archive ------------------------------------------------------------
 say "archive"
 mkdir -p "$out"
-archive="$out/Spektrafilm.xcarchive"
+archive="$out/Filmify.xcarchive"
 run rm -rf "$archive"
 run xcodebuild -project "$proj/Spektrafilm.xcodeproj" -scheme Spektrafilm \
     -configuration Release -destination 'generic/platform=macOS' \
@@ -114,7 +114,7 @@ fi
 run rm -rf "$out/export"
 run xcodebuild -exportArchive -archivePath "$archive" \
     -exportOptionsPlist "$plist" -exportPath "$out/export"
-app="$out/export/Spektrafilm.app"
+app="$out/export/Filmify.app"
 
 # --- 4. verify the signature ----------------------------------------------
 # Checked, not assumed. `--options runtime` is what makes the hardened
@@ -147,7 +147,7 @@ if ! $dry; then
   # The licence texts are inside the bundle, where the obligation is met; a
   # copy at the top of the DMG is so somebody can read them before installing.
   cp -R "$app/Contents/Resources/Resources/Licenses" "$staging/Licences"
-  hdiutil create -volname "Spektrafilm $version" -srcfolder "$staging" \
+  hdiutil create -volname "Filmify $version" -srcfolder "$staging" \
       -ov -format UDZO "$dmg" >/dev/null
   rm -rf "$staging"
   echo "  $dmg ($(du -h "$dmg" | cut -f1))"

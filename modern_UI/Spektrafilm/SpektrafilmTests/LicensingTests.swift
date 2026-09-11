@@ -96,7 +96,7 @@ final class EngineMessageTests: XCTestCase {
 
     func testAnIncompleteInstallDoesNotTellTheUserToRunABuildScript() {
         let message = EngineMessage.userFacing(Engine(
-            description: "the engine's resources are missing at /Applications/Spektrafilm.app; "
+            description: "the engine's resources are missing at /Applications/Filmify.app; "
                        + "run engine/build.sh bundle"))
         XCTAssertFalse(message.hasPrefix("the engine's resources"),
                        "the developer text was passed through unchanged")

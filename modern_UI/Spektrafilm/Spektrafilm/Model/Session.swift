@@ -487,8 +487,11 @@ final class Session: CanvasHost {
     private var saveTask: Task<Void, Never>?
     private var reopenTask: Task<Void, Never>?
     private var prefetch: [URL: Task<URL?, Never>] = [:]
+    // Renamed with the product. The old `com.hanze.spektrafilm` directory is
+    // simply orphaned: it holds decoded-TIFF caches, which rebuild on demand,
+    // so nothing needs migrating and nothing is lost but disk.
     nonisolated static let cacheRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appending(path: "com.hanze.spektrafilm")
+        .appending(path: "com.hanze.filmify")
     nonisolated static let liveEdge = 1600
 
     init(renderer: Renderer? = Renderer()) {

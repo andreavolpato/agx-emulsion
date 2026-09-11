@@ -14,12 +14,12 @@
 	     them (HANDOFF-DISTRIBUTION §2.6). -->
 	<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>NSHumanReadableCopyright</key><string>Spektrafilm is free software under the GNU GPL v3 or later. Film and paper profiles © Andrea Volpato, CC BY-SA 4.0.</string>
+	<key>NSHumanReadableCopyright</key><string>Filmify is free software under the GNU GPL v3 or later. It uses the spektrafilm engine; film and paper profiles © Andrea Volpato, CC BY-SA 4.0.</string>
 	<key>LSMinimumSystemVersion</key><string>15.0</string>
 	<key>NSHighResolutionCapable</key><true/>
-	<key>NSDocumentsFolderUsageDescription</key><string>Spektrafilm opens a folder of negatives to print from.</string>
-	<key>NSDesktopFolderUsageDescription</key><string>Spektrafilm opens a folder of negatives to print from.</string>
-	<key>NSDownloadsFolderUsageDescription</key><string>Spektrafilm opens a folder of negatives to print from.</string>
+	<key>NSDocumentsFolderUsageDescription</key><string>Filmify opens a folder of negatives to print from.</string>
+	<key>NSDesktopFolderUsageDescription</key><string>Filmify opens a folder of negatives to print from.</string>
+	<key>NSDownloadsFolderUsageDescription</key><string>Filmify opens a folder of negatives to print from.</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
