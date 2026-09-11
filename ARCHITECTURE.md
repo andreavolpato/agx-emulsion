@@ -13,10 +13,13 @@ native host that does not exist yet.
 
 ## 0. The product, end to end
 
-spektrafilm is **one application with a C++ render engine linked into it**, and
-a Python engine beside it that ships to nobody and is the reference every
-number is measured against. It used to be two programs and a pipe; RFC-014
-deleted the pipe (2026-09-10).
+Filmify is **one application with a C++ render engine linked into it**. The
+engine is spektrafilm's; so are the profiles and the LUTs baked from them. It
+used to be two programs and a pipe — RFC-014 deleted the pipe (2026-09-10) —
+and the Python engine that sat on the far side of it stayed behind in the
+upstream fork when this product was extracted into its own repository
+(2026-09-11). It ships to nobody and remains the reference every number below
+is measured against; it is simply no longer in this tree. See `README.md`.
 
 ```
   ┌─ modern_UI/Spektrafilm ─── one binary, ~20 MB ────────────────────────┐
@@ -39,10 +42,10 @@ deleted the pipe (2026-09-10).
   │  RAW decode (Core Image) ── linear ProPhoto float ──▶ spk_open        │
   └───────────────────────────────────────────────────────────────────────┘
 
-  ┌─ src/spektrafilm ── development dependency, never shipped ────────────┐
+  ┌─ src/spektrafilm ── IN THE UPSTREAM FORK, not in this repository ─────┐
   │  the reference and the test oracle: numba, colour-science, scipy.     │
   │  engine/tests/parity_*.py drive the *shipping* binary through ctypes  │
-  │  and compare against it.                                              │
+  │  and compare against it, over there.                                  │
   └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,22 +65,28 @@ is added. Renders are the one exception and go through
 `EngineClient.render(_:_:)`, because a texture cannot travel through a
 `Decodable`.
 
-**What is still Python.** `src/spektrafilm` is the reference implementation and
-the oracle for six parity harnesses (§8.6). It is a development dependency. It
-is also still the *only* implementation of three wire methods — `export`,
-`export_di`, `preview_stock_lut` — which the engine refuses by name rather than
-answering wrongly (§8.7).
+**What is still Python.** `src/spektrafilm`, in the upstream fork, is the
+reference implementation and the oracle for six parity harnesses (§8.6). It is
+a development dependency and it is not in this repository — see `README.md` for
+how the harnesses reach it.
+
+**The whole method surface is ported.** `export`, `export_di` and
+`preview_stock_lut` were for a while the only methods the Python side
+implemented, and the engine refused them by name rather than answering wrongly.
+They are `spk_reprint` at the full tier, `spk_export_di` +
+`spk_print_lut_table`, and `spk_preview_stock_lut` now (§8.8). **The engine
+gained no file writer**: it returns pixels and the baked table, and
+`Exporter.swift` writes the TIFF, the `.cube` and the print preview through
+ImageIO.
 
 ### Who owns what
 
-`CONTRACT-frontend-backend.md` §4 splits the repo between two concurrent
-sessions and is binding:
-
-| path | owner |
-|---|---|
-| `modern_UI/**` | frontend |
-| `src/**`, `tests/**`, `scripts/**`, `rfc/**` | backend |
-| `AGENTS.md`, `ARCHITECTURE.md`, `API-SPEC-*`, `CONTRACT-*` | **neither** — say so before editing |
+**Historical.** `CONTRACT-frontend-backend.md` §4 split this work between two
+concurrent sessions — frontend on `modern_UI/**`, backend on `src/**`,
+`tests/**`, `scripts/**`, `rfc/**`. The backend half belonged to the Python
+engine, which stayed behind in the fork; what came across is one product with
+one owner, so §4 no longer routes anything. The contract still governs **§1,
+the wire**, which is unchanged.
 
 Read the contract before changing anything that crosses the pipe. A field
 name, a tier name, a file layout or a version number is a wire change even

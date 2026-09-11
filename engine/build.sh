@@ -120,8 +120,12 @@ build_tests() {
 bundle_resources() {
   local app="$here/../modern_UI/Spektrafilm/Spektrafilm/Resources/engine"
   if [[ ! -f "$here/resources/spektrafilm_constants.bin" ]]; then
-    echo "build.sh: engine/resources is missing. Run:" >&2
-    echo "    PYTHONPATH=src .venv/bin/python engine/tools/bake_resources.py" >&2
+    # `engine/resources/` is *tracked* in this repository, so this means the
+    # checkout is damaged -- not that anything needs baking. Re-baking needs the
+    # Python reference tree, which is deliberately not here; see README,
+    # "Rebaking the engine resources".
+    echo "build.sh: engine/resources is missing, and it is a tracked directory." >&2
+    echo "    Restore it:  git checkout -- engine/resources" >&2
     exit 1
   fi
   mkdir -p "$app"

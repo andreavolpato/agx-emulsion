@@ -6,9 +6,11 @@
 #
 #   engine/    the baked constants, the film profiles, the print-preview LUT
 #              index and the Metal library -- `engine/build.sh bundle`.
-#              Baking them needs Python, so this does not build them: making
-#              an Xcode build depend on a virtualenv would put back exactly
-#              the thing RFC-014 exists to remove. It only says what to run.
+#              This does not build them: making an Xcode build depend on a
+#              bake step would put back exactly the thing RFC-014 exists to
+#              remove. It only says what to run. Note that `engine/resources/`
+#              is *tracked* in this repository, so the inputs are always here;
+#              only the rsync into the app folder has to happen.
 #
 #   Licenses/  the GPL-3.0, CC BY-SA 4.0 and Apache-2.0 texts the .app is
 #              obliged to carry -- `Tools/bundle-licenses.sh`. This is
@@ -32,8 +34,8 @@ done
 if [ -n "$missing" ]; then
   echo "error: the engine's resources are incomplete under $res" >&2
   echo "error: missing:$missing" >&2
-  echo "error: run \`engine/build.sh bundle\` (and, if engine/resources itself is" >&2
-  echo "error: absent, \`PYTHONPATH=src .venv/bin/python engine/tools/bake_resources.py\` first)" >&2
+  echo "error: run \`engine/build.sh bundle\`, which rsyncs the tracked" >&2
+  echo "error: \`engine/resources/\` into the app's Resources folder" >&2
   exit 1
 fi
 

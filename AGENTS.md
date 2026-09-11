@@ -1,39 +1,47 @@
-# AGENTS.md — working notes for AI sessions on this fork
+# AGENTS.md — working notes for AI sessions on Filmify
 
-Fork of `andreavolpato/spektrafilm`. This file records conventions and, more
-importantly, the traps that cost real debugging time. Read the traps section
-before touching the pipeline.
+The macOS desktop product built on the **spektrafilm** engine. Extracted from
+the `spektrafilm` fork into its own repository on 2026-09-11; `README.md` says
+what is here and what is deliberately not. This file records conventions and,
+more importantly, the traps that cost real debugging time. Read the traps
+section before touching the pipeline.
 
 ---
 
 ## What this repo is, in one screen
 
-**One binary, plus a reference.** The macOS app under `modern_UI/` has a C++
-render engine (`engine/`) compiled into it and reached through a hand-written
-`extern "C"` surface; it renders into an `MTLTexture` the canvas draws. The
-Python engine under `src/` is a **development dependency that never ships** —
-it is the reference and the oracle for six parity harnesses.
-`ARCHITECTURE.md` §0 is the map and §8 is the engine. RFC-014 §8 is the
-after-the-fact record: what parity measures, why each bar is where it is, and
-the bugs already found.
+**One binary.** The macOS app under `modern_UI/` has a C++ render engine
+(`engine/`) compiled into it and reached through a hand-written `extern "C"`
+surface; it renders into an `MTLTexture` the canvas draws. There is no Python
+in this repository — no `src/`, no `.venv`, no subprocess, at build time or at
+run time. `ARCHITECTURE.md` §0 is the map and §8 is the engine. RFC-014 §8 is
+the after-the-fact record: what parity measures, why each bar is where it is,
+and the bugs already found.
+
+**The Python reference is not here, and two things need it.** The upstream
+fork's `src/` package is the oracle `engine/tests/parity_*.py` compare against,
+and the only thing that can re-bake `engine/resources/`. Both take it as an
+explicit `PYTHONPATH` — see README, "Parity harnesses" and "Rebaking the engine
+resources". Nothing else in this repository does. `engine/resources/` is
+tracked precisely so that building the app never needs it.
 
 **There is no CPU fallback and no Python at run time.** If something is slow,
 it is not "falling back" — there is nothing to fall back to. A 45 MP full
 render is 0.87 s; a number near the old numba figures means something else is
 wrong, and three such causes are already recorded (trap 18).
 
-**Two sessions work here concurrently**, split by
-`CONTRACT-frontend-backend.md` §4: frontend owns `modern_UI/**`, backend owns
-`src/**`, `tests/**`, `scripts/**`, `rfc/**`. **`engine/**` is new and the
-contract predates it** — it is backend-shaped (it is the render engine) but it
-is compiled into the frontend's target, so say which you are touching. `AGENTS.md`, `ARCHITECTURE.md`,
-`API-SPEC-*` and `CONTRACT-*` belong to neither — **say so before editing one**.
-§4.1 also forbids rebasing or force-pushing a branch the other side may have
-read, and `git stash` / `git clean -fdx` / `git checkout -- .` at the repo root.
+**The frontend/backend split is historical.** `CONTRACT-frontend-backend.md` §4
+divided this work between two concurrent sessions — frontend on `modern_UI/**`,
+backend on `src/**`, `tests/**`, `scripts/**`, `rfc/**`. The backend half of
+that split belonged to the Python engine, which stayed behind in the fork. What
+came across is one product with one owner, so §4 no longer routes anything.
+The contract is still worth reading for **§1, the wire**, which has not changed.
+`AGENTS.md`, `ARCHITECTURE.md`, `API-SPEC-*` and `CONTRACT-*` still belong to
+nobody in particular — **say so before editing one.**
 
-**`native/` and `scripts/gpu_native/native_host_spike/` are dead.** They were
-the stdio proxy host and its verification spike, from before the engine
-existed. Nothing references either; they should be deleted (RFC-014 §6 step 6).
+**`native/` is gone.** It was the stdio proxy host, from before the engine
+existed and superseded by it (RFC-014 §6 step 6). It was deliberately not
+carried across, and nothing references it.
 
 **The whole method surface is ported** as of 2026-09-10. `export`,
 `export_di` and `preview_stock_lut` were the last three refused by name; they
@@ -50,36 +58,29 @@ See trap 14.
 
 ## Environment
 
-The package is **not** installed system-wide. A venv lives at `.venv`:
+**No virtualenv, and no Python, for anything this repository builds.** Xcode
+26.6, macOS 15+, Apple silicon:
 
 ```bash
-cd "/Users/xiaojinqiu/Documents/Summer 2026/spektrafilm"
-.venv/bin/python ...            # always use this interpreter
+engine/build.sh bundle       # C++ engine + MSL kernels + sync baked resources
+xcodebuild -project modern_UI/Spektrafilm/Spektrafilm.xcodeproj \
+           -scheme Spektrafilm -derivedDataPath build/DerivedData build
 ```
 
-There are **two checkouts** of this repo, each with its own venv, each venv's
-editable install pinned to its own `src` (see trap 14):
+A `python3` is used only by the `Tools/*.py` generators (`gen-project.py`,
+`gen-catalog.py`), which are standard-library-only.
 
-```
-~/Documents/Summer 2026/spektrafilm       ui/frontend-fixes    ← the app uses this one
-~/Documents/Summer 2026/spektrafilm-gpu   gpu/native-metal
-```
+**The Python reference lives in the fork**, at
+`~/Documents/Summer 2026/spektrafilm`. The parity harnesses and
+`engine/tools/bake_resources.py` reach it through `PYTHONPATH=<fork>/src` and
+that fork's `.venv` — see README. That fork's Environment notes (its venv, its
+two checkouts, `-W ignore`) apply to work done *there*, not here.
 
-Recreate if needed:
-
-```bash
-uv venv --python 3.13 .venv
-uv pip install --python .venv/bin/python \
-  numpy scipy colour-science scikit-image matplotlib opt-einsum numba \
-  pyfftw rawpy exiv2 OpenImageIO lensfunpy mlx
-uv pip install --python .venv/bin/python --no-deps -e .
-```
-
-GUI deps (napari, pyside6) are deliberately omitted — the runtime core does
-not import them. Add them only if working on `spektrafilm_gui`.
-
-Always pass `-W ignore`: the PCHIP LUT preparation emits monotonicity warnings
-that bury real output.
+**Trap 14 no longer bites here.** It was about a venv's editable install
+pinning `spektrafilm` to whichever checkout created it, so that two checkouts
+silently ran each other's code. There is no venv in this repository to be
+confused; if you are chasing that class of bug you are in the reference
+checkout, not this one.
 
 ---
 
@@ -148,24 +149,31 @@ engine/build.sh bundle       # sync resources into the app's Resources/engine
 engine/build.sh dylib        # what the ctypes parity harnesses load
 ```
 
-If `engine/resources/` does not exist (it is gitignored — it is 11.8 MB of
-generated copies), bake it first:
-
-```bash
-PYTHONPATH=src .venv/bin/python engine/tools/bake_resources.py
-```
+`engine/resources/` is **tracked here** (15 MB of baked output), so a fresh
+clone can build without baking anything. Re-baking needs the Python reference
+tree and is rare — see README, "Rebaking the engine resources".
 
 **Run the parity harnesses before believing any engine change.** They take
-under a minute together and each one catches a different class of mistake:
+under a minute together and each one catches a different class of mistake.
+
+⚠️ **The `parity_*.py` commands below run from a checkout that has the Python
+reference** — the fork, not this repository — with `REF` set to that checkout's
+root. They drive this repository's dylib through ctypes, so they must also be
+pointed at *this* `engine/`; the simplest form is to run them from here with
+`PYTHONPATH` naming the fork's `src`. The two that are pure C++ run here.
 
 ```bash
-PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_setup.py    # constants
-PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_schema.py   # the wire
-PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_render.py   # the picture
-PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_session.py  # every field, live
-PYTHONPATH=src:engine/tests .venv/bin/python engine/tests/parity_grain.py    # distributions
-engine/build/gpu_smoke engine/resources/spektrafilm.metallib                 # the boundary
-engine/tests/check_math_guard.sh                                             # that the guard fires
+export REF=~/Documents/Summer\ 2026/spektrafilm          # the Python reference
+export PYTHONPATH="$REF/src:engine/tests"
+"$REF/.venv/bin/python" engine/tests/parity_setup.py     # constants
+"$REF/.venv/bin/python" engine/tests/parity_schema.py    # the wire
+"$REF/.venv/bin/python" engine/tests/parity_render.py    # the picture
+"$REF/.venv/bin/python" engine/tests/parity_session.py   # every field, live
+"$REF/.venv/bin/python" engine/tests/parity_grain.py     # distributions
+"$REF/.venv/bin/python" engine/tests/parity_lut.py       # the print tables, bit-exact
+# and these two need nothing but this repository:
+engine/build/gpu_smoke engine/resources/spektrafilm.metallib   # the boundary
+engine/tests/check_math_guard.sh                               # that the guard fires
 ```
 
 `parity_render.py --size 180` uses a small synthetic frame and runs in
@@ -181,8 +189,8 @@ since `engine/build.sh bundle` is an rsync that leaves a *stale* bundle rather
 than an empty one when it does not run:
 
 ```bash
-SPEKTRAFILM_ENGINE_RESOURCES=/path/to/Spektrafilm.app/Contents/Resources/Resources/engine \
-    PYTHONPATH=src .venv/bin/python engine/tests/parity_lut.py
+SPEKTRAFILM_ENGINE_RESOURCES=/path/to/Filmify.app/Contents/Resources/Resources/engine \
+    PYTHONPATH="$REF/src" "$REF/.venv/bin/python" engine/tests/parity_lut.py
 ```
 
 ### The app

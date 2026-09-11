@@ -1,0 +1,58 @@
+{
+  "fujifilm_crystal_archive_typeii": {
+    "declared_pairing": true,
+    "lut_size": 33,
+    "output_cctf_encoding": true,
+    "output_color_space": "Display P3",
+    "paired_film": "fujifilm_pro_400h"
+  },
+  "kodak_2383": {
+    "declared_pairing": true,
+    "lut_size": 33,
+    "output_cctf_encoding": true,
+    "output_color_space": "Display P3",
+    "paired_film": "kodak_vision3_250d"
+  },
+  "kodak_2393": {
+    "declared_pairing": false,
+    "lut_size": 33,
+    "output_cctf_encoding": true,
+    "output_color_space": "Display P3",
+    "paired_film": "kodak_vision3_250d"
+  },
+  "kodak_ektacolor_edge": {
+    "declared_pairing": false,
+    "lut_size": 33,
+    "output_cctf_encoding": true,
+    "output_color_space": "Display P3",
+    "paired_film": "kodak_portra_400"
+  },
+  "kodak_endura_premier": {
+    "declared_pairing": false,
+    "lut_size": 33,
+    "output_cctf_encoding": true,
+    "output_color_space": "Display P3",
+    "paired_film": "kodak_portra_400"
+  },
+  "kodak_portra_endura": {
+    "declared_pairing": true,
+    "lut_size": 33,
+    "output_cctf_encoding": true,
+    "output_color_space": "Display P3",
+    "paired_film": "kodak_portra_400"
+  },
+  "kodak_supra_endura": {
+    "declared_pairing": false,
+    "lut_size": 33,
+    "output_cctf_encoding": true,
+    "output_color_space": "Display P3",
+    "paired_film": "kodak_portra_400"
+  },
+  "kodak_ultra_endura": {
+    "declared_pairing": false,
+    "lut_size": 33,
+    "output_cctf_encoding": true,
+    "output_color_space": "Display P3",
+    "paired_film": "kodak_portra_400"
+  }
+}
