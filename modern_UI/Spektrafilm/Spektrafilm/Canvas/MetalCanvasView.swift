@@ -25,6 +25,10 @@ protocol CanvasHost: AnyObject {
     func viewportChanged()
     func picked(normalised: CGPoint)
     var geometry: Geometry { get }
+    /// The crop tool's pivot, source-normalised. Every crop-tool drag is
+    /// converted through the edit space this point defines, so a gesture and
+    /// the picture it is dragging cannot disagree about where the centre is.
+    var cropPivot: CGPoint { get }
     /// The live tier's pixel size. The geometry is normalised against it, and
     /// the rotation is rigid in *pixels*, so the hit tests need it.
     var sourceImageSize: CGSize { get }
@@ -66,8 +70,16 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
 
     private enum CropDrag {
         case handle(CropHandle, origin: Geometry, grabOffset: CGSize)
+        /// A fresh rectangle being drawn level on screen: `from` is the
+        /// **edit-space** point the drag started at.
         case draw(from: CGPoint)
+        /// The ⌘ line. `from` is edit space too — the space the user is
+        /// drawing in (see `mouseDown`).
         case straighten(from: CGPoint, origin: Geometry)
+        /// Turning the photograph. `centre` is the frame's centre in **view**
+        /// points and `from` the pointer's bearing about it at mouse-down;
+        /// the angle between them is the turn.
+        case rotate(origin: Geometry, centre: CGPoint, from: Double)
     }
     private var cropDrag: CropDrag?
 
@@ -99,7 +111,11 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingArea { removeTrackingArea(trackingArea) }
-        let ta = NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        // `.cursorUpdate` so entering the canvas asks for the cursor too, not
+        // only moving inside it — the crop tool's cursor is position- and
+        // modifier-dependent, and neither of those has to change for the
+        // pointer to arrive somewhere new.
+        let ta = NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self)
         addTrackingArea(ta)
         trackingArea = ta
     }
@@ -188,27 +204,49 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
         }
         switch host.tool {
         case .crop:
-            guard let n = renderer.viewport.normalised(atView: p) else { return }
+            // No bail for a click outside the frame: outside is where the
+            // rotate gesture lives, grey surround and turned corners
+            // included.
             let g = host.geometry
             let size = host.sourceImageSize
+            let v = renderer.viewport
             // ⌘-drag draws a line that should be horizontal, and the frame
-            // straightens to it. Lightroom's and Capture One's gesture, and
-            // the only one that beats nudging a slider by eye.
+            // straightens to it. Lightroom's and Capture One's gesture, the
+            // only one that beats nudging a slider by eye.
+            //
+            // Measured in **edit space**, not in source space: "level" means
+            // level on the screen the user is drawing on, and that is the
+            // space the photograph is turned in. A line drawn there at λ
+            // leaves the picture level at `θ + λ` — with the points put
+            // through S first this would be `θ + (λ + θ)` and the straighten
+            // would overshoot by twice the angle it started from.
             if e.modifierFlags.contains(.command) {
-                cropDrag = .straighten(from: n, origin: g)
-                host.straightenPreview(StraightenLine(from: n, to: n))
+                let from = editPoint(atView: p, v)
+                cropDrag = .straighten(from: from, origin: g)
+                let s = g.sourcePoint(forEdit: from, pivot: host.cropPivot, imageSize: size)
+                host.straightenPreview(StraightenLine(from: s, to: s))
                 return
             }
+            // ⌥ draws a new rectangle, level on screen and anywhere — inside
+            // the current crop too. Lightroom's gesture, and the only way to
+            // redraw a crop without first moving the old one out of the way.
+            if e.modifierFlags.contains(.option) {
+                cropDrag = .draw(from: editPoint(atView: p, v))
+                return
+            }
+            let n = sourcePoint(atView: p, renderer, host)
             // A grab area that is a constant size on screen: 10 pt, converted
             // through the viewport so it is not enormous at 12 % zoom and
             // unhittable at 400 %.
-            let tolerance = CanvasNSView.handleGrab / max(renderer.viewport.scale, 1e-6)
+            let tolerance = CanvasNSView.handleGrab / max(v.scale, 1e-6)
             if let handle = g.handle(at: n, in: size, tolerance: tolerance) {
                 let c = g.centre
                 cropDrag = .handle(handle, origin: g,
                                    grabOffset: CGSize(width: n.x - c.x, height: n.y - c.y))
             } else {
-                cropDrag = .draw(from: n)
+                let centre = viewPoint(ofSource: g.centre, g, host, v)
+                cropDrag = .rotate(origin: g, centre: centre,
+                                   from: CanvasNSView.bearing(from: centre, to: p))
             }
         default:
             // A mask grip claims the drag before the pan does, and only
@@ -240,6 +278,61 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
     /// Radius of a crop grip's grab area, in view points.
     static let handleGrab: CGFloat = 10
 
+    // MARK: edit space
+    //
+    // While the crop tool is up the canvas draws the photograph **turned**
+    // about the pivot, so the crop frame is level on screen — Capture One's
+    // tool, the one that lets you judge a straighten against a level frame.
+    // Every position a crop gesture reads is therefore an edit-space point,
+    // mapped to the source through `sourcePoint(forEdit:pivot:imageSize:)`.
+    // Nothing else in the canvas changes: the finished view and the exported
+    // file never see this mapping.
+
+    /// View point → edit space, normalised to the W×H box the viewport spans.
+    /// Deliberately **unclamped** — outside the box is a real place on the
+    /// turned photograph, and what a point out there means is decided in
+    /// source space, after the mapping.
+    private func editPoint(atView p: CGPoint, _ v: ViewportState) -> CGPoint {
+        let ip = v.imagePoint(atView: p)
+        return CGPoint(x: ip.x / max(v.image.width, 1), y: ip.y / max(v.image.height, 1))
+    }
+
+    /// View point → source point, unclamped. What a *hit test* gets: clamping
+    /// first would drag a pointer that is a long way outside the frame onto
+    /// its edge, where it would read as a grip and start resizing instead of
+    /// turning the photograph.
+    private func sourcePoint(atView p: CGPoint, _ renderer: Renderer, _ host: CanvasHost) -> CGPoint {
+        let e = editPoint(atView: p, renderer.viewport)
+        return host.geometry.sourcePoint(forEdit: e, pivot: host.cropPivot, imageSize: host.sourceImageSize)
+    }
+
+    /// The same, clamped into the frame. For the drags that move or resize
+    /// the crop: a drag that leaves the image still has a meaning (`Geometry`
+    /// fits whatever comes out of it), and the clamp belongs in source space,
+    /// where the frame's edges actually are — the edit box's edges are
+    /// diagonal lines on the photograph.
+    private func clampedSourcePoint(atView p: CGPoint, _ renderer: Renderer, _ host: CanvasHost) -> CGPoint {
+        let s = sourcePoint(atView: p, renderer, host)
+        return CGPoint(x: s.x.clamped(to: 0...1), y: s.y.clamped(to: 0...1))
+    }
+
+    /// Where a source point is on screen, through E — the frame's centre for
+    /// a rotate drag. With the pivot on the crop's centre (the tool's normal
+    /// state) this is simply the middle of the frame; after the crop has been
+    /// moved it is wherever that same point of the photograph now sits.
+    private func viewPoint(ofSource s: CGPoint, _ g: Geometry, _ host: CanvasHost,
+                           _ v: ViewportState) -> CGPoint {
+        let e = g.editPoint(forSource: s, pivot: host.cropPivot, imageSize: host.sourceImageSize)
+        return v.viewPoint(atImage: CGPoint(x: e.x * v.image.width, y: e.y * v.image.height))
+    }
+
+    /// The pointer's bearing about a view point, in degrees, clockwise from
+    /// east — y grows downward in this view, which is the convention every
+    /// rotation in `Geometry` uses.
+    static func bearing(from centre: CGPoint, to p: CGPoint) -> Double {
+        atan2(p.y - centre.y, p.x - centre.x) * 180 / .pi
+    }
+
     override func mouseDragged(with e: NSEvent) {
         guard let renderer, let host else { return }
         let p = local(e)
@@ -252,35 +345,52 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
             return
         }
         if let drag = cropDrag, host.tool == .crop {
-            // Clamped rather than dropped: a drag that leaves the image still
-            // has a meaning, and `Geometry` fits whatever comes out of it.
-            let ip = renderer.viewport.imagePoint(atView: p)
-            let img = renderer.viewport.image
-            let n = CGPoint(x: (ip.x / max(img.width, 1)).clamped(to: 0...1),
-                            y: (ip.y / max(img.height, 1)).clamped(to: 0...1))
             let size = host.sourceImageSize
             switch drag {
             case .handle(.body, let origin, let grab):
+                let n = clampedSourcePoint(atView: p, renderer, host)
                 let target = CGPoint(x: n.x - grab.width, y: n.y - grab.height)
                 let delta = CGSize(width: target.x - origin.centre.x, height: target.y - origin.centre.y)
                 host.geometryChanged(origin.moved(by: delta, in: size))
             case .handle(let handle, let origin, _):
+                let n = clampedSourcePoint(atView: p, renderer, host)
                 host.geometryChanged(origin.resized(handle: handle,
                                                     to: origin.unrotated(n, in: size), in: size))
             case .draw(let from):
-                let x0 = min(from.x, n.x), y0 = min(from.y, n.y)
-                let w = abs(n.x - from.x), h = abs(n.y - from.y)
+                // Drawn in edit space, so it is level on screen *and* level in
+                // the turned photograph — which is why the angle is kept. It
+                // used to be zeroed here, back when the rectangle was drawn
+                // axis-aligned to the frame instead; zeroing it now would
+                // spin the picture under the rectangle the user just drew.
+                let to = editPoint(atView: p, renderer.viewport)
+                let w = abs(to.x - from.x), h = abs(to.y - from.y)
                 guard w * size.width > Geometry.minSide, h * size.height > Geometry.minSide else { return }
-                var g = host.geometry
-                g.crop = CropRect(x: x0, y: y0, width: w, height: h)
-                // A fresh rectangle is drawn axis-aligned to the *frame*, so
-                // it starts unstraightened; the angle is a separate decision
-                // and re-applying the old one would rotate a rectangle the
-                // user just drew square.
-                g.angle = 0
-                host.geometryChanged(g.constrained(in: size, anchor: anchorFor(from: from, to: n)))
+                let centre = CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2)
+                let s = host.geometry.sourcePoint(forEdit: centre, pivot: host.cropPivot, imageSize: size)
+                // Same pixels, same shape: S is a rotation, and in both
+                // spaces one unit of x is one width of the source.
+                host.geometryChanged(host.geometry.redrawn(
+                    as: CropRect(x: s.x - w / 2, y: s.y - h / 2, width: w, height: h),
+                    in: size, anchor: anchorFor(from: from, to: to)))
+            case .rotate(let origin, let centre, let from):
+                // The picture follows the hand: a clockwise drag turns the
+                // photograph clockwise, which is a *smaller* angle (positive
+                // is clockwise here, and the photograph is drawn at −θ).
+                // Recomputed from `origin` every event, like the other drags,
+                // so a turn that hits ±45° and comes back does not drift.
+                var delta = CanvasNSView.bearing(from: centre, to: p) - from
+                while delta > 180 { delta -= 360 }
+                while delta <= -180 { delta += 360 }
+                host.geometryChanged(origin.straightened(to: origin.angle - delta, in: size))
             case .straighten(let from, _):
-                host.straightenPreview(StraightenLine(from: from, to: n))
+                // The preview is stored in source space, like every other
+                // overlay line, and drawn back through E — so it sits under
+                // the cursor, which is the live proof that S and E invert
+                // each other. The angle is measured in edit space (mouseUp).
+                let to = editPoint(atView: p, renderer.viewport)
+                host.straightenPreview(StraightenLine(
+                    from: host.geometry.sourcePoint(forEdit: from, pivot: host.cropPivot, imageSize: size),
+                    to: host.geometry.sourcePoint(forEdit: to, pivot: host.cropPivot, imageSize: size)))
             }
             return
         }
@@ -302,8 +412,12 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
         dragStart = nil
         maskDrag = nil
         if case .straighten(let from, let origin) = cropDrag, let host, let renderer {
-            let n = renderer.viewport.normalised(atView: local(e)) ?? from
-            if let deg = Geometry.straightenAngle(from: from, to: n, in: host.sourceImageSize) {
+            // Both ends in edit space, which is where the line has to come
+            // out level — so the angle *adds* to the one already there. Put
+            // through S instead, the same sum would overshoot by θ: the drawn
+            // line's slope in the photo is already `λ + θ`.
+            let to = editPoint(atView: local(e), renderer.viewport)
+            if let deg = Geometry.straightenAngle(from: from, to: to, in: host.sourceImageSize) {
                 host.geometryChanged(origin.straightened(to: origin.angle + deg, in: host.sourceImageSize))
             }
         }
@@ -313,11 +427,104 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
     }
 
     override func mouseMoved(with e: NSEvent) {
-        guard let renderer else { return }
-        host?.hovered(normalised: renderer.viewport.normalised(atView: local(e)))
+        guard let renderer, let host else { return }
+        let p = local(e)
+        // The readout samples the photograph, so in the crop tool it wants
+        // the *source* point — the edit point put through S — and nil
+        // outside the frame, because `Session.sample` indexes the texture
+        // with it and 0…1 is the contract there.
+        if host.tool == .crop {
+            let n = sourcePoint(atView: p, renderer, host)
+            host.hovered(normalised: (0...1).contains(n.x) && (0...1).contains(n.y) ? n : nil)
+            cropCursor(at: p).set()
+        } else {
+            host.hovered(normalised: renderer.viewport.normalised(atView: p))
+        }
     }
 
     override func mouseExited(with e: NSEvent) { host?.hovered(normalised: nil) }
+
+    // MARK: cursor
+
+    /// What the pointer means in the crop tool: on the frame it draws, off it
+    /// it turns the photograph, and ⌥ draws a new rectangle anywhere.
+    private func cropCursor(at p: CGPoint) -> NSCursor {
+        guard let renderer, let host else { return .arrow }
+        if NSEvent.modifierFlags.contains(.option) { return .crosshair }
+        let n = sourcePoint(atView: p, renderer, host)
+        let tolerance = CanvasNSView.handleGrab / max(renderer.viewport.scale, 1e-6)
+        return host.geometry.handle(at: n, in: host.sourceImageSize, tolerance: tolerance) == nil
+            ? CanvasNSView.rotateCursor
+            : .crosshair
+    }
+
+    /// AppKit has no rotate cursor, so the SF Symbol is rendered into one.
+    /// Built once, and the hot spot is the middle: a rotate cursor that
+    /// points with its corner points at nothing.
+    private static let rotateCursor: NSCursor = {
+        guard let symbol = NSImage(systemSymbolName: "arrow.triangle.2.circlepath",
+                                   accessibilityDescription: "Rotate")?
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .semibold)) else { return .crosshair }
+        let s = symbol.size
+        let size = NSSize(width: s.width + 4, height: s.height + 4)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let box = NSRect(x: 2, y: 2, width: s.width, height: s.height)
+            // A white halo, so the glyph reads over a dark photograph and
+            // over the grey surround alike.
+            for dx in [-1.0, 1.0] as [CGFloat] {
+                for dy in [-1.0, 1.0] as [CGFloat] {
+                    CanvasNSView.tinted(symbol, .white)
+                        .draw(in: box.offsetBy(dx: dx, dy: dy))
+                }
+            }
+            CanvasNSView.tinted(symbol, .black).draw(in: box)
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
+    }()
+
+    /// A symbol drawn in one flat colour. Symbol images are templates, and
+    /// drawing a template paints it in its own black — so the shape is drawn
+    /// first and then filled through it (`sourceAtop`), which tints only the
+    /// pixels the glyph actually covers.
+    private static func tinted(_ image: NSImage, _ color: NSColor) -> NSImage {
+        NSImage(size: image.size, flipped: false) { rect in
+            image.draw(in: rect)
+            color.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+    }
+
+    /// The cursor is answered here as well as from `mouseMoved` because
+    /// AppKit re-applies the cursor from the window's cursor rects every time
+    /// they are invalidated, and SwiftUI invalidates them on every update.
+    /// With the default implementation the rotate cursor would flick back to
+    /// the rect's crosshair between moves.
+    override func cursorUpdate(with event: NSEvent) {
+        if host?.tool == .crop {
+            cropCursor(at: local(event)).set()
+        } else {
+            super.cursorUpdate(with: event)
+        }
+    }
+
+    /// ⌥ turns a drag into a draw, so the cursor has to follow the modifier
+    /// on its own. Nothing else tells the view: `mouseMoved` is not sent for
+    /// a bare modifier press, and AppKit's cursor rects only re-arm on
+    /// movement too — so without this, holding ⌥ over the frame leaves the
+    /// rotate cursor up until the mouse happens to twitch.
+    override func flagsChanged(with event: NSEvent) {
+        if host?.tool == .crop {
+            // The last known pointer position: a flags change carries one,
+            // but it is the position at the *previous* event when the mouse
+            // itself has not moved, and the window's own is the live one.
+            let p = convert(window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
+            cropCursor(at: p).set()
+        } else {
+            super.flagsChanged(with: event)
+        }
+    }
 
     override func rightMouseDown(with e: NSEvent) {
         if let menu = host?.contextMenu() { NSMenu.popUpContextMenu(menu, with: e, for: self) }
@@ -332,7 +539,12 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
     override func resetCursorRects() {
         switch host?.tool {
         case .hand: addCursorRect(bounds, cursor: .openHand)
-        case .crop: addCursorRect(bounds, cursor: .crosshair)   // grips get their own in CropOverlay
+        // The crosshair stays as the *fallback* the rect machinery restores —
+        // but it is not the answer: the crop tool's cursor depends on where
+        // the pointer is, so `cursorUpdate(with:)` overrides this rect with
+        // `cropCursor(at:)` on every pass. (Grips get their own look from
+        // `CropOverlay`, which draws them.)
+        case .crop: addCursorRect(bounds, cursor: .crosshair)
         default: addCursorRect(bounds, cursor: host?.pickerActive == true ? .crosshair : .arrow)
         }
     }

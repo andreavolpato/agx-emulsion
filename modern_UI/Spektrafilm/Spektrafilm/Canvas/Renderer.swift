@@ -32,6 +32,11 @@ struct CanvasUniforms {
     var compare: UInt32 = 0
     /// Where the split sits, 0…1 across the output.
     var compareSplit: Float = 0.5
+    /// The crop tool's pivot, normalised to the source. Edit space rotates
+    /// about it — `Geometry.sourcePoint(forEdit:pivot:imageSize:)` — and it
+    /// is what keeps the frame still: while it is the crop's centre the
+    /// photo turns under a level frame. Only read while `editingCrop != 0`.
+    var pivot = SIMD2<Float>(0.5, 0.5)
 }
 
 /// The before/after comparison, as the canvas understands it.
@@ -144,6 +149,12 @@ final class Renderer: NSObject {
     var geometry = Geometry.default {
         didSet {
             guard oldValue != geometry else { return }
+            // The re-pivot rule lives at this assignment because it is the
+            // one write every angle change goes through: the panel's slider
+            // and menu hand `session.geometry` a new value, the canvas
+            // gestures do the same, and an undo writes this property
+            // directly — a hook on any one of those would miss the others.
+            if editingCrop, geometry.angle != oldValue.angle { repivotToCropCentre(from: oldValue) }
             layer2Dirty = true
             // While the crop tool is up the view stays on the whole frame, so
             // a drag does not make the picture jump under the handles. The
@@ -158,10 +169,44 @@ final class Renderer: NSObject {
     var editingCrop = false {
         didSet {
             guard oldValue != editingCrop else { return }
+            // Entering the tool pivots on the crop's own centre, so the
+            // photo turns about the middle of the frame the user is looking
+            // at. Leaving re-enters the tool's contract from scratch anyway.
+            if editingCrop { cropPivot = geometry.centre }
             layer2Dirty = true
             refreshLogicalSize()
             needsDraw?()
         }
+    }
+    /// The crop tool's pivot, source-normalised (see `CanvasUniforms.pivot`).
+    /// The canvas converts its drags through the same point, so a gesture and
+    /// the picture it is dragging cannot disagree about where the centre is.
+    var cropPivot = CGPoint(x: 0.5, y: 0.5) {
+        didSet { if oldValue != cropPivot { needsDraw?() } }
+    }
+
+    /// Point the edit transform at the crop's centre again.
+    ///
+    /// The photo is drawn about the pivot, so an angle change with the pivot
+    /// somewhere the user has since moved the crop away from would swing the
+    /// whole picture around on screen. Moving the pivot back to the crop's
+    /// centre first means the rotation happens where the user is looking —
+    /// and every edit point shifts by the same `Geometry.pivotShift`, which
+    /// the viewport is nudged by so nothing on screen jumps at all.
+    ///
+    /// The rule lives in `Geometry.repivot` so that a test can drive this
+    /// exact step rather than a paraphrase of it. `old` is the generation
+    /// being replaced, and its angle — not the new one — is what the shift is
+    /// computed at; see the note there.
+    private func repivotToCropCentre(from old: Geometry) {
+        guard let sourceSize,
+              let r = Geometry.repivot(from: old, to: geometry, pivot: cropPivot,
+                                       in: sourceSize, scale: viewport.scale)
+        else { return }
+        cropPivot = r.pivot
+        viewport.offset.x += r.offset.width
+        viewport.offset.y += r.offset.height
+        onViewportChanged?()
     }
     /// The live tier's pixel size — what the geometry is normalised against,
     /// and what `logicalSize(forSource:)` turns into the viewport's units.
@@ -427,6 +472,7 @@ final class Renderer: NSObject {
         u.editingCrop = editingCrop ? 1 : 0
         u.compare = compareMode.rawValue
         u.compareSplit = comparePosition
+        u.pivot = SIMD2(Float(cropPivot.x), Float(cropPivot.y))
         return u
     }
 

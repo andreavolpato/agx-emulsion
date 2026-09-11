@@ -30,9 +30,11 @@
 //  **fits** — `fitted(in:)` shrinks about the centre until all four corners
 //  are inside the frame. That is the fallback, and it is why `straighten` and
 //  `move` cannot produce a crop with a transparent corner in it no matter how
-//  hard the user drags. The shrink is a bisection rather than a closed form:
-//  the closed form has four cases and a degenerate one near the corners, and
-//  this is called at most once per drag event.
+//  hard the user drags. The shrink itself is a bisection, because it only
+//  ever has to be right about "does this fit" and it is called at most once
+//  per drag event; where the *largest* fitting size is the question rather
+//  than a fallback — a straighten, which must also be able to grow — the
+//  bound is closed-form instead (`maxScale`).
 //
 //  ## Order of operations, fixed
 //
@@ -103,6 +105,19 @@ struct Geometry: Codable, Equatable, Sendable {
     var flipH = false
     var flipV = false
     var aspect: CropAspect = .free
+    /// The crop's size the user last set by hand, normalised like
+    /// `crop.width/height`, or nil for "as large as fits".
+    ///
+    /// This is the memory that makes a sized crop survive a straighten: the
+    /// size is what the user chose, so an angle change may shrink it but
+    /// never grows it back past this. A crop nobody has sized — the default
+    /// full frame, a reset — has no memory and is instead always the largest
+    /// rectangle of its shape that fits (see `straightened(to:in:)`).
+    ///
+    /// Optional on purpose: `Geometry` decodes through synthesised Codable,
+    /// and only an optional decodes from an absent key, so every schema-3
+    /// sidecar written before this field existed still opens.
+    var intendedSize: CGSize? = nil
 
     static let `default` = Geometry()
     static let maxAngle: Double = 45
@@ -170,6 +185,33 @@ struct Geometry: Codable, Equatable, Sendable {
         return g
     }
 
+    /// The largest scale of a rectangle about a **fixed centre** that still
+    /// lies inside a `imageSize` frame once rotated by `angle`. Everything
+    /// is in pixels.
+    ///
+    /// An oriented rectangle lies inside an axis-aligned frame *iff* its
+    /// axis-aligned bounding box does — the frame is a box, so the extremes
+    /// of the rectangle are what matter — and that makes the bound
+    /// closed-form: half-extents (a, b) project to `a·|cos| + b·|sin|`
+    /// across and `a·|sin| + b·|cos|` down, so the scale that puts each of
+    /// those exactly on the nearer edge is a division, and the answer is the
+    /// smaller of the two.
+    ///
+    /// `fitted(in:)` bisects to the same number, so this is not a different
+    /// model; it is the direct one, and unlike a shrink it can also *grow* a
+    /// crop back when the angle returns toward 0°.
+    static func maxScale(halfExtents: CGSize, centre: CGPoint, angle: Double,
+                         in imageSize: CGSize) -> Double {
+        let a = halfExtents.width, b = halfExtents.height
+        guard a > 0, b > 0 else { return 0 }
+        let radians = angle * .pi / 180
+        let ca = abs(cos(radians)), sa = abs(sin(radians))
+        let roomX = min(centre.x, imageSize.width - centre.x)
+        let roomY = min(centre.y, imageSize.height - centre.y)
+        guard roomX > 0, roomY > 0 else { return 0 }
+        return min(roomX / (a * ca + b * sa), roomY / (a * sa + b * ca))
+    }
+
     // MARK: moving between the source's frame and the crop's own
 
     /// A source-normalised point, expressed in the crop's **unrotated** frame
@@ -188,13 +230,97 @@ struct Geometry: Codable, Equatable, Sendable {
     }
 
     private func transform(_ p: CGPoint, in imageSize: CGSize, by degrees: Double) -> CGPoint {
+        rotate(p, about: centre, by: degrees, in: imageSize)
+    }
+
+    /// Rotate a normalised point about a normalised pivot, rigidly in
+    /// **pixels** — the same convention as `transform`, which is this about
+    /// the crop's own centre.
+    private func rotate(_ p: CGPoint, about pivot: CGPoint, by degrees: Double,
+                        in imageSize: CGSize) -> CGPoint {
         let w = max(imageSize.width, 1), h = max(imageSize.height, 1)
-        let c = centre
-        let dx = (p.x - c.x) * w, dy = (p.y - c.y) * h
+        let dx = (p.x - pivot.x) * w, dy = (p.y - pivot.y) * h
         let a = degrees * .pi / 180
         let ca = cos(a), sa = sin(a)
-        return CGPoint(x: c.x + (dx * ca - dy * sa) / w,
-                       y: c.y + (dx * sa + dy * ca) / h)
+        return CGPoint(x: pivot.x + (dx * ca - dy * sa) / w,
+                       y: pivot.y + (dx * sa + dy * ca) / h)
+    }
+
+    // MARK: the crop tool's edit space
+    //
+    // While the crop is being edited the **frame** stays level on screen and
+    // the photograph turns under it (Capture One's tool, and the only one
+    // that lets you judge a straighten against a level frame). That screen is
+    // edit space, related to the source by a rotation about a pivot `P`:
+    //
+    //      edit → source:   S(e) = P + R(+θ)(e − P)
+    //      source → edit:   E(s) = P + R(−θ)(s − P)
+    //
+    // with the crop, oriented at θ in the source, appearing in edit space as
+    // an axis-aligned rectangle centred on E(C). The pivot is what makes the
+    // view stable: while it is the crop's centre the photo turns about the
+    // frame's centre, and when it is not (the crop has been moved since) the
+    // frame moves over a still picture. Both are rigid in pixels, like every
+    // other rotation here.
+    //
+    // The inverse pair for `sourcePoint(forOutput:)` / `outputPoint(forSource:)`
+    // is a different mapping — that one is crop → output — and this is not a
+    // replacement for it. Output, and therefore the exported file, does not
+    // change when the crop tool does.
+
+    /// Edit space → source, the mapping the canvas samples the photograph
+    /// through while the crop tool is up (S above).
+    func sourcePoint(forEdit e: CGPoint, pivot: CGPoint, imageSize: CGSize) -> CGPoint {
+        rotate(e, about: pivot, by: angle, in: imageSize)
+    }
+
+    /// Source → edit space (E above): where a source point is drawn while the
+    /// crop tool is up, and therefore where every overlay handle goes.
+    func editPoint(forSource s: CGPoint, pivot: CGPoint, imageSize: CGSize) -> CGPoint {
+        rotate(s, about: pivot, by: -angle, in: imageSize)
+    }
+
+    /// How far every point of edit space moves, **in pixels**, when the pivot
+    /// moves from `p1` to `p2` at this angle: `(I − R(−θ))·(p₂ − p₁)`.
+    ///
+    /// The same for every point — a translation — which is what lets one
+    /// nudge of the viewport cancel it exactly when a re-pivot happens under
+    /// a rotation. `Geometry.repivot` is its only caller, and `GeometryTests`
+    /// pins the cancellation it is used for.
+    static func pivotShift(from p1: CGPoint, to p2: CGPoint, angle: Double,
+                           in imageSize: CGSize) -> CGSize {
+        let w = max(imageSize.width, 1), h = max(imageSize.height, 1)
+        let dx = (p2.x - p1.x) * w, dy = (p2.y - p1.y) * h
+        let a = -angle * .pi / 180
+        let ca = cos(a), sa = sin(a)
+        let rx = dx * ca - dy * sa, ry = dx * sa + dy * ca
+        return CGSize(width: dx - rx, height: dy - ry)
+    }
+
+    /// The re-pivot rule, as one pure step: what `Renderer` does at the
+    /// assignment every angle change goes through. `nil` means "nothing to
+    /// do" — the angle did not change, or the pivot is already the crop's
+    /// centre (which is the ordinary case: the pivot only lags behind after
+    /// the crop has been dragged somewhere else).
+    ///
+    /// **The angle that matters is the one *before* the write, not after.**
+    /// What has to stay still is where the frame's centre was drawn before
+    /// it, and that is `E_old(C) = P₁ + R(−θ_old)(C − P₁)`; the new one is
+    /// just `C`, because the pivot has become the crop's centre. So the
+    /// compensation is `(I − R(−θ_old))·(C − P₁)` — `old.angle`. Passing
+    /// `new.angle` instead leaves `(R(−θ_new) − R(−θ_old))·(C − P₁)`: nothing
+    /// at all for one step of a drag, where the two angles are a degree
+    /// apart, but a jump of tens of pixels for a 20°→0° write with the crop
+    /// moved off-centre — which is what typing a slider value, the Crop
+    /// menu's straighten, a ⌘-line and an undo all are.
+    static func repivot(from old: Geometry, to new: Geometry, pivot: CGPoint,
+                        in imageSize: CGSize, scale: CGFloat)
+        -> (pivot: CGPoint, offset: CGSize)? {
+        guard new.angle != old.angle else { return nil }
+        let target = new.centre
+        guard pivot != target else { return nil }
+        let shift = pivotShift(from: pivot, to: target, angle: old.angle, in: imageSize)
+        return (target, CGSize(width: -shift.width * scale, height: -shift.height * scale))
     }
 
     /// Which grip a source-normalised point is on, or `.body` for inside the
@@ -238,15 +364,63 @@ struct Geometry: Codable, Equatable, Sendable {
 
     // MARK: mutations, each of which returns something that fits
 
-    /// Set the straighten angle and pull the crop back inside the frame.
-    /// This is the operation that makes the fallback visible: rotating a
-    /// full-frame crop by 5° shrinks it to about 91 % of the frame, which is
-    /// the same thing every other raw editor does and the reason a straighten
-    /// costs resolution.
+    /// Set the straighten angle: keep the centre, keep the shape, take the
+    /// **largest size that fits at this angle** — capped at `intendedSize`
+    /// when the user has set one.
+    ///
+    /// Rotating a full-frame crop by 5° still shrinks it to about 91 % of the
+    /// frame, which is the same thing every other raw editor does and the
+    /// reason a straighten costs resolution. What changed is that the result
+    /// is now a function of (centre, shape, intendedSize, angle) and nothing
+    /// else. The old version fitted *whatever the crop had become*, so each
+    /// angle change compounded the last one's shrink and 0° → 12° → 0° left
+    /// a crop smaller than the frame. Now the angle is not destructive:
+    /// 0° → 12° → 0° restores the frame, and a crop the user resized comes
+    /// back to exactly the size they set.
+    ///
+    /// This is the one angle entry point — the slider, the ⌘-line straighten,
+    /// the rotate drag and "Straighten to 0°" all come through here — which
+    /// is what lets the frame stay level in the crop tool: the centre does
+    /// not wander as the angle changes.
     func straightened(to degrees: Double, in imageSize: CGSize) -> Geometry {
         var g = self
         g.angle = degrees.clamped(to: -Geometry.maxAngle...Geometry.maxAngle)
-        return g.fitted(in: imageSize)
+        let w = max(imageSize.width, 1), h = max(imageSize.height, 1)
+        // The centre survives the angle change, clamped into the frame the
+        // way `fitted` clamps it.
+        let c = CGPoint(x: g.centre.x.clamped(to: 0...1), y: g.centre.y.clamped(to: 0...1))
+        // The size to scale: the user's if they set one, otherwise the
+        // crop's own shape — for a default crop, the source's. Scaling both
+        // normalised sides by one factor keeps the pixel aspect.
+        let base = intendedSize ?? CGSize(width: crop.width, height: crop.height)
+        guard base.width > 0, base.height > 0 else { return g.fitted(in: imageSize) }
+        // What "no size set" means, and the one place an old sidecar is
+        // adopted. `nil` is the state of a crop that is maximal about its own
+        // centre at its own angle — `.default`, "whole frame", or the result
+        // of this function — so a `nil` crop that could still *grow* is one
+        // the user sized before this field existed, and it keeps its size.
+        // Nothing is written back: the test is the same on every call.
+        let cap: Double
+        if intendedSize != nil {
+            cap = 1
+        } else if Geometry.maxScale(halfExtents: CGSize(width: crop.width * w / 2,
+                                                        height: crop.height * h / 2),
+                                    centre: CGPoint(x: c.x * w, y: c.y * h),
+                                    angle: angle, in: imageSize) > 1 + 1e-4 {
+            // `self.angle`, not `g.angle`: whether this crop was maximal is a
+            // fact about the state being left, not the one being entered.
+            cap = 1
+        } else {
+            cap = .infinity   // no memory means no cap: as large as fits
+        }
+        let scale = min(Geometry.maxScale(halfExtents: CGSize(width: base.width * w / 2,
+                                                              height: base.height * h / 2),
+                                          centre: CGPoint(x: c.x * w, y: c.y * h),
+                                          angle: g.angle, in: imageSize),
+                        cap)
+        g.crop = CropRect(x: c.x - base.width * scale / 2, y: c.y - base.height * scale / 2,
+                          width: base.width * scale, height: base.height * scale)
+        return g
     }
 
     /// Move the crop by a normalised delta, keeping it inside the frame.
@@ -291,7 +465,39 @@ struct Geometry: Codable, Equatable, Sendable {
         let y1 = g.crop.y + g.crop.height * anchor.y
         g.crop = CropRect(x: x1 - (nw / w) * anchor.x, y: y1 - (nh / h) * anchor.y,
                           width: nw / w, height: nh / h)
-        return g.fitted(in: imageSize)
+        // The user just chose this shape and this is the size it came out:
+        // remember it, or a later straighten would treat the result as "no
+        // preference" and grow it to the maximal fit.
+        let out = g.fitted(in: imageSize)
+        return out.rememberingSize()
+    }
+
+    /// A brand-new rectangle drawn by the user, in source normalised units
+    /// and level in the crop's own frame — so `angle` is untouched, which is
+    /// what lets the canvas draw it level on screen while the photograph is
+    /// turned. `anchor` is the corner the drag started at (see `constrained`,
+    /// which grows the shape from it when an aspect is locked).
+    ///
+    /// Drawing a rectangle is the user saying how big the crop is, the same
+    /// statement dragging a handle makes, so the result is remembered even
+    /// when the aspect is free — `constrained` alone does not, because as an
+    /// *aspect* entry point its `.free` case is a no-op that must not freeze
+    /// a size nobody chose.
+    func redrawn(as crop: CropRect, in imageSize: CGSize,
+                 anchor: CGPoint = CGPoint(x: 0.5, y: 0.5)) -> Geometry {
+        var g = self
+        g.crop = crop
+        return g.constrained(in: imageSize, anchor: anchor).rememberingSize()
+    }
+
+    /// `self` with `intendedSize` set to the crop it actually has. Every
+    /// operation that *sizes* a crop ends this way; `moved`, `turned` and
+    /// `straightened` deliberately do not, so an angle change cannot make a
+    /// size decision on the user's behalf.
+    private func rememberingSize() -> Geometry {
+        var g = self
+        g.intendedSize = CGSize(width: crop.width, height: crop.height)
+        return g
     }
 
     /// Resize by moving one handle, honouring the aspect lock. `handle` says
@@ -326,7 +532,9 @@ struct Geometry: Codable, Equatable, Sendable {
             g.crop = CropRect(x: ax - (nw / w) * anchor.x, y: ay - (nh / h) * anchor.y,
                               width: nw / w, height: nh / h)
         }
-        return g.fitted(in: imageSize)
+        // Dragging a handle is the user saying how big the crop should be;
+        // whatever came out is the new remembered size.
+        return g.fitted(in: imageSize).rememberingSize()
     }
 
     /// Coarse rotation. The crop rides along: turning the frame right must

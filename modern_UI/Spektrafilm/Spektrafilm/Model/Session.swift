@@ -246,6 +246,10 @@ final class Session: CanvasHost {
             // Entering the crop tool shows the whole frame; leaving it fits
             // the crop. The renderer does both from this one flag.
             renderer.editingCrop = tool == .crop
+            // Entering the tool pivots on the crop's centre without moving
+            // anything, so no viewport change announces it — take the mirror
+            // straight from the renderer.
+            cropPivot = renderer.cropPivot
             // What Esc goes back to. Taken on the way *in*, so a crop the user
             // spent a minute on is not lost by leaving the tool with the
             // mouse and coming back — only Esc discards, and only back to
@@ -279,6 +283,13 @@ final class Session: CanvasHost {
     /// draw handles in view coordinates. The renderer is not `@Observable`
     /// and should not become so — it is touched per draw.
     private(set) var viewportSnapshot = ViewportState()
+    /// The crop tool's pivot, mirrored from the renderer for the same reason
+    /// and the same audience: the overlay draws in edit space, which is a
+    /// rotation about this point. The renderer owns it — it feeds the uniform
+    /// and carries the re-pivot rule — and every change it makes to it is
+    /// accompanied by a viewport change, so this stays current through
+    /// `viewportChanged` (plus the tool's own entry, which moves nothing).
+    private(set) var cropPivot = CGPoint(x: 0.5, y: 0.5)
     /// The ⌘-drag straighten line, while one is being drawn.
     private(set) var straightenPreview: StraightenLine?
     /// Which executor the service is rendering with, once `open` has said.
@@ -1175,6 +1186,10 @@ final class Session: CanvasHost {
 
     func viewportChanged() {
         viewportSnapshot = renderer.viewport
+        // Every re-pivot compensates the viewport, so this funnel is where
+        // the mirror catches up: the two cannot disagree while both are read
+        // from the renderer at the same moment.
+        cropPivot = renderer.cropPivot
         guard renderer.base != nil else { zoomPercent = 0; isFit = true; return }
         zoomPercent = renderer.viewport.zoomPercent
         isFit = renderer.viewport.isFit

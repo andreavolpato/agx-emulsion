@@ -101,6 +101,10 @@ struct CropSection: View {
                 var n = g
                 n.crop = .full
                 n.angle = 0
+                // The whole frame is not a size anyone chose — it is the
+                // absence of one, so the next straighten treats it as
+                // maximal-fit again instead of pinning it to 1×1.
+                n.intendedSize = nil
                 session.geometry = n
             }
         }

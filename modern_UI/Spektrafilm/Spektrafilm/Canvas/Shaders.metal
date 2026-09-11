@@ -47,6 +47,7 @@ struct CanvasUniforms {           // must match Renderer.swift
     uint checker;                 // draw a soft focus frame (unused)
     uint compare;                 // 0 off, 1 split, 2 before-only
     float compareSplit;           // split position, 0…1 across the *output*
+    float2 pivot;                 // crop tool's edit-space pivot, source-normalised
 };
 
 //  Output uv → source uv. A transliteration of
@@ -72,6 +73,20 @@ static inline float2 geometryMap(float2 uv, constant GeometryUniform &g) {
     float rx = px * g.cosSin.x - py * g.cosSin.y;
     float ry = px * g.cosSin.y + py * g.cosSin.x;
     return float2(g.centre.x + rx, g.centre.y + ry * g.pixelRatio.x);
+}
+
+//  Edit space → source, while the crop tool is up: the frame stays level on
+//  screen and the photograph turns under it, which is a rotation about the
+//  pivot. A transliteration of `Geometry.sourcePoint(forEdit:pivot:imageSize:)`
+//  and rigid in pixels the same way `geometryMap` is. It is NOT a second
+//  `geometryMap` — that one is crop → output and the exported file goes
+//  through it unchanged; this one is the editing view only.
+static inline float2 editToSource(float2 e, constant CanvasUniforms &u) {
+    float dx = e.x - u.pivot.x;
+    float dy = (e.y - u.pivot.y) * u.geometry.pixelRatio.y;   // width-fractions
+    float rx = dx * u.geometry.cosSin.x - dy * u.geometry.cosSin.y;
+    float ry = dx * u.geometry.cosSin.y + dy * u.geometry.cosSin.x;
+    return float2(u.pivot.x + rx, u.pivot.y + ry * u.geometry.pixelRatio.x);
 }
 
 /// Whether a *source* uv is inside the oriented crop. The inverse rotation of
@@ -372,15 +387,27 @@ fragment float4 canvasFragment(QuadOut in [[stage_in]],
     float2 ip = (px - u.offset) / u.scale;                 // output logical pixel
     float2 ouv = ip / u.imageSize;                         // 0…1 across the output
     float3 ground = float3(u.surroundGray);
-    if (ouv.x < 0.0 || ouv.y < 0.0 || ouv.x > 1.0 || ouv.y > 1.0) {
-        return float4(ground, 1);
-    }
     // While the crop is being edited the canvas shows the whole frame, the
     // way Capture One's crop tool does: you cannot judge a crop against
-    // pixels you cannot see.
-    float2 suv = (u.editingCrop != 0) ? ouv : geometryMap(ouv, u.geometry);
-    if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
-        return float4(ground, 1);
+    // pixels you cannot see. There the sample goes through the edit-space
+    // rotation instead of `geometryMap`, and the ground test is on the
+    // **source** uv: in edit space the photograph is a rotated rectangle
+    // whose corners stick out of the W×H box, and clipping to that box would
+    // cut them off. Output mode is the branch below, unchanged.
+    float2 suv;
+    if (u.editingCrop != 0) {
+        suv = editToSource(ouv, u);
+        if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
+            return float4(ground, 1);
+        }
+    } else {
+        if (ouv.x < 0.0 || ouv.y < 0.0 || ouv.x > 1.0 || ouv.y > 1.0) {
+            return float4(ground, 1);
+        }
+        suv = geometryMap(ouv, u.geometry);
+        if (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) {
+            return float4(ground, 1);
+        }
     }
     //  Before/after. The split is measured across the **output** — the
     //  picture — not across the viewport, so the line stays on the same part
