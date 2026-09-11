@@ -278,6 +278,13 @@ engine/build/
 # self-contained. Re-bake only when a profile, LUT or colour constant changes,
 # from a checkout that has the Python reference tree — then commit the result.
 # See README "Rebaking the engine resources".
+#
+# `engine/resources/spektrafilm.metallib` is the one file in there that stays
+# ignored: `*.metallib` above catches it, and that is the right answer. It is
+# compiled from `engine/src/shaders/*.metal` by `engine/build.sh` on every
+# build, with the two math flags (RFC-014 §5.1 trap 1) kept next to the reason
+# for them. Committing it would add a way for the kernels to go stale against
+# their own source.
 
 # The engine resources `engine/build.sh bundle` rsyncs into the app bundle.
 # Generated from `engine/resources/`, and checked by the app's pre-build phase.

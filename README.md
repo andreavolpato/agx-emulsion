@@ -84,7 +84,8 @@ needs it — `OpenPathTests` and `DecodeSeparationTests` skip rather than fail.
 | `modern_UI/Spektrafilm/` | the app: Swift sources, tests, `Tools/`, the Xcode project |
 | `modern_UI/design/`, `reference_layout/`, `film_covers/` | the drawing the UI was measured against, and the stock cover art |
 | `engine/` | the C++ engine, its MSL kernels, its C ABI, its parity harnesses |
-| `engine/resources/` | **tracked** — the baked constants, 28 profiles, print-LUT index, metallib |
+| `engine/resources/spektrafilm.metallib` | **not tracked, on purpose** — `engine/build.sh` recompiles it from `engine/src/shaders/*.metal` on every build, so it can never go stale against the shaders |
+| `engine/resources/` | **tracked** — the baked constants, 28 profiles, the print-LUT index |
 | `engine/third_party/metal-cpp/` | vendored Apple metal-cpp (Apache-2.0) |
 | `rfc/`, `HANDOFF-*.md`, `ARCHITECTURE.md`, `AGENTS.md` | the design record and the traps |
 
