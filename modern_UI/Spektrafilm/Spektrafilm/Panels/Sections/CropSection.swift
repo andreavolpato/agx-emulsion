@@ -32,11 +32,16 @@ struct CropSection: View {
                                                     next.aspect = a
                                                     session.geometry = next.constrained(in: size)
                                                 }))
+                    // Scrubbed through `scrubStraighten`, not written straight
+                    // to `geometry`: a scrub is a stream of writes and the
+                    // canvas must not rescale under it. The refit happens once,
+                    // on `onCommit` — the release, or the typed value.
                     ScrubSlider(label: "Straighten", sublabel: "degrees",
                                 value: Binding(get: { g.angle },
-                                               set: { session.geometry = g.straightened(to: $0, in: size) }),
+                                               set: { session.scrubStraighten(to: $0) }),
                                 range: -Geometry.maxAngle...Geometry.maxAngle, snap: 1,
-                                format: { String(format: "%+.1f°", $0) })
+                                format: { String(format: "%+.1f°", $0) },
+                                onCommit: { session.straightenScrubEnded() })
                     turnsRow
                     Text(dimensions)
                         .font(Theme.Font.caption).foregroundStyle(Theme.dim)

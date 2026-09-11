@@ -35,6 +35,34 @@ struct ViewportState: Equatable, Sendable {
         centre()
     }
 
+    /// Fit a rect given in **normalised image coordinates**, leaving `margin`
+    /// view points clear on every side. The crop tool's fit.
+    ///
+    /// Not `fit()`: that one is the axis-aligned fit of the whole image and is
+    /// what "Fit" means everywhere else. This fits an arbitrary box — the
+    /// turned photograph's bounding box in edit space — and it deliberately
+    /// does not touch `image`, which stays the whole frame, so every mapping
+    /// between view points, image points and edit space is unchanged. The
+    /// margin is what keeps the crop's grips and the rotate zone around it
+    /// reachable, and it is why the crop tool's fit is slightly tighter than
+    /// the plain one even at 0°.
+    ///
+    /// No clamp: the rect is the photograph, so the fit is by construction
+    /// inside the viewport and centred on it, which is what `clamp()` would
+    /// have to say about it anyway.
+    mutating func fit(toNormalised rect: CGRect, margin: CGFloat = 0) {
+        let w = rect.width * image.width, h = rect.height * image.height
+        guard w > 0, h > 0 else { return }
+        // A canvas narrower than twice the margin would give a negative
+        // scale, which mirrors the picture rather than shrinking it.
+        let avail = CGSize(width: max(viewport.width - 2 * margin, 1),
+                           height: max(viewport.height - 2 * margin, 1))
+        scale = min(avail.width / w, avail.height / h)
+        let c = CGPoint(x: rect.midX * image.width, y: rect.midY * image.height)
+        offset = CGPoint(x: viewport.width / 2 - c.x * scale,
+                         y: viewport.height / 2 - c.y * scale)
+    }
+
     mutating func centre() {
         offset = CGPoint(x: (viewport.width - image.width * scale) / 2,
                          y: (viewport.height - image.height * scale) / 2)

@@ -110,6 +110,17 @@ struct CanvasArea: View {
             CompareOverlay(session: session)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Everything in this stack is positioned in **view coordinates**, and
+        // a view coordinate at high zoom is off the canvas: the crop frame's
+        // corners, its grips and the mask handles all ran past the canvas edge
+        // and were painted over the side panels and the toolbar. SwiftUI does
+        // not clip by default; the canvas is the one place that must.
+        //
+        // Not the Metal view's problem — a `CAMetalLayer` cannot draw outside
+        // itself (which is why a zoomed picture looks *cut off* at the canvas
+        // edge rather than spilling, and why the crop tool's view is fitted to
+        // the picture: `Renderer.fitRotatedPhoto`). This is the overlay half.
+        .clipped()
         .overlay(alignment: .leading) { CollapseTab(edge: .leading, collapsed: $session.leftCollapsed) }
         .overlay(alignment: .trailing) { CollapseTab(edge: .trailing, collapsed: $session.rightCollapsed) }
         .overlay(alignment: .top) { CollapseTab(edge: .top, collapsed: $session.topCollapsed).padding(.top, 4) }

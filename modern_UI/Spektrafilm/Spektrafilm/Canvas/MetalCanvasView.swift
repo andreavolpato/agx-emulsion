@@ -154,6 +154,12 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
         if vp.viewport != bounds.size { vp.resize(viewport: bounds.size) }
         if vp != renderer.viewport {
             renderer.viewport = vp
+            // The crop tool's view is locked to the whole turned photograph,
+            // so a resize there is a **refit** and not `resize`'s
+            // keep-the-centre — which is what the line above just did, and
+            // which is wrong while the tool is up: half the picture would end
+            // up outside the canvas the moment the window changed size.
+            if renderer.editingCrop { renderer.fitRotatedPhoto() }
             host?.viewportChanged()
         }
         scheduleDraw()
@@ -165,6 +171,10 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
 
     override func scrollWheel(with e: NSEvent) {
         guard let renderer else { return }
+        // Locked in the crop tool: the view is fitted to the whole photograph
+        // and the user cannot move it (see `Renderer.fitRotatedPhoto`). The
+        // wheel does nothing at all there rather than fighting the lock.
+        guard host?.tool != .crop else { return }
         let p = local(e)
         if e.modifierFlags.contains(.command) || e.modifierFlags.contains(.option) {
             let dy = e.hasPreciseScrollingDeltas ? e.scrollingDeltaY : e.scrollingDeltaY * 4
@@ -181,6 +191,7 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
 
     override func magnify(with e: NSEvent) {
         guard let renderer else { return }
+        guard host?.tool != .crop else { return }   // locked, as above
         renderer.viewport.zoom(by: 1 + e.magnification, about: local(e))
         host?.viewportChanged()
         scheduleDraw()
@@ -193,6 +204,9 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
         guard let renderer, let host else { return }
         let p = local(e)
         if e.clickCount == 2 {
+            // Locked in the crop tool: the view is fitted to the whole
+            // photograph and the user cannot move it.
+            guard host.tool != .crop else { return }
             renderer.viewport.toggleHundred(about: p)
             host.viewportChanged()
             scheduleDraw()
@@ -245,6 +259,10 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
                                    grabOffset: CGSize(width: n.x - c.x, height: n.y - c.y))
             } else {
                 let centre = viewPoint(ofSource: g.centre, g, host, v)
+                // A rotation in flight: the view holds still until this one
+                // ends (mouse-up), so the picture never rescales under the
+                // hand that is turning it.
+                renderer.beginRotation()
                 cropDrag = .rotate(origin: g, centre: centre,
                                    from: CanvasNSView.bearing(from: centre, to: p))
             }
@@ -422,6 +440,11 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
             }
         }
         cropDrag = nil
+        // The end of a rotation is where the view refits — once, at the angle
+        // the gesture ended on. Every other drag leaves it alone: the crop can
+        // not leave the photograph and the photograph is fitted, so nothing a
+        // move or a resize does can put the frame off screen.
+        if host?.renderer.rotationHeld == true { host?.renderer.endRotation() }
         host?.straightenPreview(nil)
         scheduleDraw()
     }
@@ -557,7 +580,7 @@ final class CanvasNSView: MTKView, MTKViewDelegate {
         case 49: host.toggledOriginal(true)                              // space
         case 123: host.stepFrame(-1)                                     // ←
         case 124: host.stepFrame(1)                                      // →
-        case 6 where !e.modifierFlags.contains(.command):                // z
+        case 6 where !e.modifierFlags.contains(.command) && host.tool != .crop:  // z
             renderer.viewport.toggleHundred(about: CGPoint(x: bounds.midX, y: bounds.midY))
             host.viewportChanged(); scheduleDraw()
         // Return commits the crop, Esc abandons it — every crop tool in every

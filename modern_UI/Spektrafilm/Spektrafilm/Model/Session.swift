@@ -261,6 +261,13 @@ final class Session: CanvasHost {
     /// The crop as it was when the crop tool was entered. See `cancelCrop`.
     private var cropEntryGeometry: Geometry?
 
+    /// Zoom and pan are the crop tool's business while it is up: the view
+    /// there is fitted to the whole (turned) photograph and the user cannot
+    /// move it — see `Renderer.fitRotatedPhoto`. Every control that would
+    /// move it is disabled and greyed rather than left to no-op, so the
+    /// toolbar says why nothing happens.
+    var zoomLocked: Bool { tool == .crop }
+
     /// Return: keep what is on screen and leave the tool.
     func commitCrop() {
         guard tool == .crop else { return }
@@ -1192,7 +1199,10 @@ final class Session: CanvasHost {
         cropPivot = renderer.cropPivot
         guard renderer.base != nil else { zoomPercent = 0; isFit = true; return }
         zoomPercent = renderer.viewport.zoomPercent
-        isFit = renderer.viewport.isFit
+        // While the crop tool is up the view is fitted to the whole
+        // photograph rather than to the frame, so its scale is no longer
+        // `fitScale` — but it is fitted, and the pill should say so.
+        isFit = renderer.viewport.isFit || renderer.editingCrop
         updateDetailTier()
     }
     func picked(normalised n: CGPoint) {
@@ -1293,8 +1303,10 @@ final class Session: CanvasHost {
     }
     func contextMenu() -> NSMenu? {
         let m = NSMenu()
-        m.addItem(withTitle: "Zoom to Fit", action: #selector(zoomFit), keyEquivalent: "").target = self
-        m.addItem(withTitle: "Zoom to 100 %", action: #selector(zoomHundred), keyEquivalent: "").target = self
+        let fit = m.addItem(withTitle: "Zoom to Fit", action: #selector(zoomFit), keyEquivalent: "")
+        fit.target = self; fit.isEnabled = !zoomLocked
+        let hundred = m.addItem(withTitle: "Zoom to 100 %", action: #selector(zoomHundred), keyEquivalent: "")
+        hundred.target = self; hundred.isEnabled = !zoomLocked
         m.addItem(.separator())
         let copy = m.addItem(withTitle: "Copy Settings", action: #selector(copyMenu), keyEquivalent: "")
         copy.target = self; copy.isEnabled = selection != nil
@@ -1321,17 +1333,37 @@ final class Session: CanvasHost {
         return String(format: "auto %+.1f EV", ev)
     }
 
-    func zoomToFit() { renderer.viewport.fit(); viewportChanged(); renderer.needsDraw?() }
+    func zoomToFit() {
+        guard !zoomLocked else { return }
+        renderer.viewport.fit(); viewportChanged(); renderer.needsDraw?()
+    }
     func zoomTo(fraction: CGFloat) {
+        guard !zoomLocked else { return }
         let v = renderer.viewport
         renderer.viewport.setScale(fraction * v.hundredScale, about: CGPoint(x: v.viewport.width / 2, y: v.viewport.height / 2))
         viewportChanged(); renderer.needsDraw?()
     }
     func zoomStep(_ dir: Int) {
+        guard !zoomLocked else { return }
         let v = renderer.viewport
         renderer.viewport.stepZoom(dir, about: CGPoint(x: v.viewport.width / 2, y: v.viewport.height / 2))
         viewportChanged(); renderer.needsDraw?()
     }
+
+    /// The Straighten slider's write. A scrub is a stream of writes and the
+    /// view must not rescale under it, so this holds the refit until the
+    /// end of the gesture — `ScrubSlider.onCommit`, which fires on release
+    /// and on a typed value — instead of letting every degree refit the
+    /// canvas. Every other angle entry point writes `geometry` directly and
+    /// refits at once: the menu, "Straighten to 0°", an undo and the canvas
+    /// gestures are all single writes.
+    func scrubStraighten(to degrees: Double) {
+        renderer.beginRotation()
+        geometry = geometry.straightened(to: degrees, in: sourceImageSize)
+    }
+
+    /// The end of a Straighten scrub: refit the crop tool's view, once.
+    func straightenScrubEnded() { renderer.endRotation() }
 
     private func addCurvePoint(at n: CGPoint) {
         guard let base = renderer.base, let v = Session.sample(base, at: n) else { return }

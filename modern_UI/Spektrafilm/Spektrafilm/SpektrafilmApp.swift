@@ -65,10 +65,14 @@ struct EditorCommands: Commands {
                 .keyboardShortcut("v").disabled(!session.canPasteSettings)
         }
         CommandMenu("View") {
-            Button("Zoom In") { session.zoomStep(1) }.keyboardShortcut("+")
-            Button("Zoom Out") { session.zoomStep(-1) }.keyboardShortcut("-")
-            Button("Zoom to Fit") { session.zoomToFit() }.keyboardShortcut("0")
-            Button("Zoom to 100 %") { session.zoomTo(fraction: 1) }.keyboardShortcut("1")
+            // Greyed out in the crop tool, where the view is fitted to the
+            // whole turned photograph and the user cannot move it
+            // (`Session.zoomLocked`). Disabled rather than silently ignored:
+            // a shortcut that does nothing and says nothing reads as a bug.
+            Button("Zoom In") { session.zoomStep(1) }.keyboardShortcut("+").disabled(session.zoomLocked)
+            Button("Zoom Out") { session.zoomStep(-1) }.keyboardShortcut("-").disabled(session.zoomLocked)
+            Button("Zoom to Fit") { session.zoomToFit() }.keyboardShortcut("0").disabled(session.zoomLocked)
+            Button("Zoom to 100 %") { session.zoomTo(fraction: 1) }.keyboardShortcut("1").disabled(session.zoomLocked)
             Divider()
             Button("Toggle Side Panels") {
                 withAnimation(.easeOut(duration: 0.18)) {

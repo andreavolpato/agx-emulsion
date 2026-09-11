@@ -55,10 +55,12 @@ struct TopBar: View {
             .opacity(session.canCompare ? 1 : 0.4)
             .help("Before / after split — drag the line on the canvas (⌥\\)")
             .padding(.trailing, 6)
-            iconButton("plus.magnifyingglass", "Zoom in (⌘+)") { session.zoomStep(1) }
+            iconButton("plus.magnifyingglass", "Zoom in (⌘+)", disabled: session.zoomLocked) { session.zoomStep(1) }
             zoomPill.padding(.horizontal, 12)
-            iconButton("minus.magnifyingglass", "Zoom out (⌘−)") { session.zoomStep(-1) }
-            iconButton("arrow.down.right.and.arrow.up.left", "Fit (⌘0)") { session.zoomToFit() }.padding(.leading, 18)
+                .disabled(session.zoomLocked)
+                .opacity(session.zoomLocked ? 0.4 : 1)
+            iconButton("minus.magnifyingglass", "Zoom out (⌘−)", disabled: session.zoomLocked) { session.zoomStep(-1) }
+            iconButton("arrow.down.right.and.arrow.up.left", "Fit (⌘0)", disabled: session.zoomLocked) { session.zoomToFit() }.padding(.leading, 18)
             iconButton("arrow.up.left.and.arrow.down.right", "Full screen (⌃⌘F)") { NSApp.keyWindow?.toggleFullScreen(nil) }
                 .padding(.leading, 12)
                 .padding(.trailing, 18)
@@ -87,15 +89,21 @@ struct TopBar: View {
         .help(help)
     }
 
-    private func iconButton(_ name: String, _ help: String, action: @escaping () -> Void) -> some View {
+    /// `disabled` is for the controls the crop tool locks: greyed out, so the
+    /// toolbar says *why* nothing happens, rather than a live-looking button
+    /// that quietly does nothing (`Theme.text` at 0.4 is the same weight the
+    /// before/after button uses when it has nothing to compare).
+    private func iconButton(_ name: String, _ help: String, disabled: Bool = false,
+                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: name)
                 .font(.system(size: Theme.Metric.toolIcon, weight: .regular))
-                .foregroundStyle(Theme.text)
+                .foregroundStyle(disabled ? Theme.text.opacity(0.4) : Theme.text)
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
         .help(help)
     }
 

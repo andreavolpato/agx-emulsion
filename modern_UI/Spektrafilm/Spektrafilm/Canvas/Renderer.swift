@@ -154,7 +154,14 @@ final class Renderer: NSObject {
             // and menu hand `session.geometry` a new value, the canvas
             // gestures do the same, and an undo writes this property
             // directly — a hook on any one of those would miss the others.
-            if editingCrop, geometry.angle != oldValue.angle { repivotToCropCentre(from: oldValue) }
+            if editingCrop, geometry.angle != oldValue.angle {
+                repivotToCropCentre(from: oldValue)
+                // …and then re-lock the view to the whole photograph, but
+                // only once the rotation has ended: while a hand is still
+                // turning it the scale must not change at all
+                // (`beginRotation`/`endRotation`).
+                if !rotationHeld { fitRotatedPhoto() }
+            }
             layer2Dirty = true
             // While the crop tool is up the view stays on the whole frame, so
             // a drag does not make the picture jump under the handles. The
@@ -175,6 +182,11 @@ final class Renderer: NSObject {
             if editingCrop { cropPivot = geometry.centre }
             layer2Dirty = true
             refreshLogicalSize()
+            // …and then **always** lock the view to the whole photograph.
+            // `refreshLogicalSize` only has something to do when the logical
+            // size changes, which is why entering the tool at 400 % with a
+            // full-frame 0° crop used to arrive at 400 %.
+            if editingCrop { fitRotatedPhoto() }
             needsDraw?()
         }
     }
@@ -183,6 +195,65 @@ final class Renderer: NSObject {
     /// the picture it is dragging cannot disagree about where the centre is.
     var cropPivot = CGPoint(x: 0.5, y: 0.5) {
         didSet { if oldValue != cropPivot { needsDraw?() } }
+    }
+
+    /// The margin the crop tool's view keeps clear around the photograph, in
+    /// view points. The crop is always inside the picture, so fitting the
+    /// picture puts the frame on screen — and this is what keeps the grips,
+    /// which sit half outside the frame, and the rotate zone outside it,
+    /// reachable.
+    static let cropLockMargin: CGFloat = 24
+
+    /// Fit the view to the whole photograph, **as it is drawn**: the bounding
+    /// box of its four corners in edit space (`Geometry.editBounds`), plus
+    /// `margin` points clear all round.
+    ///
+    /// This is the crop tool's view. The photograph is turned about the pivot
+    /// on screen, so at any non-zero angle it occupies a box larger than the
+    /// frame — 1/cos θ taller on a 2:3 frame, and more across on a wide one —
+    /// and fitting the frame cuts the picture's own corners off. Fitting the
+    /// photograph fits the crop as well, whatever the angle is, because the
+    /// crop only ever contains pixels of the photograph.
+    ///
+    /// Only `scale` and `offset` change: `viewport.image` stays the whole
+    /// frame, so every mapping between view points, image points and edit
+    /// space — and therefore every gesture — is exactly what it was.
+    /// False when there is nothing to fit (no image, or the tool is not up).
+    ///
+    /// It invalidates the canvas itself. `onViewportChanged` alone is not
+    /// enough and this is the whole bug of the first cut of it: the mirror
+    /// update repaints the pill and the panel because they *read*
+    /// `zoomPercent`, but nothing the canvas view reads changes, so its
+    /// `updateNSView` never runs and the layer keeps presenting the old
+    /// scale. The SwiftUI overlay on top — the frame, the grips, the thirds —
+    /// derives from the same geometry and does update, so the two disagree on
+    /// screen: the frame sits at the new fit around a photograph still drawn
+    /// at the old one, until an unrelated event forces a repaint.
+    @discardableResult
+    func fitRotatedPhoto(margin: CGFloat = Renderer.cropLockMargin) -> Bool {
+        guard editingCrop, let sourceSize else { return false }
+        viewport.fit(toNormalised: geometry.editBounds(pivot: cropPivot, in: sourceSize), margin: margin)
+        onViewportChanged?()
+        needsDraw?()
+        return true
+    }
+
+    /// True from the first event of a rotation until the input that produced
+    /// it has ended — a canvas drag held down, or the Straighten slider
+    /// between its press and its release. The view is **never** refitted while
+    /// it is set: a picture that rescales under a hand still turning it is the
+    /// thing this lock exists to stop. The refit happens once, at the end.
+    private(set) var rotationHeld = false
+
+    /// A rotation gesture has begun. Hold the view still until it ends.
+    func beginRotation() { rotationHeld = true }
+
+    /// The rotation input has ended: refit now, once, at the angle it ended
+    /// on. Outside the crop tool this only clears the flag — the view there
+    /// follows the crop, not the photograph.
+    func endRotation() {
+        rotationHeld = false
+        fitRotatedPhoto()
     }
 
     /// Point the edit transform at the crop's centre again.

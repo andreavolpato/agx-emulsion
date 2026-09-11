@@ -280,6 +280,29 @@ struct Geometry: Codable, Equatable, Sendable {
         rotate(s, about: pivot, by: -angle, in: imageSize)
     }
 
+    /// The box the **whole photograph** occupies in edit space: its four
+    /// corners put through E, normalised to the source's W×H frame — the units
+    /// the canvas measures in while the crop tool is up
+    /// (`Renderer.logicalSize(forSource:)`).
+    ///
+    /// At 0° this is exactly the unit rect and fitting it is the ordinary fit;
+    /// at any other angle it is strictly larger than the frame, because the
+    /// turned photograph's corners stick out past it — 1/cos θ taller on a
+    /// square-ish frame, and more on a wide one. This is what the crop tool's
+    /// view is fitted to: fitting the *crop* would cut the picture's own
+    /// corners off, since the crop is the largest rectangle that fits inside
+    /// the turned photograph and the photograph is therefore always at least
+    /// as big (measured: 8.5° cut 37.6 pt off the top and bottom of the frame
+    /// at fit, 20.4° 72 pt vertically and 12 pt horizontally).
+    func editBounds(pivot: CGPoint, in imageSize: CGSize) -> CGRect {
+        let corners = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)].map {
+            editPoint(forSource: CGPoint(x: $0.0, y: $0.1), pivot: pivot, imageSize: imageSize)
+        }
+        var box = CGRect(origin: corners[0], size: .zero)
+        for c in corners.dropFirst() { box = box.union(CGRect(origin: c, size: .zero)) }
+        return box
+    }
+
     /// How far every point of edit space moves, **in pixels**, when the pivot
     /// moves from `p1` to `p2` at this angle: `(I − R(−θ))·(p₂ − p₁)`.
     ///
