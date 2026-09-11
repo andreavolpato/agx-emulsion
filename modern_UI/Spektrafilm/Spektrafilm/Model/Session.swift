@@ -476,6 +476,22 @@ final class Session: CanvasHost {
 
     /// Whether this frame's develop has been asked for.
     private var wantsDevelop = false
+    /// Whether `decoded` has been superseded by a re-decode that has not
+    /// landed yet.
+    ///
+    /// The reopen window is the one moment `decoded` is a frame the engine
+    /// must not be handed: the white balance has changed, the new decode is
+    /// still in flight, and `decoded` is the *previous* one. A develop asked
+    /// for in that window would open the engine on a frame the user has
+    /// already changed away from — and worse, `load`'s own tail calls
+    /// `ensureDeveloped` and would find that session waiting for it, which is
+    /// how a white-balance change came to do nothing at all (RFC-015 §1.1).
+    ///
+    /// It is a flag rather than `decoded = nil` because the white-balance
+    /// panel reads `decoded` (`setWhiteBalance`, `pickNeutral`): clearing it
+    /// for the length of a re-decode would blank and refill the panel on every
+    /// drag.
+    private var decodeIsStale = false
     /// The develop in flight, if any. Anything that needs the engine to hold
     /// the frame awaits it rather than starting a second one — which is what
     /// Solve pressed while the decode is still landing turns into.
@@ -720,6 +736,7 @@ final class Session: CanvasHost {
         browsing = true
         selection = nil
         decoded = nil
+        decodeIsStale = false
         wantsDevelop = false
         developTask?.cancel(); developTask = nil
         sourceLongEdge = 0
@@ -800,6 +817,7 @@ final class Session: CanvasHost {
         selectedMaskID = sidecar.masks.first?.id
         syncMasks()
         decoded = nil
+        decodeIsStale = false
         exif = EXIFReadout.read(url)
         stockWarning = nil
         // Show the last print of this frame instantly if it is resident.
@@ -858,7 +876,16 @@ final class Session: CanvasHost {
             try? ImageDecoder.decode(url, settings: settings)
         }.value
         clock.lap("decode")
-        guard !Task.isCancelled, selection == url, let d = decodedImage else { return }
+        guard !Task.isCancelled, selection == url, let d = decodedImage else {
+            // A load that *failed* rather than being superseded must not leave
+            // `decodeIsStale` set: every later `ensureDeveloped` would refuse
+            // to develop this frame, and the frame would be undevelopable for
+            // the rest of the session. A superseded load was cancelled by the
+            // reopen that replaced it, and that one set the flag again for its
+            // own decode.
+            if !Task.isCancelled { decodeIsStale = false }
+            return
+        }
         let preview: TextureBox = await Task.detached(priority: .userInitiated) {
             TextureBox(ImageDecoder.makePreviewTexture(d, device: device, maxEdge: liveEdge))
         }.value
@@ -873,6 +900,7 @@ final class Session: CanvasHost {
         }
         guard !Task.isCancelled, selection == url else { return }
         decoded = d
+        decodeIsStale = false
         sourceLongEdge = max(d.pixelSize.width, d.pixelSize.height)
         if sidecar.decode.whiteBalance == .asShot, let t = d.asShotTemperature, let tn = d.asShotTint,
            (sidecar.decode.temperature != t || sidecar.decode.tint != tn) {
@@ -924,7 +952,28 @@ final class Session: CanvasHost {
         // later. It is a no-op once the frame is on the canvas, and `load`'s
         // own tail comes back through here with the decode already in hand, so
         // the two cannot wait on each other.
-        if decoded == nil, let load = loadTask { await load.value }
+        //
+        // A *stale* decode is the other half of that wait. `decoded` is still
+        // the frame the reopen is replacing, so developing now would open the
+        // engine on the old white balance — and `load`'s tail would then come
+        // back through here, find that session waiting, and keep it.
+        //
+        // Waiting once is not enough: a drag on the Kelvin slider supersedes
+        // one load with another, and the load this call first waited on is
+        // then cancelled with the frame still stale. Giving up there is what
+        // made Solve, Export and a slider release do *nothing* while the drag
+        // was settling, so the loop follows to whichever load is newest and
+        // waits for that one instead. It terminates because a load is only
+        // superseded by a newer load — which this then waits on — and every
+        // iteration awaits a task that is already cancelled or will finish.
+        while decoded == nil || decodeIsStale, let load = loadTask {
+            await load.value
+            // Nothing newer to wait for: this was the last load in flight.
+            if loadTask == load { break }
+        }
+        // Still stale after the newest load means it was cancelled or failed
+        // rather than superseding — there is no frame here to develop.
+        if decodeIsStale { return nil }
         if let sid = serviceSessionID { return sid }
         if let task = developTask { return await task.value }
         guard let url = selection, let d = decoded else { return nil }
@@ -1149,6 +1198,48 @@ final class Session: CanvasHost {
             developTask?.cancel(); developTask = nil
             renderer.store.invalidatePrint(for: url)
             previewSoft = true
+            // The engine keeps the frame the *previous* decode made, and it
+            // has no idea a decode happened after it. Without this, `load`'s
+            // tail would find that session already there, decide the frame was
+            // developed, and reprint from the old decode — a white-balance
+            // change that changes nothing the user can see. Dropping the
+            // session is what `select` and `enterBrowse` do on a frame change;
+            // a re-decode is a frame change as far as the engine is concerned
+            // (RFC-015 §1.1).
+            scheduler.invalidate()
+            serviceSessionID = nil
+            // A higher-resolution render is made from the engine's frame too,
+            // so a zoomed-in canvas would otherwise keep the old white balance
+            // in the tile. Both copies have to go: the renderer's is the one
+            // on screen now, and the store's is the one `updateDetailTier`
+            // would find on the next pan.
+            //
+            // The store's copy is the subtle one. The slot is stamped with
+            // `printStamp`, which is the *film* params — a white balance is a
+            // decode setting and does not appear in it, so the resident tile
+            // still matches its own stamp and the cache serves it back as if
+            // it were current, which puts the old colour on screen the first
+            // time the user moves the view.
+            //
+            // The tier is deliberately *not* reset to `.live`. The frame has
+            // not changed size, so the zoom the user is at still wants the
+            // same tier, and `applyRender` asks for it again as soon as the
+            // new print lands (its `detailTier != .live` branch finds the slot
+            // empty and calls `scheduleDetail`). Resetting it here would drop
+            // the escalation instead, and the canvas would sit on the live
+            // tier until the viewport moved.
+            detailPending = false
+            detailTask?.cancel(); detailTask = nil
+            renderer.dropDetail()
+            renderer.store.dropDetail()
+            // `decoded` is still the frame the user has just changed *away*
+            // from, and it stays there until the new decode lands — the panel
+            // reads it (`setWhiteBalance`, `pickNeutral`) and clearing it
+            // would blank and refill the white-balance controls on every drag.
+            // So the develop is told instead: until the new decode is in hand,
+            // a develop would open the engine on the old frame, and `load`'s
+            // tail would then keep that session as if it were the new one.
+            decodeIsStale = true
             loadTask = Task { await load(url) }
         }
     }
@@ -1542,7 +1633,13 @@ final class Session: CanvasHost {
             let outcome = try await client.render(.reprint,
                 RenderRequest(sessionID: sessionID, tier: tier.rawValue))
             let r = outcome.response
-            guard gen == detailGeneration, selection == url,
+            // A render already committed to the engine outlives a cancelled
+            // `detailTask`, and a reopen (a white-balance change) moves neither
+            // the generation nor the selection. What it does move is the
+            // session: a tile made from any session but the one on screen is
+            // a different decode, and storing it under a stamp that still
+            // matches would serve the old colour on the next pan.
+            guard gen == detailGeneration, selection == url, sessionID == serviceSessionID,
                   let tex = outcome.texture, let w = r.width, let h = r.height else { return }
             renderer.store.setDetail(tex, tier: tier.rawValue, rank: tier.rank, stamp: stamp, for: url)
             renderer.setDetail(tex)
