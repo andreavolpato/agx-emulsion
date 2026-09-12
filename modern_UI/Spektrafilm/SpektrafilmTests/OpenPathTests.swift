@@ -431,6 +431,37 @@ final class OpenPathTests: XCTestCase {
         return url
     }
 
+    // MARK: - the original
+
+    /// The original the canvas compares against is the frame's **own** pixels.
+    ///
+    /// It used to be the 1600 px live-tier preview, with a second copy
+    /// rendered lazily at whatever resolution was on screen. That made a
+    /// before/after at 100 % compare a decode *upscaled* from 1600 px against
+    /// a print rendered from the full frame — the left half soft, the right
+    /// half showing grain, and the difference reads as the film's.
+    func testTheOriginalIsAtTheNativeResolution() async throws {
+        let url = try rawFrame()
+        let session = Session()
+        session.open(urls: [url])
+        try await waitUntil("the frame to decode", timeout: 120) { session.decoded != nil }
+        let native = try XCTUnwrap(session.decoded?.pixelSize)
+        XCTAssertGreaterThan(native.width, CGFloat(Session.liveEdge),
+                             "this frame is not bigger than the live tier, so it cannot show the difference")
+
+        try await waitUntil("the original to reach the frame's own size", timeout: 180) {
+            guard let original = session.renderer.original else { return false }
+            return original.width == Int(native.width) && original.height == Int(native.height)
+        }
+        let original = try XCTUnwrap(session.renderer.original)
+        // And it is not the preview cache's copy, which stays small on purpose:
+        // eight of those are what make switching frames instant.
+        let cached = try XCTUnwrap(session.renderer.store.source(for: url))
+        XCTAssertLessThan(cached.width, original.width, "the preview cache grew to native size")
+        XCTAssertEqual(session.renderer.sourceSize?.width, native.width,
+                       "the viewport is expressed against the frame, not the original texture (D4)")
+    }
+
     // MARK: - reading the canvas back
 
     /// An rgba16Unorm texture's samples, whatever its storage mode. The print

@@ -702,7 +702,10 @@ bool tier_image(spk_session* session, const Tier& tier, Image& out, std::string&
     return true;
 }
 
-std::string meter_key(const Params& params) {
+// `static`, because this sits inside the `extern "C"` block with the entry
+// points and a C-linkage function returning a `std::string` is a warning (and
+// nothing outside this file calls it).
+static std::string meter_key(const Params& params) {
     const Json values = read_params(params);
     std::string key;
     for (const char* name : kMeterKeyFields) key += values.at(name).dump() + ";";

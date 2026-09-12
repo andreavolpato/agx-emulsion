@@ -76,39 +76,29 @@ final class Renderer: NSObject {
     /// zoomed past the threshold — or true with a stale detail still shown
     /// while a sharper one renders.
     private(set) var showsDetail = false
-    /// The image the viewport is expressed against: the live tier's pixel
-    /// size, fixed per frame. A resolution swap must not move the view, so
-    /// `scale` stays points-per-live-pixel and the draw multiplies it by the
-    /// texture's own ratio (see `canvasUniforms`).
+    /// The image the viewport is expressed against: the **frame's** own pixel
+    /// size — the crop's, when one is applied — not the pixel size of whatever
+    /// tier is on screen (D4). A resolution swap must not move the view, and a
+    /// zoom must mean one frame pixel per device pixel, so `scale` stays
+    /// points-per-frame-pixel and the draw takes the texture's own ratio into
+    /// account in `canvasUniforms`.
     var logicalImageSize: CGSize? {
         viewport.image == CGSize(width: 1, height: 1) ? nil : viewport.image
     }
     /// What the canvas draws: the detail print when one is shown, else the
     /// live print or decode preview.
     var base: MTLTexture? { showsDetail ? (detail ?? live) : live }
-    /// The display decode at the live tier — Apple's rendering of the RAW,
-    /// never the engine's input. Shown instead of the adjusted image while
-    /// Space is held, and left of the split.
-    var original: MTLTexture? {
-        didSet { if oldValue !== original { originalDetail = nil } }
-    }
-    /// The same decode at the resolution of the detail print on screen.
+    /// The display decode at the frame's **own** resolution — Apple's
+    /// rendering of the RAW, never the engine's input. Shown instead of the
+    /// adjusted image while Space is held, and left of the split.
     ///
-    /// Without it, the before/after at 200 % compared a 1600 px decode
-    /// stretched 5× against a native-resolution print: the left half soft,
-    /// the right half showing grain, and the difference read as the film's.
-    /// Set by `Session` only while a comparison is actually up (it is a
-    /// full-resolution texture at the full tier), and dropped with the detail
-    /// print and with any new original, since it is a picture of that one.
-    private(set) var originalDetail: MTLTexture?
-    /// What the canvas compares against: the original at the resolution of
-    /// whatever it is showing.
-    var before: MTLTexture? { showsDetail ? (originalDetail ?? original) : original }
-
-    func setOriginalDetail(_ texture: MTLTexture?) {
-        originalDetail = texture
-        needsDraw?()
-    }
+    /// Native, not the live tier (D3). It used to be a 1600 px preview with a
+    /// second, lazily-rendered copy at whatever resolution was on screen, so
+    /// that a before/after at 200 % did not compare a stretched decode against
+    /// a sharp print. One native texture makes that ladder unnecessary: it is
+    /// a picture of the frame at every zoom, and it is one texture per
+    /// selected frame rather than one per tier visited.
+    var original: MTLTexture?
     private var adjusted: MTLTexture?
     /// Rasterised coverage for the mask kinds that cannot be closed-form.
     /// Nothing writes it yet — brush and the Vision sources are the next
@@ -400,7 +390,6 @@ final class Renderer: NSObject {
     /// Discard the detail texture. Used when it can no longer be trusted:
     /// the parameters changed, or another frame is selected.
     func dropDetail() {
-        originalDetail = nil
         guard detail != nil || showsDetail else { return }
         detail = nil
         showsDetail = false
@@ -566,7 +555,7 @@ final class Renderer: NSObject {
         }
         var shown: MTLTexture? = nil
         if let base {
-            if showOriginal, let before { shown = before }
+            if showOriginal, let original { shown = original }
             else if let dst = ensureAdjusted(for: base) {
                 if layer2Dirty {
                     encodeLayer2(cb, src: base, dst: dst)
@@ -599,7 +588,7 @@ final class Renderer: NSObject {
             // fragment texture is a sampling of undefined memory the moment a
             // branch is mispredicted into, and "the compare flag is off" is
             // not a guarantee the GPU makes.
-            enc.setFragmentTexture(before ?? shown, index: 1)
+            enc.setFragmentTexture(original ?? shown, index: 1)
             enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         }
@@ -659,7 +648,7 @@ final class Renderer: NSObject {
         var shown: MTLTexture? = nil
         // The same swap `draw` makes while Space is held, so a capture of
         // "show original" shows the original rather than the print.
-        if base != nil, showOriginal, let before { shown = before }
+        if base != nil, showOriginal, let original { shown = original }
         else if let base, let dst = ensureAdjusted(for: base) {
             encodeLayer2(cb, src: base, dst: dst)
             layer2Dirty = false
@@ -676,7 +665,7 @@ final class Renderer: NSObject {
         if let shown {
             enc.setRenderPipelineState(quadPipelineOffscreen)
             enc.setFragmentTexture(shown, index: 0)
-            enc.setFragmentTexture(before ?? shown, index: 1)
+            enc.setFragmentTexture(original ?? shown, index: 1)
             enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         }

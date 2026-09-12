@@ -78,6 +78,16 @@ final class Session: CanvasHost {
     /// against. Zero before the first image lands.
     var sourceImageSize: CGSize { renderer.sourceSize ?? .zero }
 
+    /// The frame's **own** pixels, whatever tier is on the canvas, or nil
+    /// before a decode has landed.
+    ///
+    /// `renderer.sourceSize` is the size the viewport is expressed against,
+    /// and since D4 that is the native frame: "100 %" has to mean one native
+    /// pixel per device pixel while a 1600 px live tier of a 6000 px frame is
+    /// on screen, not one *texture* pixel. A nil means "the frame's size is
+    /// not known yet", and the callers pass it as "leave the size alone".
+    private var nativeSourceSize: CGSize? { decoded?.pixelSize }
+
     // MARK: masks (蒙版) — Layer 2, local
     //
     // A mask is a region plus its own adjustments (`Model/Mask.swift`), so it
@@ -351,7 +361,6 @@ final class Session: CanvasHost {
         didSet {
             guard oldValue != comparing else { return }
             renderer.compareSplit = comparing
-            if comparing { ensureOriginalDetail() }
         }
     }
     /// 0…1 across the output. Stored here so the overlay can bind to it.
@@ -507,9 +516,18 @@ final class Session: CanvasHost {
     /// Solve pressed while the decode is still landing turns into.
     private var developTask: Task<String?, Never>?
     /// The long edge of an original-at-detail render in flight, if any.
-    private var originalDetailEdge: Int?
 
     private var loadTask: Task<Void, Never>?
+    /// The largest texture side this app's device will make, from the engine's
+    /// capabilities. Metal publishes no such property (D1), and over it
+    /// `MTLTextureDescriptor` asserts rather than returning nil, so the app
+    /// must stay inside it. Nil until capabilities land.
+    private var maxTextureEdge: Int?
+    /// The background render of the *native* original (D3). One per selected
+    /// frame: it is a full-resolution texture (363 MB at 45 MP, 1.2 GB at
+    /// 151 MP), so it is replaced rather than accumulated, and the preview
+    /// cache that makes switching frames instant stays at the live tier.
+    private var nativeOriginalTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var reopenTask: Task<Void, Never>?
     private var prefetch: [URL: Task<URL?, Never>] = [:]
@@ -693,6 +711,10 @@ final class Session: CanvasHost {
         serviceBlocked = nil
         backend = caps.backend
         serviceReady = true
+        // Metal publishes no maximum-texture property, so this comes from the
+        // engine, which probes the device (`capabilities.max_texture_dimension_2d`).
+        // Nil from an engine that does not report it.
+        if let edge = caps.maxTextureDimension2D, edge > 0 { maxTextureEdge = Int(edge) }
         if let why = caps.schemaMismatch { stockWarning = why }
         Task { [client] in
             let catalog = (try? await client.printLUTCatalog()) ?? [:]
@@ -832,11 +854,15 @@ final class Session: CanvasHost {
         exposureEvByMethod = nil
         exif = EXIFReadout.read(url)
         stockWarning = nil
-        // Show the last print of this frame instantly if it is resident.
+        // Show the last print of this frame instantly if it is resident. The
+        // viewport is expressed against the *native* frame (D4), which is not
+        // known until this frame decodes — so until then it is expressed
+        // against what is on screen, and `load` corrects it when the decode
+        // lands (`refreshLogicalSize` refits, because the view was fitted).
         if let cached = renderer.store.print(for: url) {
-            renderer.setLive(cached, logical: CGSize(width: cached.width, height: cached.height)); previewSoft = true
+            renderer.setLive(cached, logical: nativeSourceSize ?? CGSize(width: cached.width, height: cached.height)); previewSoft = true
         } else if let src = renderer.store.source(for: url) {
-            renderer.setLive(src, logical: CGSize(width: src.width, height: src.height)); previewSoft = true
+            renderer.setLive(src, logical: nativeSourceSize ?? CGSize(width: src.width, height: src.height)); previewSoft = true
         } else {
             renderer.setLive(nil)
         }
@@ -875,6 +901,42 @@ final class Session: CanvasHost {
         }
     }
 
+    /// Render the *display* decode at the frame's own size and hand it to the
+    /// canvas as the original.
+    ///
+    /// The same picture the live-tier preview is — Core Image's rendering of
+    /// the RAW, not a second interpretation of it — at the size of the frame.
+    /// `makePreviewTexture` with the native long edge resamples nothing: the
+    /// scale comes out 1, and the only cost is the texture.
+    ///
+    /// Dropped rather than shown if anything has moved on by the time it
+    /// lands: another frame selected, or a different decode (a white balance
+    /// change) started. It is not kept in `renderer.store`, which is the
+    /// small-texture cache the instant frame switch depends on.
+    private func scheduleNativeOriginal(_ d: DecodedImage, for url: URL, settings: DecodeSettings) {
+        nativeOriginalTask?.cancel()
+        let device = renderer.device
+        // The frame's own size, capped at the largest texture the device will
+        // make: past that the descriptor *asserts* and takes the process with
+        // it, which is the case the engine refuses the frame for in the first
+        // place. Falling back to the live tier keeps an older engine (one that
+        // reports no limit) from crashing the app.
+        let limit = maxTextureEdge ?? Session.liveEdge
+        let longEdge = min(Int(max(d.pixelSize.width, d.pixelSize.height)), limit)
+        let started = Date()
+        nativeOriginalTask = Task { [weak self] in
+            let box = await Task.detached(priority: .utility) {
+                TextureBox(ImageDecoder.makePreviewTexture(d, device: device, maxEdge: longEdge))
+            }.value
+            guard let self, !Task.isCancelled, self.selection == url,
+                  self.sidecar.decode == settings, let tex = box.texture else { return }
+            self.renderer.original = tex
+            canvasLog("original \(url.lastPathComponent) at \(tex.width)x\(tex.height) "
+                      + "landed in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+            self.renderer.needsDraw?()
+        }
+    }
+
     private func load(_ url: URL) async {
         status = "Decoding \(url.lastPathComponent)…"
         var clock = LoadClock()
@@ -906,10 +968,17 @@ final class Session: CanvasHost {
             renderer.store.setSource(tex, for: url)
             renderer.original = tex
             if renderer.store.print(for: url) == nil {
-                renderer.setLive(tex, logical: CGSize(width: tex.width, height: tex.height))
+                // `d.pixelSize`, not the texture's: the canvas holds a tier,
+                // and the viewport is expressed against the frame (D4).
+                renderer.setLive(tex, logical: d.pixelSize)
                 previewSoft = true
             }
         }
+        // The preview above is what makes an open fast; the original the canvas
+        // compares against is the frame's *own* pixels, and it renders behind
+        // this one (D3). Here rather than beside the preview: an as-shot decode
+        // has just written the camera's temperature into `sidecar.decode`, and
+        // the render drops itself if the decode moves on before it lands.
         guard !Task.isCancelled, selection == url else { return }
         decoded = d
         decodeIsStale = false
@@ -918,6 +987,7 @@ final class Session: CanvasHost {
            (sidecar.decode.temperature != t || sidecar.decode.tint != tn) {
             sidecar.decode.temperature = t; sidecar.decode.tint = tn
         }
+        scheduleNativeOriginal(d, for: url, settings: sidecar.decode)
         guard wantsDevelop else {
             clock.lap("decode-only")
             canvasLog(clock.summary()
@@ -1111,7 +1181,9 @@ final class Session: CanvasHost {
         }
         canvasLog("applyRender uploaded \(w)x\(h)")
         renderer.store.setPrint(tex, for: url)
-        renderer.setLive(tex, logical: renderer.sourceSize == nil ? CGSize(width: w, height: h) : nil)
+        // The frame's own size, and only when it is known: passing nil leaves
+        // whatever the decode established (D4).
+        renderer.setLive(tex, logical: nativeSourceSize)
         previewSoft = false
         lastRenderMs = r.elapsedMs
         if let base = statusBase { status = "\(base)  ·  \(r.reprint ? "reprint" : "render") \(Int(r.elapsedMs)) ms" }
@@ -1129,7 +1201,6 @@ final class Session: CanvasHost {
             if let resident = renderer.store.detail(for: url, stamp: stamp, atLeast: detailTier.rank) {
                 detailTier = DetailTier(rawValue: resident.tier) ?? detailTier
                 renderer.setDetail(resident.texture)
-                ensureOriginalDetail()
             } else {
                 renderer.dropDetail()
                 renderer.store.dropDetail(unless: stamp, for: url)
@@ -1457,40 +1528,8 @@ final class Session: CanvasHost {
     func toggledOriginal(_ on: Bool) {
         renderer.showOriginal = on
         showingOriginal = on
-        if on { ensureOriginalDetail() }
     }
 
-    /// The original at the resolution of the detail print on screen, so that a
-    /// comparison at zoom compares the film against the decode — not against
-    /// a 1600 px decode stretched to 200 % (see `Renderer.originalDetail`).
-    ///
-    /// Only while a comparison is up: at the full tier this is another
-    /// full-resolution texture (~360 MB at 45 MP), and a user who never
-    /// compares at zoom should not pay for it. Rendered from the *display*
-    /// decode, like the live-tier original, at the detail print's long edge.
-    private func ensureOriginalDetail() {
-        guard comparing || showingOriginal, renderer.showsDetail, let detail = renderer.detail,
-              let url = selection, let d = decoded, let original = renderer.original else { return }
-        let edge = max(detail.width, detail.height)
-        if let have = renderer.originalDetail, max(have.width, have.height) == edge { return }
-        guard originalDetailEdge != edge else { return }   // already on its way
-        originalDetailEdge = edge
-        let device = renderer.device
-        Task { [weak self] in
-            let box = await Task.detached(priority: .userInitiated) {
-                TextureBox(ImageDecoder.makePreviewTexture(d, device: device, maxEdge: edge))
-            }.value
-            guard let self else { return }
-            if self.originalDetailEdge == edge { self.originalDetailEdge = nil }
-            // Still the same frame, the same decode and the same detail size:
-            // anything else and this is a picture of something no longer shown.
-            guard self.selection == url, self.renderer.original === original,
-                  let shown = self.renderer.detail, max(shown.width, shown.height) == edge,
-                  let tex = box.texture else { return }
-            self.renderer.setOriginalDetail(tex)
-            canvasLog("original at \(tex.width)x\(tex.height) for the comparison")
-        }
-    }
     func hovered(normalised n: CGPoint?) {
         guard let n, let base = renderer.base else { hoverValue = nil; return }
         hoverValue = Session.sample(base, at: n)
@@ -1609,21 +1648,32 @@ final class Session: CanvasHost {
     // as fast and would cost four times the resident memory for detail the
     // viewport cannot show.
 
-    /// 100 % — one image pixel per device pixel.
-    nonisolated static let detailZoomFraction: CGFloat = 1.0
-    /// 200 % — twice the image pixels the viewport can show, past what the
-    /// 3400 px preview tier can feed.
-    nonisolated static let fullZoomFraction: CGFloat = 2.0
     nonisolated static let previewEdge = 3400
     /// How long the zoom must be still before a detail render is committed
     /// to. Sized against the *current* cost of that render — see the table
     /// above; it was 700 when a full render was seventeen seconds.
     nonisolated static let detailDebounceMs = 180
 
+    /// Which tier a zoom asks for, in **native-frame zoom** (D4).
+    ///
+    /// A tier is sharp enough while its pixels are still one per native pixel
+    /// on screen, so the escalation point is that tier's long edge over the
+    /// frame's: the live tier is 1:1 from `liveEdge / image`, the preview tier
+    /// from `previewEdge / image`.
+    ///
+    /// These were the constants 1.0 and 2.0, and they were right while zoom
+    /// was measured against the texture on screen — the live tier *was* the
+    /// image, so "100 %" and "the live tier is 1:1" were the same moment. Once
+    /// zoom means the native frame they are not, and keeping the old numbers
+    /// would escalate far too late: on a 6000 px frame the live tier is 1:1 at
+    /// 27 %, so a canvas showing a stretched 1600 px texture would still be
+    /// asking for `.live` at the label's 100 %.
     nonisolated static func wantedTier(zoomFraction: CGFloat, imageLongEdge: CGFloat) -> DetailTier {
         guard imageLongEdge > CGFloat(Session.liveEdge) else { return .live }
-        if zoomFraction >= Session.fullZoomFraction, imageLongEdge > CGFloat(Session.previewEdge) { return .full }
-        if zoomFraction >= Session.detailZoomFraction { return .preview }
+        let liveCovers = CGFloat(Session.liveEdge) / imageLongEdge
+        let previewCovers = CGFloat(Session.previewEdge) / imageLongEdge
+        if imageLongEdge > CGFloat(Session.previewEdge), zoomFraction >= previewCovers { return .full }
+        if zoomFraction >= liveCovers { return .preview }
         return .live
     }
 
@@ -1679,7 +1729,6 @@ final class Session: CanvasHost {
             detailPending = false
             detailTier = DetailTier(rawValue: resident.tier) ?? want
             renderer.setDetail(resident.texture)
-            ensureOriginalDetail()
             return
         }
 
@@ -1743,7 +1792,6 @@ final class Session: CanvasHost {
                   let tex = outcome.texture, let w = r.width, let h = r.height else { return }
             renderer.store.setDetail(tex, tier: tier.rawValue, rank: tier.rank, stamp: stamp, for: url)
             renderer.setDetail(tex)
-            ensureOriginalDetail()
             canvasLog("detail \(tier.rawValue) \(w)x\(h) landed in \(Int(r.elapsedMs)) ms")
             if let base = statusBase { status = base }
         } catch {

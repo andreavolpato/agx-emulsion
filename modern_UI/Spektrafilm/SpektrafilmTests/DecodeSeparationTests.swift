@@ -192,11 +192,15 @@ final class DecodeSeparationTests: XCTestCase {
         let printed = try XCTUnwrap(session.renderer.store.print(for: url), "no print on the canvas")
 
         let shown = try samples(original, gpu)
-        let display = try samples(try XCTUnwrap(ImageDecoder.makePreviewTexture(d, device: gpu, maxEdge: Session.liveEdge)), gpu)
+        // At the *frame's* size, which is what the original is since D3: it
+        // used to be the live-tier preview, and comparing against that is how
+        // this test noticed the change.
+        let nativeEdge = Int(max(d.pixelSize.width, d.pixelSize.height))
+        let display = try samples(try XCTUnwrap(ImageDecoder.makePreviewTexture(d, device: gpu, maxEdge: nativeEdge)), gpu)
         XCTAssertEqual(shown, display, "the original is not the display decode")
         let linearOnly = DecodedImage(linear: d.linear, display: d.linear, pixelSize: d.pixelSize, isRAW: true,
                                       sourceURL: url, asShotTemperature: nil, asShotTint: nil)
-        let linear = try samples(try XCTUnwrap(ImageDecoder.makePreviewTexture(linearOnly, device: gpu, maxEdge: Session.liveEdge)), gpu)
+        let linear = try samples(try XCTUnwrap(ImageDecoder.makePreviewTexture(linearOnly, device: gpu, maxEdge: nativeEdge)), gpu)
         XCTAssertGreaterThan(meanGreen(shown), meanGreen(linear) * 1.05,
                              "the original looks like the linear decode, not Apple's rendering")
 

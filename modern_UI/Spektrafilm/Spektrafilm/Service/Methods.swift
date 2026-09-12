@@ -20,6 +20,10 @@ struct Capabilities: Decodable, Sendable {
     let version: String
     let engine: String
     let maxMP: Double
+    /// The largest texture side the engine's device will make, so the app
+    /// knows the same wall the engine does. Optional: an engine from before
+    /// the field sends nothing, and the callers fall back to their own size.
+    let maxTextureDimension2D: Double?
     let tiers: [String: Int?]
     let transportVersion: Int
     let schemaVersion: Int
@@ -115,7 +119,8 @@ struct Capabilities: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case version, engine, tiers, backend
-        case maxMP = "max_mp", transportVersion = "transport_version", schemaVersion = "schema_version"
+        case maxMP = "max_mp", maxTextureDimension2D = "max_texture_dimension_2d",
+             transportVersion = "transport_version", schemaVersion = "schema_version"
     }
 }
 
