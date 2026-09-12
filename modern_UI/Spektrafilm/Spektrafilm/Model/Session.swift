@@ -1397,12 +1397,9 @@ final class Session: CanvasHost {
     /// A shoot-layer edit, so it re-renders the negative — and the Exp. Comp.
     /// sublabel ("auto +x EV") is a *report* of what the meter chose, so it has
     /// to be the new intent's number the moment the pill moves rather than a
-    /// film render later. The EV comes from the map the last develop's `solve`
-    /// left behind, which is exactly why `solve` reports all four at once; if
-    /// the map is not there yet — a frame that has never been developed — the
-    /// label is left alone for the develop to fill in. A legacy sidecar has no
-    /// method at all, and `solve` reports `exposure_compensation_ev` for
-    /// whatever meter is running, so nothing here applies to it.
+    /// film render later. `retargetSolvedEV` is that, and it is a separate
+    /// method because the pill is not the only thing that can change the Tone:
+    /// so can a paste, which replaces `params` whole.
     ///
     /// `params`' setter is what pushes undo, requests the print and schedules
     /// the save, so this must go through it rather than around it.
@@ -1411,10 +1408,25 @@ final class Session: CanvasHost {
         var p = params
         p.autoExposureMethod = method
         params = p
-        if let ev = method.flatMap({ exposureEvByMethod?[$0] }) {
-            sidecar.solvedEV = ev
-            scheduleSave()
-        }
+        retargetSolvedEV()
+    }
+
+    /// Put the EV the meter *would* report for the current Tone under the Exp.
+    /// Comp. sublabel, from the map the last develop's `solve` left behind —
+    /// which is why `solve` reports all four intents at once.
+    ///
+    /// Called by everything that changes the Tone: the pill above and
+    /// `pasteSettings`, whose clip carries one. A method the map does not carry
+    /// — a legacy sidecar's `nil`, or a frame that has never been developed —
+    /// leaves the label alone for the develop to fill in.
+    ///
+    /// Undo needs no equivalent: it restores the whole `Sidecar`, `solvedEV`
+    /// included, so the label comes back with the parameters that produced it.
+    private func retargetSolvedEV() {
+        guard let ev = sidecar.params.autoExposureMethod.flatMap({ exposureEvByMethod?[$0] })
+        else { return }
+        sidecar.solvedEV = ev
+        scheduleSave()
     }
 
     private func startStockPreview(_ stock: String) {
@@ -1792,6 +1804,9 @@ final class Session: CanvasHost {
         pushUndo()
         sidecar.params = clip.params
         sidecar.adjustments = clip.adjustments
+        // The clip carries a Tone, so the label has to follow the paste the
+        // same way it follows the pill (see `retargetSolvedEV`).
+        retargetSolvedEV()
         renderer.layer2 = clip.adjustments.uniforms
         renderer.setCurves(clip.adjustments.curves)
         requestPrint()

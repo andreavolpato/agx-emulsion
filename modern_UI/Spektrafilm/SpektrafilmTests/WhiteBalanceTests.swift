@@ -263,6 +263,43 @@ final class WhiteBalanceTests: XCTestCase {
                              "the print did not follow the intent (a reprint, not a re-render?)")
     }
 
+    /// A paste retargets the label too.
+    ///
+    /// `pasteSettings` replaces `params` whole, and the Tone is one of them, so
+    /// the Exp. Comp. sublabel has the same problem the Tone pill has: it
+    /// reports what the meter chose, and the meter has just changed. Copying a
+    /// frame's settings, changing Tone, and pasting the copy back is the
+    /// shortest way to make the two disagree.
+    func testAPasteRetargetsTheLabel() async throws {
+        let url = try frame()
+        let session = Session()
+        session.open(urls: [url])
+        try await waitUntil("the frame to decode") { session.decoded != nil }
+        try await waitUntil("the engine to warm up") { session.serviceReady }
+        session.solveNow()
+        try await waitUntil("the print to land", timeout: 90) {
+            session.serviceSessionIDForExport != nil && session.frameStates[url] == .processed && !session.busy
+        }
+        let sid = try XCTUnwrap(session.serviceSessionIDForExport)
+        let solved = try await session.client.call(.solve, SolveRequest(sessionID: sid, target: "exposure"),
+                                                   as: SolveResponse.self)
+        let evs = try XCTUnwrap(solved.exposureEvByMethod)
+        let balanced = try XCTUnwrap(evs["balanced"])
+        let highlights = try XCTUnwrap(evs["protect_highlights"])
+        XCTAssertGreaterThan(abs(balanced - highlights), 0.1, "this frame cannot tell the two apart")
+
+        // Copy at `balanced`, move the pill to `protect_highlights`, paste the
+        // copy back: the paste is what puts the Tone back to balanced, and the
+        // label has to follow it.
+        session.copySettings()
+        session.setAutoExposureMethod("protect_highlights")
+        XCTAssertEqual(session.solvedEVLabel, String(format: "auto %+.1f EV", highlights))
+        session.pasteSettings()
+        XCTAssertEqual(session.params.autoExposureMethod, "balanced", "the paste did not move the Tone")
+        XCTAssertEqual(session.solvedEVLabel, String(format: "auto %+.1f EV", balanced),
+                       "the label still reports the pasted-over Tone's EV")
+    }
+
     // MARK: - helpers
 
     /// The 1 MP smoke frame, **copied into a directory of its own**.
