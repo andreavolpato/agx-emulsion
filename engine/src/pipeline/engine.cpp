@@ -28,6 +28,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -58,6 +59,24 @@ struct Tier {
     uint32_t long_edge;   // 0 = the frame's own resolution
 };
 constexpr Tier kTiers[] = {{"live", 1600}, {"preview", 3400}, {"full", 0}};
+
+// RFC-015 P.1: the auto-exposure meter's own resolution. Each tier used to
+// meter its own image, so an export was exposed differently from the canvas
+// the user approved (up to +0.069 EV of print luminance on real RAWs). The
+// session meters once, on the frame downscaled to this long edge and taken
+// through decode_input and geometry, and every tier applies that EV. Its own
+// constant, so a tier change cannot move auto exposure; when the live tier is
+// the same size its image is reused.
+constexpr uint32_t kMeterLongEdge = 1600;
+// The wire fields upstream of the auto-exposure node: the only ones that can
+// change what it meters, so the only ones that re-meter. The film, exposure
+// compensation and the method itself leave the cached meter valid.
+// `parity_exposure.py` (c5) walks the whole schema to catch a missing one.
+constexpr const char* kMeterKeyFields[] = {
+    "input_color_space", "input_cctf_decoding",
+    "geometry_crop_x", "geometry_crop_y", "geometry_crop_w", "geometry_crop_h",
+    "geometry_rotation_deg", "geometry_quarter_turns", "geometry_flip_h", "geometry_flip_v",
+};
 
 // The hard cap on a frame's size, as a **pixel count** rather than a
 // megapixel figure, because that is what memory scales with: the decoded
@@ -129,8 +148,17 @@ struct spk_session {
         Image image;      // the source at this tier
         Image negative;   // Tap.CMY_FILM
         bool has_negative = false;
+        std::optional<double> applied_ev;   // what the node applied to `negative`
     };
     std::unordered_map<std::string, TierState> tiers;
+
+    // The frame's one auto-exposure meter, all seven methods (RFC-015 P.1),
+    // valid while the upstream fields in `key` are unchanged.
+    struct Meter {
+        bool valid = false;
+        std::string key;
+        ExposureEvs evs;
+    } meter;
 
     std::mutex lock;
     Progress progress;
@@ -674,14 +702,50 @@ bool tier_image(spk_session* session, const Tier& tier, Image& out, std::string&
     return true;
 }
 
+std::string meter_key(const Params& params) {
+    const Json values = read_params(params);
+    std::string key;
+    for (const char* name : kMeterKeyFields) key += values.at(name).dump() + ";";
+    return key;
+}
+
+// The session's meter, computed on demand -- whichever render or solve needs
+// it first -- and kept until an upstream field changes. Needs an open frame.
+bool ensure_meter(spk_session* session, std::string& error) {
+    const std::string key = meter_key(session->params);
+    if (session->meter.valid && session->meter.key == key) return true;
+    Image small;
+    const bool ok = kTiers[0].long_edge == kMeterLongEdge
+        ? tier_image(session, kTiers[0], small, error)
+        : downscale(session->engine->gpu, session->source, kMeterLongEdge, small, error);
+    ExposureEvs evs;
+    if (!ok || !session->pipeline->measure_meter_evs(small, evs, error)) return false;
+    session->meter.valid = true;
+    session->meter.key = key;
+    session->meter.evs = evs;
+    return true;
+}
+
 bool negative_for(spk_session* session, const Tier& tier, Progress* progress, Image& out,
                   std::string& error) {
     spk_session::TierState& state = session->tiers[tier.name];
-    if (state.has_negative) { out = state.negative; return true; }
+    if (state.has_negative) {
+        if (progress) progress->auto_exposure_ev = state.applied_ev;
+        out = state.negative;
+        return true;
+    }
     Image source;
     if (!tier_image(session, tier, source, error)) return false;
+    // Every tier's node applies the frame's one EV (RFC-015 P.1).
+    if (!ensure_meter(session, error)) return false;
+    const CameraParams& camera = session->params.camera;
+    session->pipeline->set_auto_exposure_ev(
+        camera.auto_exposure ? std::optional<double>(session->meter.evs.of(camera.auto_exposure_method))
+                             : std::nullopt);
     Image negative;
     if (!session->pipeline->run_film(source, negative, progress, error)) return false;
+    state.applied_ev = session->pipeline->last_auto_exposure_ev();
+    if (progress) progress->auto_exposure_ev = state.applied_ev;
     // The negative is what every subsequent slider drag reprints from, so it
     // has to outlive the frame arena. Copying it here is also what makes a
     // reprint grain-consistent for free: the realisation is baked in and is
@@ -1127,26 +1191,18 @@ spk_status spk_solve(spk_session* session, const char* target, char** out_json) 
     bool metered = false;
 
     if (want == "exposure" || want == "both") {
-        // The same measurement `preprocess.auto_exposure` makes, on the live
-        // tier, reported rather than applied -- so the frontend can show the
-        // number and the user can override it.
+        // The session's one meter of the frame (RFC-015 P.1): the number
+        // every tier's auto-exposure node applies, so the label, the canvas
+        // and the export agree. `exposure_compensation_ev` is the session's
+        // own method's; the four intents are what each would choose.
         gpu::Gpu* gpu = session->engine->gpu;
         gpu->begin_frame();
-        Image live;
         std::string error;
-        ExposureEvs evs;
-        // `RenderEngine.solve` meters the whole live tier, not the stride
-        // sample the auto-exposure node uses. Same measurement, different
-        // sampling, and they differ by ~3e-3 EV.
-        //
-        // One gather answers both halves: `current` is the session's own
-        // method, which is what `exposure_compensation_ev` has always been,
-        // and the other four are what each intent would choose.
-        bool ok = tier_image(session, kTiers[0], live, error) &&
-                  session->pipeline->measure_exposure_evs(live, evs, error, /*stride=*/false);
+        const bool ok = ensure_meter(session, error);
         gpu->end_frame();
         if (!ok) { g_error = error; return SPK_ERR_GPU; }
-        solved.set("exposure_compensation_ev", Json(evs.current));
+        const ExposureEvs& evs = session->meter.evs;
+        solved.set("exposure_compensation_ev", Json(evs.of(session->params.camera.auto_exposure_method)));
         ev_by_method.set("balanced", Json(evs.balanced));
         ev_by_method.set("center", Json(evs.center));
         ev_by_method.set("protect_highlights", Json(evs.protect_highlights));
@@ -1196,6 +1252,9 @@ spk_status spk_progress(spk_session* session, const char* progress_id, char** ou
     out.set("pct", Json(p.done ? 100.0
                                : (p.total_nodes ? 100.0 * double(p.fired) / double(p.total_nodes) : 0.0)));
     out.set("node_times", std::move(times));
+    // RFC-015 P.1, additive: the EV the auto-exposure node applied to this
+    // render's negative, null with the meter off.
+    out.set("auto_exposure_ev", p.auto_exposure_ev ? Json(*p.auto_exposure_ev) : Json());
     out.set("done", Json(p.done));
     out.set("cancelled", Json(p.cancelled));
     if (out_json) *out_json = dup_json(out);

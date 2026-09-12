@@ -729,33 +729,52 @@ bool Pipeline::measure_exposure_ev(const Image& in, double& ev, std::string& err
     return true;
 }
 
-bool Pipeline::measure_exposure_evs(const Image& in, ExposureEvs& out, std::string& error, bool stride) {
-    const std::string& method = params_.camera.auto_exposure_method;
-    if (!is_known_exposure_method(method)) {
-        error = "auto_exposure_method '" + method + "' is not implemented by the native engine";
-        return false;
-    }
+double ExposureEvs::of(const std::string& method) const {
+    if (method == "balanced") return balanced;
+    if (method == "center") return center;
+    if (method == "protect_highlights") return protect_highlights;
+    if (method == "protect_shadows") return protect_shadows;
+    if (method == "average") return average;
+    if (method == "median") return median;
+    return center_weighted;
+}
+
+bool Pipeline::measure_meter_evs(const Image& in, ExposureEvs& out, std::string& error) {
+    // The node's own upstream nodes, so the meter sees what the node would:
+    // decoded, cropped and turned. `node_geometry` records the frame's long
+    // edge for the film's pitch, and this is not the frame being rendered,
+    // so the pitch state is put back afterwards; the timings are not this
+    // render's either.
+    const uint32_t saved_long_edge = source_long_edge_;
+    Progress* const saved_progress = progress_;
+    progress_ = nullptr;
+    Image cast, decoded, framed;
+    const bool ok = node_input_cast(in, cast, error) &&
+                    node_decode_input(cast, decoded, error) &&
+                    node_geometry(decoded, framed, error);
+    source_long_edge_ = saved_long_edge;
+    progress_ = saved_progress;
+    if (!ok) return false;
+
+    // The whole image, not a stride: this is metered once per frame.
     std::vector<double> Y;
     uint32_t sh = 0, sw = 0;
-    if (!exposure_sample_y(in, stride, Y, sh, sw, error)) return false;
+    if (!exposure_sample_y(framed, /*stride=*/false, Y, sh, sw, error)) return false;
     out = exposure_evs_from(Y, sh, sw);
-    // The session's own method, from the sample already in hand. For one of
-    // the four that is one of the numbers just computed; for a legacy meter it
-    // is that meter's own arithmetic, which stays exactly as it was.
-    if (method == "center_weighted" || method == "average" || method == "median")
-        return legacy_exposure_ev(Y, sh, sw, method, out.current, error);
-    if (method == "balanced") out.current = out.balanced;
-    else if (method == "center") out.current = out.center;
-    else if (method == "protect_highlights") out.current = out.protect_highlights;
-    else out.current = out.protect_shadows;
-    return true;
+    return legacy_exposure_ev(Y, sh, sw, "center_weighted", out.center_weighted, error) &&
+           legacy_exposure_ev(Y, sh, sw, "average", out.average, error) &&
+           legacy_exposure_ev(Y, sh, sw, "median", out.median, error);
 }
 
 bool Pipeline::node_auto_exposure(const Image& in, Image& out, std::string& error) {
     if (!params_.camera.auto_exposure) { out = in; return true; }
     Timer t(this, "preprocess.auto_exposure");
+    // The session's one EV for the frame when it gave one (RFC-015 P.1);
+    // otherwise the reference's own stride meter of this input.
     double ev = 0.0;
-    if (!measure_exposure_ev(in, ev, error)) return false;
+    if (injected_ev_) ev = *injected_ev_;
+    else if (!measure_exposure_ev(in, ev, error)) return false;
+    last_ae_ev_ = ev;
     // `matching_scalar`: the gain is narrowed to float32 before it multiplies
     // the frame, exactly as the CPU path narrows it, so the two agree bit for
     // bit rather than nearly.
@@ -1448,6 +1467,7 @@ bool Pipeline::run_film(const Image& in, Image& out, Progress* progress, std::st
     if (!built_) { error = "pipeline was not built"; return false; }
     progress_ = progress;
     if (progress_) { progress_->total_nodes = node_count_; progress_->fired = 0; }
+    last_ae_ev_.reset();
 
     Image cur, next;
     SPK_NODE(node_input_cast(in, cur, error));

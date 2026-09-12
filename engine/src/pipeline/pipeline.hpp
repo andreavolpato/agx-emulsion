@@ -24,6 +24,7 @@
 // per-run argument, so the parameter works. That is a knowing divergence and
 // the render-parity harness reports it as one.
 #pragma once
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -66,6 +67,10 @@ struct Progress {
     bool done = false;
     bool detailed = false;
     std::unordered_map<std::string, double> node_ms;
+    // The EV the auto-exposure node applied to this render's negative;
+    // empty with the meter off. `spk_progress` reports it (RFC-015 P.1), so a
+    // harness can hold every tier to the same number.
+    std::optional<double> auto_exposure_ev;
 };
 
 // RFC-015 §2.3: what each of the four exposure intents would choose, all from
@@ -77,13 +82,13 @@ struct ExposureEvs {
     double center = 0.0;
     double protect_highlights = 0.0;
     double protect_shadows = 0.0;
-    /// The session's *own* method's EV: one of the four above for an intent,
-    /// the legacy meter's own number for `center_weighted`/`average`/`median`.
-    /// `solve` reports it as `exposure_compensation_ev`, which is what that
-    /// field has always been. It lives here because it comes from the same
-    /// gather — metering the live tier a second time for one number would cost
-    /// a full readback for no extra information.
-    double current = 0.0;
+    // The three legacy meters, from the same sample (RFC-015 P.1): a session
+    // caches all seven, so a method change does not re-meter.
+    double center_weighted = 0.0;
+    double average = 0.0;
+    double median = 0.0;
+    /// The EV for a method by its wire name.
+    double of(const std::string& method) const;
 };
 
 class Pipeline {
@@ -113,22 +118,25 @@ public:
     // `Tap.CMY_FILM` -> `Tap.RGB_OUT`.
     bool run_print(const Image& cmy, Image& out, Progress* progress, std::string& error);
 
-    // The auto-exposure meter on its own, without applying its gain.
-    // `solve(target="exposure")` reports the EV so the frontend can show it
-    // and the user can override it; `preprocess.auto_exposure` applies the
-    // same number. One implementation, so the two cannot disagree about what
-    // "the exposure" is.
-    // `stride` picks which of the reference's *two* samplings to reproduce,
-    // because they differ: `preprocess.auto_exposure` meters a 256 px stride
-    // sample (`small_preview`), while `RenderEngine.solve` meters the whole
-    // live tier. They disagree by ~3e-3 EV, and matching whichever one the
-    // caller stands in for is what keeps parity honest.
+    // The reference's per-input meter: what `preprocess.auto_exposure` does
+    // when no session EV was set (a standalone pipeline, `warm_up`), on a
+    // 256 px stride sample (`small_preview`) or, with `stride` false, on the
+    // whole input. A session meters with `measure_meter_evs` instead.
     bool measure_exposure_ev(const Image& in, double& ev, std::string& error, bool stride = true);
 
-    // The four intents of RFC-015 §2.3, from one sample. `solve` has to report
-    // all four *and* the session's own method, and metering the frame twice to
-    // do that would cost a second live-tier readback for no extra information.
-    bool measure_exposure_evs(const Image& in, ExposureEvs& out, std::string& error, bool stride = true);
+    // RFC-015 P.1: the session's one meter of the frame. `in` is the frame at
+    // the meter's own resolution; this runs the node's own upstream nodes on
+    // it (input_cast, decode_input, geometry), reads the whole image back and
+    // returns all seven methods' EVs. Leaves the pipeline's pitch as it was.
+    bool measure_meter_evs(const Image& in, ExposureEvs& out, std::string& error);
+
+    // The EV the auto-exposure node applies instead of metering its own
+    // input. The session sets it before every film render, so every tier is
+    // exposed alike; empty (a standalone pipeline, `warm_up`) meters the
+    // input as the reference does.
+    void set_auto_exposure_ev(std::optional<double> ev) { injected_ev_ = ev; }
+    // What the node applied in the last `run_film`; empty with the meter off.
+    std::optional<double> last_auto_exposure_ev() const { return last_ae_ev_; }
 
     // The film's pixel pitch for the frame most recently run through
     // `run_film`, in micrometres. Grain, halation and the DIR-coupler
@@ -220,6 +228,8 @@ private:
     double pixel_size_um_ = 0.0;
     uint32_t source_long_edge_ = 0;
     Progress* progress_ = nullptr;
+    std::optional<double> injected_ev_;
+    std::optional<double> last_ae_ev_;
 
     // --- baked, persistent ----------------------------------------------
     struct Baked {

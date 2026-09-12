@@ -11,41 +11,42 @@ between them is evidence about the definition, not about a transliteration.
 What it checks, per frame:
 
   a. **Legacy meters** (`center_weighted`, `average`, `median`): the C++
-     `solve` EV equals `measure_autoexposure_ev` on the same live tier, and
-     the gain the C++ auto-exposure *node* applies equals the one the Python
-     pipeline would apply.
+     `solve` EV equals `measure_autoexposure_ev` on the same frame, and the
+     gain the C++ auto-exposure *node* applies equals Python's.
   b. **The four new modes**: C++ `exposure_ev_by_method` (a sibling of
      `solved_params`, never inside it) equals
      `measure_autoexposure_evs_by_method` to 1e-9 EV. With a mode selected,
      `exposure_compensation_ev` is that mode's entry.
-  c. **Solve vs node, per mode.** `solve` meters the whole live tier; the
-     node meters a stride sample (`step = ceil(long_edge / 256)`). The
-     difference is reported as a number per frame, and it must be exactly 0
-     on frames of 256 px or less, where the two samples are the same.
+  c. **A second frame size.** Each frame is also opened strided to at most
+     256 px (`frame[::step, ::step]`), and its meter is compared the same
+     way, so every method is held on two samplings of the same scene.
   d. **Negative controls.** The Python side of each comparison is perturbed
      in five ways (a rank one off, interpolated percentiles, the floor, S_HI,
      float32 luminance) and the harness must go red for every one. Otherwise
      "within 1e-9" would mean nothing. The render check's own resolution is
      measured by sweeping a gain error until the picture changes.
+  c1-c5. **One EV per frame, at every tier** (RFC-015 P.1), on full-resolution
+     RAWs and a schema walk: see that section below.
 
-How the node is observed. The C ABI has no tap after the auto-exposure node,
-so the harness observes it twice:
+The meter (RFC-015 P.1). A session meters once: the frame downscaled to
+`kMeterLongEdge` (1600 px), after `decode_input` and geometry, the whole
+image, not a stride. Every tier's auto-exposure node applies that one EV and
+`solve` reports it. For the frames here (at most 1600 px, no geometry) the
+meter image is the frame itself, so the Python side is
+`measure_autoexposure_ev` on the whole frame.
 
-  * **exactly**: the node meters `frame[::step, ::step]` (a pure gather,
-    `spk_stride_sample`). A second session opened on that pre-strided frame
-    is at most 256 px, so its stride is 1 and its `solve` reports the node's
-    measurement exactly;
-  * **end to end**: render with the meter on, and render the frame
-    pre-multiplied by `float32(2^EV_python)` with the meter off. The node
-    narrows its gain through float32 and multiplies, so if its EV is
-    Python's, the two renders are bit-identical.
+How the node is observed. The C ABI's `progress` reports the EV the node
+applied (`auto_exposure_ev`); independently of that hook, the harness renders
+with the meter on and renders the frame pre-multiplied by
+`float32(2^EV_python)` with the meter off. The node narrows its gain through
+float32 and multiplies, so if its EV is Python's, the two renders are
+bit-identical.
 
-Frame sizes. Every frame is at most 1600 px on its long edge, so the live tier
-shares the source on both sides (`tier_image`, `resize_for_preview`) and
-nothing is resampled. The real frames are RAW files decoded to linear ProPhoto
-by the fork's own loader, downscaled once on the host and cached. Both engines
-receive that same float32 array. Frames over 256 px go through the node's
-stride on both sides.
+Frame sizes. Every frame here is at most 1600 px on its long edge, so the live
+tier and the meter share the source on both sides and nothing is resampled.
+The real frames are RAW files decoded to linear ProPhoto by the fork's own
+loader, downscaled once on the host and cached; both engines receive that
+same float32 array.
 
 Grain and glare are off: they are stochastic, and a bit-identical render
 comparison would measure the noise (RFC-013's grain trap).
@@ -54,7 +55,7 @@ Usage:
     engine/tests/parity_exposure.py [--python-only] [--no-real] [--verbose]
 
 `--python-only` runs without the dylib: the reference numbers, the RFC §6
-known answers, the stride-vs-full table, and the negative controls against
+known answers, the per-frame table, and the negative controls against
 the unperturbed reference (which shows the frame set can see each
 perturbation).
 """
@@ -133,7 +134,7 @@ def synthetic_frames() -> list[tuple[str, np.ndarray]]:
     rgb *= np.array([1.1, 1.0, 0.8])
     frames.append(("lognormal_181x221_exact_ranks", rgb))
 
-    # At the live tier's limit (not resampled) with a stride of 7 in the node,
+    # At the live tier's limit (not resampled), strided by 7 in check (c),
     # a black border, a lamp and a sky: the RFC's hard cases, synthetically.
     rng = np.random.default_rng(3)
     h, w = 1200, 1600
@@ -183,8 +184,8 @@ def real_frames() -> list[tuple[str, np.ndarray]]:
     return out
 
 
-def node_step(frame: np.ndarray) -> int:
-    """`Pipeline::measure_exposure_ev`'s stride and `small_preview`'s: the same formula."""
+def stride_step(frame: np.ndarray) -> int:
+    """The stride that brings a frame to at most 256 px (`small_preview`'s formula)."""
     n = max(frame.shape[:2])
     return int(math.ceil(n / 256)) if n > 256 else 1
 
@@ -207,12 +208,12 @@ class Reference:
     name: str
     frame: np.ndarray
     step: int
-    full: dict          # on the live tier: what `solve` reproduces
-    node: dict          # on the stride sample: what the node applies
+    full: dict          # on the whole frame: the session meter, what every tier applies
+    strided: dict       # on frame[::step, ::step]: check (c)'s second frame
 
 
 def reference(name: str, frame: np.ndarray) -> Reference:
-    step = node_step(frame)
+    step = stride_step(frame)
     return Reference(name, frame, step, python_evs(frame), python_evs(frame[::step, ::step]))
 
 
@@ -300,17 +301,15 @@ def run_controls(refs: list[Reference], observed: dict[str, dict]) -> int:
 
 
 def print_reference_table(refs: list[Reference]) -> None:
-    print("(c) solve (whole live tier) vs node (stride sample), Python reference, EV")
+    print("Python reference EVs: the session meter (whole frame), and (c) the same frame strided to <= 256 px")
     header = f"{'frame':32s} {'size':>10s} {'step':>4s} " + " ".join(f"{m[:12]:>13s}" for m in NEW)
     print(header)
     for ref in refs:
         h, w = ref.frame.shape[:2]
         print(f"{ref.name:32s} {f'{w}x{h}':>10s} {ref.step:4d} "
               + " ".join(f"{ref.full[m]:+13.6f}" for m in NEW))
-        print(f"{'':32s} {'':>10s} {'node':>4s} "
-              + " ".join(f"{ref.node[m]:+13.6f}" for m in NEW))
-        print(f"{'':32s} {'':>10s} {'diff':>4s} "
-              + " ".join(f"{ref.node[m] - ref.full[m]:+13.2e}" for m in NEW))
+        print(f"{'':32s} {'':>10s} {'strd':>4s} "
+              + " ".join(f"{ref.strided[m]:+13.6f}" for m in NEW))
 
 
 # The frames are float32, because that is what `spk_open` takes, so a known
@@ -348,8 +347,8 @@ def check_known_answers(refs: dict[str, Reference]) -> int:
                    and abs(r["protect_shadows"] - 1.0) < tol))
     for ref in refs.values():
         if ref.step == 1:
-            checks.append((f"{ref.name}: <= 256 px, so node == solve exactly",
-                           all(ref.node[m] == ref.full[m] for m in NEW + LEGACY)))
+            checks.append((f"{ref.name}: <= 256 px, so the strided frame is the frame",
+                           all(ref.strided[m] == ref.full[m] for m in NEW + LEGACY)))
     for label, ok in checks:
         print(f"{'ok  ' if ok else 'FAIL'} {label}")
         failures += not ok
@@ -363,7 +362,7 @@ def check_engine(refs: list[Reference], verbose: bool) -> tuple[int, dict[str, d
 
     failures = 0
     observed: dict[str, dict] = {}
-    worst = {"legacy_solve": 0.0, "legacy_node": 0.0, "new_solve": 0.0, "new_node": 0.0}
+    worst = {"legacy_solve": 0.0, "legacy_strided": 0.0, "new_solve": 0.0, "new_strided": 0.0}
     with Engine() as engine:
         names = [f["name"] for f in engine.params_schema()["fields"]]
         if "auto_exposure_method" not in names:
@@ -372,7 +371,7 @@ def check_engine(refs: list[Reference], verbose: bool) -> tuple[int, dict[str, d
             failures += 1
         for ref in refs:
             h, w = ref.frame.shape[:2]
-            print(f"\n{ref.name}  {w}x{h}, node stride {ref.step}")
+            print(f"\n{ref.name}  {w}x{h}, (c) stride {ref.step}")
             try:
                 full = engine.open(ref.frame, BASE)
                 small = engine.open(np.ascontiguousarray(ref.frame[::ref.step, ::ref.step]), BASE)
@@ -398,23 +397,23 @@ def check_engine(refs: list[Reference], verbose: bool) -> tuple[int, dict[str, d
                         failures += 1
                         continue
                     ev_full = sf["solved_params"]["exposure_compensation_ev"]
-                    ev_node = ss["solved_params"]["exposure_compensation_ev"]
+                    ev_strided = ss["solved_params"]["exposure_compensation_ev"]
                     problems = []
                     # Swift decodes solved_params as [String: Double].
                     if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
                                for v in sf["solved_params"].values()):
                         problems.append("solved_params holds a non-number")
                     d_full = abs(ev_full - ref.full[method])
-                    d_node = abs(ev_node - ref.node[method])
+                    d_strided = abs(ev_strided - ref.strided[method])
                     kind = "legacy" if method in LEGACY else "new"
                     worst[f"{kind}_solve"] = max(worst[f"{kind}_solve"], d_full)
-                    worst[f"{kind}_node"] = max(worst[f"{kind}_node"], d_node)
+                    worst[f"{kind}_strided"] = max(worst[f"{kind}_strided"], d_strided)
                     if not d_full <= EV_TOLERANCE:
                         problems.append(f"solve {ev_full:+.12f}, Python {ref.full[method]:+.12f}")
-                    if not d_node <= EV_TOLERANCE:
-                        problems.append(f"node {ev_node:+.12f}, Python {ref.node[method]:+.12f}")
-                    if np.float32(2.0 ** ev_node) != np.float32(2.0 ** ref.node[method]):
-                        problems.append("node gain differs after the float32 narrowing")
+                    if not d_strided <= EV_TOLERANCE:
+                        problems.append(f"strided {ev_strided:+.12f}, Python {ref.strided[method]:+.12f}")
+                    if np.float32(2.0 ** ev_full) != np.float32(2.0 ** ref.full[method]):
+                        problems.append("the applied gain differs after the float32 narrowing")
                     bm = sf.get("exposure_ev_by_method")
                     if bm is None:
                         problems.append("no exposure_ev_by_method beside solved_params")
@@ -425,12 +424,11 @@ def check_engine(refs: list[Reference], verbose: bool) -> tuple[int, dict[str, d
                                             f"exposure_ev_by_method[{method!r}] {bm.get(method)!r}")
                     if "exposure_ev_by_method" in sf["solved_params"]:
                         problems.append("exposure_ev_by_method is inside solved_params")
-                    if ref.step == 1 and ev_node != ev_full:
-                        problems.append("<= 256 px but node and solve differ")
+                    if ref.step == 1 and ev_strided != ev_full:
+                        problems.append("<= 256 px but the strided frame meters differently")
                     failures += report(f"{method:18s}", problems, verbose,
-                                       f"solve {ev_full:+.9f}  node {ev_node:+.9f}  "
-                                       f"(stride-vs-full {ev_node - ev_full:+.2e})  "
-                                       f"|C++ - Py| {d_full:.1e} / {d_node:.1e}")
+                                       f"solve {ev_full:+.9f}  strided {ev_strided:+.9f}  "
+                                       f"|C++ - Py| {d_full:.1e} / {d_strided:.1e}")
                 if by_method_seen:
                     first = by_method_seen[0]
                     if any(bm != first for bm in by_method_seen[1:]):
@@ -441,14 +439,17 @@ def check_engine(refs: list[Reference], verbose: bool) -> tuple[int, dict[str, d
                     failures += report("exposure_ev_by_method", [f"{m} off by {d:.2e}" for m, d in bad],
                                        verbose, "all four within 1e-9 of Python")
                 failures += check_node_render(engine, full, ref, verbose)
-    print(f"\nworst |C++ - Python|: legacy solve {worst['legacy_solve']:.2e}, legacy node "
-          f"{worst['legacy_node']:.2e}, new solve {worst['new_solve']:.2e}, "
-          f"new node {worst['new_node']:.2e} EV (bar {EV_TOLERANCE:.0e})")
+    print(f"\nworst |C++ - Python|: legacy solve {worst['legacy_solve']:.2e}, legacy strided "
+          f"{worst['legacy_strided']:.2e}, new solve {worst['new_solve']:.2e}, "
+          f"new strided {worst['new_strided']:.2e} EV (bar {EV_TOLERANCE:.0e})")
     return failures, observed
 
 
 def check_node_render(engine, session, ref: Reference, verbose: bool) -> int:
-    """The node's gain, end to end: meter on == pre-multiplied by Python's gain, meter off."""
+    """The node's gain, end to end: meter on == pre-multiplied by Python's gain, meter off.
+
+    The node applies the session's one meter of the frame, which on these
+    frames (<= 1600 px, no geometry) is the whole frame: `ref.full`."""
     from spk_ctypes import EngineError
 
     failures = 0
@@ -459,7 +460,7 @@ def check_node_render(engine, session, ref: Reference, verbose: bool) -> int:
             if method != "center_weighted":
                 continue
         metered, _ = session.render("live")
-        gain = np.float32(2.0 ** ref.node[method])
+        gain = np.float32(2.0 ** ref.full[method])
         with engine.open(ref.frame * gain, {**BASE, "auto_exposure": False}) as manual:
             by_hand, _ = manual.render("live")
         worst = int(np.abs(metered.astype(np.int32) - by_hand.astype(np.int32)).max())
@@ -471,12 +472,12 @@ def check_node_render(engine, session, ref: Reference, verbose: bool) -> int:
 
 def render_resolution(engine, ref: Reference) -> int:
     """How small a gain error the render comparison can see, on this frame."""
-    with engine.open(ref.frame * np.float32(2.0 ** ref.node["balanced"]),
+    with engine.open(ref.frame * np.float32(2.0 ** ref.full["balanced"]),
                      {**BASE, "auto_exposure": False}) as s:
         exact, _ = s.render("live")
     seen = None
     for delta in (1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4):
-        gain = np.float32(2.0 ** (ref.node["balanced"] + delta))
+        gain = np.float32(2.0 ** (ref.full["balanced"] + delta))
         with engine.open(ref.frame * gain, {**BASE, "auto_exposure": False}) as s:
             moved, _ = s.render("live")
         changed = int((moved != exact).sum())
@@ -497,6 +498,216 @@ def report(label: str, problems: list[str], verbose: bool, detail: str) -> int:
     if verbose:
         print(f"ok   {label}: {detail}")
     return 0
+
+
+# --- RFC-015 P.1: one EV per frame, at every tier ----------------------------------
+#
+# Each tier used to meter its own image, so the export was exposed differently
+# from the canvas: on 13 RAWs up to 0.095 EV at the node and +0.069 EV of print
+# luminance. The session now meters once (a METER_LONG_EDGE image, after
+# decode_input and geometry) and every tier applies that EV. These run on
+# full-resolution RAWs; before the engine change, (c1)-(c3) and (c5) are red,
+# which is their control.
+
+SEVEN = LEGACY + NEW
+TIER_RAWS = REAL_FRAMES + ["tests/Test_image/Nikon Z7ii/_DSC2704.NEF"]
+# What Params.swift sends for a new frame, minus the two stochastic stages.
+APP = {"film_stock": "kodak_portra_400", "print_stock": "kodak_supra_endura",
+       "film_format_mm": 36.0, "grain_active": False, "grain_sublayers_active": False,
+       "halation_active": True, "glare_active": False, "auto_exposure": True,
+       "input_color_space": COLOR_SPACE, "input_cctf_decoding": False}
+# Export vs canvas once the meter is shared: measured residual <= 0.0024 EV on
+# five RAWs with the meter equalised by hand; today up to 0.069.
+DOWNSCALE_BAR_EV = 0.005
+# (c3) cases over the bar for a reason that is not the meter. Each must still
+# be over it: one that comes back within the bar fails, so the list cannot go
+# stale. Measured: _DSC2704 center_weighted +0.0057 EV luminance / +0.0079
+# worst channel, average +0.0046 / +0.0062, and the same with the meter off
+# and both tiers exposed by hand at the same gain.
+C3_KNOWN = {("_DSC2704", "center_weighted"), ("_DSC2704", "average")}
+C3_KNOWN_REASON = ("not the meter: identical with meter off; tracked by the pixel-unit "
+                   "sharpening/glare item")
+# C++ vs Python once the EV comes from a downscaled image: bounded by the two
+# downscalers, <= 1.3e-7 EV on 11 of 13 RAWs and 4.8e-4 on the worst.
+CROSS_ENGINE_BAR_EV = 1e-3
+
+
+def python_meter(frame: np.ndarray, delta: dict) -> dict:
+    """The Python reference's session meter for these params: all seven EVs."""
+    from spektrafilm.runtime.params_builder import digest_params, init_params
+    from spektrafilm.service import schema
+    from spektrafilm.service.session import RenderSession
+
+    params = init_params(film_profile=delta.get("film_stock", "kodak_portra_400"),
+                         print_profile=delta.get("print_stock", "kodak_portra_endura"))
+    carry = {k: v for k, v in delta.items() if k not in ("film_stock", "print_stock")}
+    schema.validate_delta(carry)
+    schema.apply_delta(params, carry)
+    params.settings.working_precision = "float32"
+    try:
+        from spektrafilm.backends.metal import device as mdev
+        params.settings.gpu_backend = "metal" if mdev.available() else ""
+    except Exception:
+        params.settings.gpu_backend = ""
+    return RenderSession("parity", None, frame, digest_params(params), {}).meter_evs()
+
+
+def load_full_res(engine, rel: str) -> np.ndarray | None:
+    """A RAW at native resolution, decoded by the fork's loader. Centre-cropped
+    only if the engine refuses its size (the 60 MP cap, until it is raised)."""
+    from spektrafilm.service.engine import _load_image
+    from spk_ctypes import EngineError
+
+    path = REPO / rel
+    if not path.exists():
+        print(f"skip {rel}: not present")
+        return None
+    img = np.ascontiguousarray(np.asarray(_load_image(path)[0], dtype=np.float32)[..., :3])
+    try:
+        engine.open(img, APP).close()
+    except EngineError as exc:
+        h, w = img.shape[:2]
+        keep = int(60e6 // h)
+        img = np.ascontiguousarray(img[:, (w - keep) // 2:(w - keep) // 2 + keep])
+        print(f"note {path.name}: engine refused {w}x{h} ({exc}); centre-cropped to {keep}x{h}")
+    return img
+
+
+def export_vs_canvas(live_rgba: np.ndarray, full_rgba: np.ndarray) -> tuple[float, float]:
+    """Full render downscaled to the live size vs the live render, in linear
+    Display P3: (mean-luminance ΔEV, worst per-channel ΔEV). The engine's own
+    downscale is not on the ABI; skimage agrees with it to <= 1.3e-7 EV on
+    metering."""
+    from spektrafilm.model import colour_baked as cb
+    from spektrafilm.utils.preview import resize_for_preview
+
+    def linear(rgba):
+        v = rgba[..., :3].astype(np.float64) / 65535.0
+        return np.asarray(cb.RGB_to_RGB(v, "Display P3", "Display P3", apply_cctf_decoding=True))
+
+    live = linear(live_rgba)
+    down = resize_for_preview(linear(full_rgba), max(live.shape[:2]))
+    assert down.shape == live.shape, (down.shape, live.shape)
+    y = lambda a: np.asarray(cb.RGB_to_XYZ(a, "Display P3"))[..., 1]
+    d_lum = math.log2(y(down).mean() / y(live).mean())
+    d_ch = max((math.log2(down[..., c].mean() / live[..., c].mean()) for c in range(3)), key=abs)
+    return d_lum, d_ch
+
+
+def check_tiers(verbose: bool) -> int:
+    """(c1)-(c4) on full-resolution RAWs."""
+    from spk_ctypes import Engine
+
+    failures = 0
+    worst_downscale, worst_cross = (0.0, ""), (0.0, "")
+    with Engine() as engine:
+        for rel in TIER_RAWS:
+            img = load_full_res(engine, rel)
+            if img is None:
+                continue
+            name = Path(rel).stem
+            print(f"\n{name}  {img.shape[1]}x{img.shape[0]}")
+            py = python_meter(img, APP)
+            with engine.open(img, APP) as s:
+                for method in SEVEN:
+                    s.set_params({"auto_exposure_method": method})
+                    ev = s.solve("exposure")["solved_params"]["exposure_compensation_ev"]
+                    applied, outs = {}, {}
+                    for tier in ("live", "preview", "full"):
+                        outs[tier], _ = s.render(tier)
+                        applied[tier] = s.progress().get("auto_exposure_ev")
+                    problems = []
+                    # (c1) the same EV at every tier, and it is solve's: ==, not ≈.
+                    if any(v is None for v in applied.values()):
+                        problems.append("the engine does not report auto_exposure_ev per render")
+                    elif not all(v == ev for v in applied.values()):
+                        problems.append("applied EV differs by tier: " + ", ".join(
+                            f"{t} {v:+.6f}" for t, v in applied.items()) + f"; solve {ev:+.6f}")
+                    # (c2) the export, bit for bit, is the frame exposed at solve's EV.
+                    with engine.open(img * np.float32(2.0 ** ev), {**APP, "auto_exposure": False}) as m:
+                        by_hand, _ = m.render("full")
+                    counts = int(np.abs(outs["full"].astype(np.int32) - by_hand.astype(np.int32)).max())
+                    if counts:
+                        problems.append(f"export is not the frame at solve's EV: {counts} counts off")
+                    # (c3) the export looks like the canvas.
+                    d_lum, d_ch = export_vs_canvas(outs["live"], outs["full"])
+                    if max(abs(d_lum), abs(d_ch)) > abs(worst_downscale[0]):
+                        worst_downscale = (max(abs(d_lum), abs(d_ch)), f"{name}/{method}")
+                    over_bar = abs(d_lum) > DOWNSCALE_BAR_EV or abs(d_ch) > DOWNSCALE_BAR_EV
+                    c3 = (f"export vs canvas {d_lum:+.4f} EV luminance, "
+                          f"{d_ch:+.4f} worst channel (bar {DOWNSCALE_BAR_EV})")
+                    if (name, method) in C3_KNOWN:
+                        if over_bar:
+                            print(f"known {method:18s}: {c3} -- {C3_KNOWN_REASON}")
+                        else:
+                            problems.append(f"{c3}: unexpectedly within bar: remove from C3_KNOWN")
+                    elif over_bar:
+                        problems.append(c3)
+                    # (c4) C++ and Python meter the same frame alike.
+                    d_py = abs(ev - py[method])
+                    if d_py > worst_cross[0]:
+                        worst_cross = (d_py, f"{name}/{method}")
+                    if d_py > CROSS_ENGINE_BAR_EV:
+                        problems.append(f"C++ {ev:+.6f} vs Python {py[method]:+.6f} EV")
+                    failures += report(f"{method:18s}", problems, verbose,
+                                       f"EV {ev:+.6f} at every tier; export vs canvas "
+                                       f"{d_lum:+.4f} / {d_ch:+.4f} EV; |C++ - Py| {d_py:.1e}")
+            del img
+    print(f"\nworst export vs canvas {worst_downscale[0]:.4f} EV ({worst_downscale[1]}); "
+          f"worst |C++ - Python| meter {worst_cross[0]:.1e} EV ({worst_cross[1]})")
+    return failures
+
+
+def meter_walk_frame() -> np.ndarray:
+    """Small enough to walk the schema quickly, uneven enough that a crop,
+    a flip-free rotation or a colour space moves the meter."""
+    rng = np.random.default_rng(8)
+    h, w = 400, 600
+    yy, xx = np.mgrid[0:h, 0:w] / np.array([h, w])[:, None, None]
+    base = 0.05 * 2.0 ** (4.0 * xx * (1.0 - 0.5 * yy))
+    rgb = base[..., None] * np.array([1.2, 1.0, 0.7]) * np.exp(rng.normal(0.0, 0.3, (h, w, 3)))
+    return np.ascontiguousarray(rgb.astype(np.float32))
+
+
+def check_meter_walk(verbose: bool) -> int:
+    """(c5) For every wire field: after `set_params`, the engine's EVs equal a
+    fresh Python meter of the same params. A cache key that misses an upstream
+    field leaves a stale EV and fails here, for that field."""
+    from parity_session import value_for
+    from spk_ctypes import Engine, EngineError
+
+    frame = meter_walk_frame()
+    base = {"grain_active": False, "glare_active": False,
+            "input_color_space": COLOR_SPACE, "input_cctf_decoding": False}
+    failures = 0
+    with Engine() as engine:
+        fields = engine.params_schema()["fields"]
+        print(f"\n(c5) meter cache walk: {len(fields)} fields, {frame.shape[1]}x{frame.shape[0]} frame")
+        for field in fields:
+            name, value = field["name"], value_for(field)
+            delta = {**base, name: value}
+            method = delta.get("auto_exposure_method", "center_weighted")
+            try:
+                with engine.open(frame, base) as s:
+                    s.solve("exposure")                      # warm the cache
+                    s.set_params({name: value})
+                    out = s.solve("exposure")
+            except EngineError as exc:
+                failures += report(f"{name:26s}", [f"engine: {exc}"], verbose, "")
+                continue
+            got = {**out.get("exposure_ev_by_method", {}),
+                   method: out["solved_params"]["exposure_compensation_ev"]}
+            want = python_meter(frame, delta)
+            # No downscale at this size, so the inputs are identical, except
+            # where an engine changes the pixels before the meter: geometry
+            # (each resamples on its own) and the input decode (float32 on
+            # the device in C++, float64 in Python).
+            gpu_touched = name.startswith("geometry_") or name == "input_cctf_decoding"
+            bar = CROSS_ENGINE_BAR_EV if gpu_touched else EV_TOLERANCE
+            bad = [f"{m} C++ {got[m]:+.6f} vs Python {want[m]:+.6f}"
+                   for m in got if not abs(got[m] - want[m]) <= bar]
+            failures += report(f"{name:26s}", bad, verbose, f"= {value!r}: EVs match")
+    return failures
 
 
 def main() -> int:
@@ -533,6 +744,10 @@ def main() -> int:
         print("\nrender check resolution")
         with Engine() as engine:
             failures += render_resolution(engine, by_name.get("smoke_1mp", refs[0]))
+        failures += check_meter_walk(args.verbose)
+        if not args.no_real:
+            print("\n(c1)-(c4) one EV at every tier, full-resolution RAWs")
+            failures += check_tiers(args.verbose)
     failures += run_controls(refs, observed)
 
     print(f"\n{failures} failures")
