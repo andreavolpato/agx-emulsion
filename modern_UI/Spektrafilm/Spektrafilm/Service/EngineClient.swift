@@ -73,8 +73,44 @@ actor EngineClient {
     enum State: Sendable, Equatable { case stopped, starting, running, failed(String) }
 
     private(set) var state: State = .stopped
-    private var engine: OpaquePointer?
-    private var session: OpaquePointer?
+    /// The engine and its session are C objects, and ARC frees neither:
+    /// releasing an `OpaquePointer` releases nothing. They live in a box of
+    /// their own so that *dropping* the client frees them. A class `deinit` is
+    /// not actor-isolated, and both alternatives are closed: Swift 6 refuses
+    /// `deinit` access to the actor's own non-Sendable stored properties, and
+    /// `isolated deinit` is macOS 15.4 against this app's 15.0.
+    ///
+    /// Until this existed only `stop()` freed them, and nothing calls it on
+    /// the way out. A dropped client kept its engine, its baked constants, its
+    /// print-LUT buffers, its setup cache and its open session's tier images
+    /// for the life of the process: ~458 MB per client on a 5.6 MP frame, and
+    /// this suite peaked 2.55 GB against 1.76 GB once they were freed. Every
+    /// `Session` makes a client (there are 23 in the test suite), and the app
+    /// makes one per `Session` too.
+    ///
+    /// The session goes first: `spk_session_release` hands it back to the
+    /// engine that made it, and `~spk_engine` frees the GPU behind both — that
+    /// order is deliberate on the C++ side too.
+    private final class Handles: @unchecked Sendable {
+        var engine: OpaquePointer?
+        var session: OpaquePointer?
+        deinit {
+            if let session { spk_session_release(session) }
+            if let engine { spk_engine_destroy(engine) }
+        }
+    }
+
+    /// Touched only under this actor's isolation, and by `Handles.deinit` once
+    /// the last reference to the client is gone.
+    private let handles = Handles()
+    private var engine: OpaquePointer? {
+        get { handles.engine }
+        set { handles.engine = newValue }
+    }
+    private var session: OpaquePointer? {
+        get { handles.session }
+        set { handles.session = newValue }
+    }
     private var sessionID: String?
     private let device: MTLDevice
     let resources: URL
@@ -155,6 +191,8 @@ actor EngineClient {
         engine = handle
         state = .running
     }
+
+
 
     func stop() {
         releaseSession()

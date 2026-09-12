@@ -330,4 +330,65 @@ final class EngineClientTests: XCTestCase {
             "no Metal library at \(where_.path)")
         await client.stop()
     }
+
+    /// A client that goes away takes its engine and its session with it.
+    ///
+    /// `EngineClient` holds two C pointers and ARC frees neither: releasing an
+    /// `OpaquePointer` releases nothing. Only `stop()` did, and only the tests
+    /// in this file call it — every test that builds a `Session` gets its own
+    /// `EngineClient` (`Session.swift`: `client = EngineClient(device:)`) and
+    /// then drops it. There are 23 of those in this suite.
+    ///
+    /// Measured, a dropped client kept ~458 MB on a 5.6 MP frame (at the C ABI:
+    /// ~386 MB for an engine plus its open session at 6 MP, ~110 MB for a
+    /// session alone), and this suite's own peak was 2.55 GB against 1.76 GB
+    /// once it was freed. That is worth having back, but it is **not** on its
+    /// own what panicked the machine on 2026-09-12 — that was several
+    /// multi-gigabyte jobs running at once, one of them a deliberate 151 MP
+    /// probe at 11.4 GB. Sizing a leak is the test's job; sizing the machine is
+    /// not.
+    ///
+    /// The bound is deliberately coarse. What it separates is "freed" from
+    /// "hundreds of MB per client"; anything in between is already wrong.
+    func testAClientThatGoesAwayFreesItsEngine() async throws {
+        let gpu = try device()
+        // The first engine in a process pays for the Metal library and the
+        // baked constants, and that cost is not per client. Pay it here.
+        do {
+            let warm = EngineClient(device: gpu)
+            _ = try await warm.open(try makeFrame(2048, device: gpu), paramsDelta: nil)
+            await warm.stop()
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        // One frame, reused: the engine copies what it keeps at `open`, and a
+        // fresh `EngineFrame` per iteration would measure the test's own 90 MB
+        // buffers autoreleasing (AGENTS: `MTLBuffer.contents()` holds them to
+        // the end of the pool) rather than what the client kept.
+        let frame = try makeFrame(2048, device: gpu)
+        let before = Self.footprintMB()
+
+        for _ in 0..<4 {
+            let client = EngineClient(device: gpu)
+            let open = try await client.open(frame, paramsDelta: nil)
+            _ = try await client.render(.reprint, RenderRequest(sessionID: open.sessionID))
+            // No `stop()`, deliberately: this is what a dropped `Session` does.
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        let growth = Self.footprintMB() - before
+        XCTAssertLessThan(growth, 200,
+                          "four dropped clients kept \(Int(growth)) MB — the engine "
+                          + "and its session outlive the client that made them")
+    }
+
+    /// This process's physical footprint, the number Activity Monitor shows.
+    private static func footprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let ok = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return ok == KERN_SUCCESS ? Double(info.phys_footprint) / (1024 * 1024) : 0
+    }
 }
