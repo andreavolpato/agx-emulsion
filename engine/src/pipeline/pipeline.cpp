@@ -102,9 +102,10 @@ uint32_t Pipeline::fresh_seed() {
     return uint32_t(z & 0xFFFFFFFFu);
 }
 
-void Pipeline::set_source_long_edge(uint32_t long_edge) {
+void Pipeline::set_source_long_edge(uint32_t long_edge, uint32_t frame_long_edge) {
     if (long_edge == 0) return;
     source_long_edge_ = long_edge;
+    if (frame_long_edge > 0) frame_long_edge_ = frame_long_edge;
     pixel_size_um_ = params_.camera.film_format_mm * 1000.0 / double(long_edge);
 }
 
@@ -1370,9 +1371,14 @@ bool Pipeline::node_glare(const Image& in, Image& out, std::string& error) {
     Image field;
     if (!lognormal_field(in.h, in.w, glare.percent, glare.roughness * glare.percent,
                          fresh_seed(), 200, false, field, error)) return false;
+    // Pixels *at the full tier*, scaled to this one: the parameter is a
+    // fraction of the frame, not of the film (see `GlareParams::blur`), so the
+    // export is exactly what it always was and the canvas is what moves.
+    const double ratio = frame_long_edge_ > 0
+                       ? double(source_long_edge_) / double(frame_long_edge_) : 1.0;
     if (glare.blur > 0.0) {
         double sigma[3];
-        fill3(sigma, glare.blur);
+        fill3(sigma, glare.blur * ratio);
         Image blurred;
         if (!blur_.gaussian(field, sigma, blurred, error)) return false;
         field = blurred;
@@ -1414,8 +1420,14 @@ bool Pipeline::node_scanner_blur(const Image& in, Image& out, std::string& error
 }
 
 bool Pipeline::node_unsharp(const Image& in, Image& out, std::string& error) {
-    const double sigma_px = params_.scanner.unsharp_mask[0];
     const double amount = params_.scanner.unsharp_mask[1];
+    // Pixels at the *full tier*, scaled to this one, so the sharpening is the
+    // same fraction of the frame wherever it runs. See `ScannerParams::unsharp_mask`;
+    // the µm-per-tier form was tried first and only reproduced today's
+    // sharpening on the one frame size it was anchored to.
+    const double ratio = frame_long_edge_ > 0
+                       ? double(source_long_edge_) / double(frame_long_edge_) : 1.0;
+    const double sigma_px = params_.scanner.unsharp_mask[0] * ratio;
     if (!(sigma_px > 0.0 && amount > 0.0)) { out = in; return true; }
     Timer t(this, "scanning.unsharp");
     double sigma[3];

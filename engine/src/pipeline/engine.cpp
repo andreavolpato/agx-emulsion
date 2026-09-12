@@ -467,7 +467,7 @@ spk_status spk_warm_up(spk_engine* engine, const char* film_stock, const char* p
             bool warmed = static_cast<bool>(seed.buf);
             Image negative, rgb;
             if (warmed) {
-                pipeline.set_source_long_edge(kLiveLongEdge);
+                pipeline.set_source_long_edge(kLiveLongEdge, kLiveLongEdge);
                 warmed = pipeline.run_film(seed, negative, nullptr, warm_error) &&
                          pipeline.run_print(negative, rgb, nullptr, warm_error) &&
                          engine->gpu->flush(warm_error);
@@ -842,7 +842,8 @@ spk_status render_tier(spk_session* session, const char* tier_name, bool use_rep
     // may be one the *previous* pipeline made.
     Image tier_source;
     bool ok = tier_image(session, *tier, tier_source, error);
-    if (ok) session->pipeline->set_source_long_edge(std::max(tier_source.h, tier_source.w));
+    if (ok) session->pipeline->set_source_long_edge(std::max(tier_source.h, tier_source.w),
+                                                  std::max(session->source.h, session->source.w));
     if (ok) ok = negative_for(session, *tier, &session->progress, negative, error);
     if (ok) ok = session->pipeline->run_print(negative, rgb, &session->progress, error);
     if (ok) ok = materialise(session, rgb, out, error);
@@ -921,7 +922,8 @@ const PrintLut* prepare_lut(spk_session* session, const char* print_stock, const
     // The same ordering `render_tier` uses, and for the same reason: the film
     // side needs the frame's pixel pitch, and a pipeline rebuilt by a
     // print-layer edit has never seen one.
-    session->pipeline->set_source_long_edge(std::max(tier_source.h, tier_source.w));
+    session->pipeline->set_source_long_edge(std::max(tier_source.h, tier_source.w),
+                                              std::max(session->source.h, session->source.w));
     if (!negative_for(session, tier, &session->progress, negative, error)) return nullptr;
     return lut;
 }

@@ -524,9 +524,19 @@ DOWNSCALE_BAR_EV = 0.005
 # stale. Measured: _DSC2704 center_weighted +0.0057 EV luminance / +0.0079
 # worst channel, average +0.0046 / +0.0062, and the same with the meter off
 # and both tiers exposed by hand at the same gain.
+#
+# **The pixel-unit sharpening was not the reason** — measured 2026-09-12 after
+# making the glare and the unsharp physical (micrometres, anchored on the full
+# tier): `0.0057 -> 0.0061` and `0.0046 -> 0.0049`, while the live tier's
+# sharpening changed by a factor of five, and with the sharpening *off*
+# entirely the gap grows (0.0004 -> 0.0009 of mean luma on an A7 III frame).
+# What is left is the pipeline's nonlinearity under downscaling — a tier is
+# the frame at another resolution, and `process(downscale(x))` is not
+# `downscale(process(x))` — which no unit change removes.
 C3_KNOWN = {("_DSC2704", "center_weighted"), ("_DSC2704", "average")}
-C3_KNOWN_REASON = ("not the meter: identical with meter off; tracked by the pixel-unit "
-                   "sharpening/glare item")
+C3_KNOWN_REASON = ("not the meter (identical with meter off), and not the pixel-unit "
+                   "sharpening (making it physical moved this by <0.001 EV): the "
+                   "pipeline's nonlinearity under downscaling")
 # C++ vs Python once the EV comes from a downscaled image: bounded by the two
 # downscalers, <= 1.3e-7 EV on 11 of 13 RAWs and 4.8e-4 on the worst.
 CROSS_ENGINE_BAR_EV = 1e-3

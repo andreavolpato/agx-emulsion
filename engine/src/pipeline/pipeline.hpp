@@ -111,7 +111,13 @@ public:
     // (`scanner_lens_blur`, `output_color_space`, the filter pack, twelve
     // fields in all) left a fresh pipeline reprinting a negative it had never
     // rendered, with no pitch and no way to get one.
-    void set_source_long_edge(uint32_t long_edge);
+    //
+    // `frame_long_edge` is the frame's **own** long edge, and it is the
+    // reference the output-pixel parameters are measured against: they are
+    // pixels at the full tier, so a smaller tier gets the same *fraction of
+    // the frame* (see `node_unsharp`). Both are set at every render, so a
+    // rebuilt pipeline cannot miss either.
+    void set_source_long_edge(uint32_t long_edge, uint32_t frame_long_edge);
 
     // `Tap.RGB_IN` -> `Tap.CMY_FILM`. `out` is the developed negative.
     bool run_film(const Image& in, Image& out, Progress* progress, std::string& error);
@@ -137,6 +143,10 @@ public:
     void set_auto_exposure_ev(std::optional<double> ev) { injected_ev_ = ev; }
     // What the node applied in the last `run_film`; empty with the meter off.
     std::optional<double> last_auto_exposure_ev() const { return last_ae_ev_; }
+
+    // The frame's own long edge, in pixels: the reference the output-pixel
+    // parameters are expressed against.
+    uint32_t frame_long_edge_ = 0;
 
     // The film's pixel pitch for the frame most recently run through
     // `run_film`, in micrometres. Grain, halation and the DIR-coupler

@@ -80,6 +80,19 @@ struct GlareParams {
     bool active = true;
     double percent = 0.03;
     double roughness = 0.7;
+    /// **Pixels at the full tier**, and scaled from there at every other tier
+    /// (`node_glare`): the blur is the same *fraction of the frame* wherever it
+    /// runs, so the export is exactly what it always was and the canvas — the
+    /// preview of that export — is what moves to match.
+    ///
+    /// **Anchored on the output, not on the film, and that is deliberate.** A
+    /// tier is not a second scan of the same negative; it is the same scan
+    /// previewed at another size, so the honest reference is the scan the user
+    /// is comparing against. Expressing this in micrometres of film (divided by
+    /// the frame's pitch) was tried first and rejected: a µm constant only
+    /// reproduces today's blur at the one resolution it is anchored to —
+    /// measured, the unsharp going 0.7 px to 0.5087 on a 6000 px frame and to
+    /// 0.1017 on a 1200 px one.
     double blur = 0.5;
 };
 
@@ -143,9 +156,17 @@ struct EnlargerParams {
 };
 
 struct ScannerParams {
+    /// **Pixels**, and it stays that way here: `scanner_lens_blur` is on the
+    /// wire (range 0…20, print layer), so its unit is the contract's to
+    /// change, not this file's. The app never sends it, so nothing in the
+    /// product moves either way. See the note on the pixel-unit item.
     double lens_blur = 0.0;
     bool white_correction = false, black_correction = false;
     double white_level = 0.98, black_level = 0.01;
+    /// `{sigma, amount}`: the sigma is **pixels at the full tier**, scaled
+    /// from there at every other tier exactly like the glare blur above, and
+    /// the amount is the unitless gain it always was. See `GlareParams::blur`
+    /// for why the reference is the output and not the film.
     double unsharp_mask[2] = {0.7, 0.7};
 };
 
